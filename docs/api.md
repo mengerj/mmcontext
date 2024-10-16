@@ -8,8 +8,6 @@
 
 .. autosummary::
     :toctree: generated
-
-    pp.basic_preproc
 ```
 
 ## Tools
@@ -20,8 +18,6 @@
 
 .. autosummary::
     :toctree: generated
-
-    tl.basic_tool
 ```
 
 ## Plotting
@@ -32,7 +28,4 @@
 
 .. autosummary::
     :toctree: generated
-
-    pl.basic_plot
-    pl.BasicClass
 ```
