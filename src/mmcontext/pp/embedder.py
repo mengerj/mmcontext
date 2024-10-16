@@ -45,17 +45,16 @@ class Embedder:
         """
         Creates or stores embeddings and adds them to adata.obsm.
 
-        Parameters
-        ----------
-            adata (AnnData): The AnnData object containing the dataset.
-            data_embeddings (np.ndarray, optional): External data embeddings to store.
-                Shape should be (n_samples, data_embedding_dim).
-            context_embeddings (np.ndarray, optional): External context embeddings to store.
-                Shape should be (n_samples, context_embedding_dim).
+        Args:
+            adata (anndata.AnnData): The AnnData object containing the dataset.
+            data_embeddings (numpy.ndarray, optional): External data embeddings to store.
+            Shape should be (n_samples, data_embedding_dim).
+            context_embeddings (numpy.ndarray, optional): External context embeddings to store.
+            Shape should be (n_samples, context_embedding_dim).
 
         Raises
         ------
-            ValueError: If embeddings are missing and no embedder is provided to create them.
+        ValueError: If embeddings are missing and no embedder is provided to create them.
         """
         # Store external data embeddings if provided
         if data_embeddings is not None:
@@ -91,8 +90,7 @@ class Embedder:
         """
         Stores embeddings in adata.obsm with the given key, after validating the shape.
 
-        Parameters
-        ----------
+        Args:
             adata (AnnData): The AnnData object.
             embeddings (np.ndarray): Embeddings to store.
             key (str): Key under which to store the embeddings in adata.obsm.

@@ -7,13 +7,14 @@
 .. currentmodule:: mmcontext
 
 .. autosummary::
-    :toctree: generated
-    mmcontext.pp.Embedder
-    mmcontext.pp.DataEmbedder
-    mmcontext.pp.PCADataEmbedder
-    mmcontext.pp.PlaceholderDataEmbedder
-    mmcontext.pp.ContextEmbedder
-    mmcontext.pp.CategoryEmbedder
+    :toctree: generated/
+
+    pp.Embedder
+    pp.DataEmbedder
+    pp.PCADataEmbedder
+    pp.PlaceholderDataEmbedder
+    pp.ContextEmbedder
+    pp.CategoryEmbedder
 ```
 
 ## Tools

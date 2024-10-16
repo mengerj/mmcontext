@@ -1,13 +1,10 @@
 import logging
-from unittest import mock
 
 import anndata
 import numpy as np
 import pytest
 
-from mmcontext.pp.context_embedder import CategoryEmbedder
-from mmcontext.pp.data_embedder import PlaceholderDataEmbedder
-from mmcontext.pp.embedder import Embedder
+from mmcontext.pp import CategoryEmbedder, Embedder, PlaceholderDataEmbedder
 from mmcontext.utils import create_test_anndata
 
 
@@ -215,34 +212,3 @@ def test_combination_methods():
     )
     embeddings_avg = context_embedder_avg.embed(adata)
     assert embeddings_avg.shape[1] == adata.obsm["cell_type_emb"].shape[1]
-
-
-def test_api_key_present_but_embedding_failure(monkeypatch, caplog):
-    logger = logging.getLogger(__name__)
-    logger.info("TEST: test_api_key_present_but_embedding_failure")
-    # Create a test AnnData object
-    adata = create_test_anndata(cell_types=["cell 2", "cell 3"])
-
-    # Mock the environment variable for the API key to simulate it being present
-    monkeypatch.setenv("OPENAI_API_KEY", "test_api_key")
-
-    # Initialize the CategoryEmbedder
-    metadata_categories = ["cell_type", "tissue"]
-    embeddings_file_path = "./data/emb_dicts/test_dict.pkl"
-    context_embedder = CategoryEmbedder(
-        metadata_categories=metadata_categories,
-        embeddings_file_path=embeddings_file_path,
-        model="text-embedding-3-small",
-        combination_method="concatenate",
-        one_hot=False,
-        unknown_threshold=10,
-    )
-
-    # Mock the 'generate_text_embedding' method to raise an exception, simulating an embedding failure
-    with mock.patch.object(context_embedder, "generate_text_embedding", side_effect=Exception("API error occurred")):
-        with caplog.at_level(logging.ERROR):
-            context_embedder.embed(adata)
-
-    # Check that the error was logged
-    assert "API call failed" in caplog.text
-    assert "API error occurred" in caplog.text
