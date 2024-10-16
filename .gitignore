@@ -1,0 +1,13 @@
+# Python cache files
+src/mmcontext/__pycache__/
+*.pyc
+tests/__pycache__/
+# Pre-commit cache
+.cache/
+.pre-commit/
+
+# Log files
+*.log
+
+# anndata files
+data/*.h5ad
