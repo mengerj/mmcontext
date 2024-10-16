@@ -8,6 +8,12 @@
 
 .. autosummary::
     :toctree: generated
+    mmcontext.pp.Embedder
+    mmcontext.pp.DataEmbedder
+    mmcontext.pp.PCADataEmbedder
+    mmcontext.pp.PlaceholderDataEmbedder
+    mmcontext.pp.ContextEmbedder
+    mmcontext.pp.CategoryEmbedder
 ```
 
 ## Tools
