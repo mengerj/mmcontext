@@ -2,6 +2,7 @@
 src/mmcontext/__pycache__/
 *.pyc
 tests/__pycache__/
+
 # Pre-commit cache
 .cache/
 .pre-commit/
@@ -11,3 +12,8 @@ tests/__pycache__/
 
 # anndata files
 data/*.h5ad
+
+# Sphinx build files
+docs/_build/
+docs/_autosummary/
+docs/generated/
