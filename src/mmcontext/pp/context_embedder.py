@@ -77,7 +77,7 @@ class CategoryEmbedder(ContextEmbedder):
         self,
         metadata_categories,
         embeddings_file_path,
-        model="text-embedding-ada-002",
+        model="text-embedding-3-small",
         combination_method="concatenate",
         one_hot=False,
         unknown_threshold=20,
@@ -158,17 +158,34 @@ class CategoryEmbedder(ContextEmbedder):
             self.logger.warning(
                 f"API call failed but {total_unknown} unknown elements is less than the threshold: {self.unknown_threshold}. Filling unknown elements with zeros."
             )
-
         # Map embeddings to each sample
         for category in self.metadata_categories:
+            # Raise an error if no embeddings are available at all for the category
+            if category not in self.metadata_embeddings or not self.metadata_embeddings[category]:
+                raise ValueError(
+                    f"No embeddings found for category '{category}'. Cannot proceed with zero vector filling."
+                )
+
+            # Get the embedding dimension from a valid stored embedding
+            embedding_dim = None
+            for value in self.metadata_embeddings[category].values():
+                if value is not None:
+                    embedding_dim = len(value)
+                    break
+            if embedding_dim is None:
+                raise ValueError(f"Failed to determine the embedding dimension for category '{category}'.")
+
             category_embeddings = []
+            # Loop through the values in adata.obs for the category
             for value in adata.obs[category]:
                 if value in self.metadata_embeddings[category]:
+                    # If the embedding exists, use it
                     category_embeddings.append(self.metadata_embeddings[category][value])
                 else:
-                    # Use one-hot encoding if no embedding is found
-                    embedding_dim = len(next(iter(self.metadata_embeddings[category].values())))
+                    # Use zeros if no embedding is found for the value
                     category_embeddings.append(np.zeros(embedding_dim))
+
+            # Store the embeddings in adata.obsm
             adata.obsm[f"{category}_emb"] = np.array(category_embeddings)
             self.logger.info(f"Embeddings for '{category}' stored in adata.obsm['{category}_emb']")
 
