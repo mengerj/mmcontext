@@ -128,8 +128,8 @@ def test_unknown_elements_exceed_threshold(monkeypatch):
     logger.info("TEST: test_unknown_elements_exceed_threshold")
     # Create a dataset with many unknown categories
     adata = create_test_anndata(
-        n_cells=30,
-        n_genes=100,
+        n_samples=30,
+        n_features=100,
         cell_types=["CellType" + str(i) for i in range(10)],  # 10 new cell types
         tissues=["Tissue" + str(i) for i in range(5)],  # 5 new tissues
     )

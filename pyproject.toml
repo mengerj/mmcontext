@@ -23,10 +23,13 @@ classifiers = [
 ]
 dependencies = [
   "anndata",
+  "ipykernel",
   "numpy",
   "openai",
+  "python-json-logger",
   "scikit-learn",
   "session-info",
+  "torch",
 ]
 optional-dependencies.dev = [
   "pre-commit",
