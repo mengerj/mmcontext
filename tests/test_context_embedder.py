@@ -1,6 +1,12 @@
+import gzip
+import importlib.resources
 import logging
+import os
+import pickle
+import shutil
+import tempfile
+from pathlib import Path
 
-import anndata
 import numpy as np
 import pytest
 
@@ -17,115 +23,141 @@ def test_context_embedder_with_missing_obs_columns():
 
     # Initialize CategoryEmbedder
     metadata_categories = ["cell_type", "tissue"]
-    embeddings_file_path = "./data/emb_dicts/test_dict.pkl"
-    model = "text-embedding-3-small"
-    combination_method = "concatenate"
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Define the temporary file path
+            temp_file_path = Path(tmpdirname) / "test_dict.pkl.gz"
+            # Copy the resource file to the temporary location
+            shutil.copy(resource_path, temp_file_path)
 
-    context_embedder = CategoryEmbedder(
-        metadata_categories=metadata_categories,
-        embeddings_file_path=embeddings_file_path,
-        model=model,
-        combination_method=combination_method,
-        one_hot=False,
-    )
-    data_embedder = PlaceholderDataEmbedder()
+            model = "text-embedding-3-small"
+            combination_method = "concatenate"
 
-    # Initialize the Embedder
-    embedder = Embedder(context_embedder=context_embedder, data_embedder=data_embedder)
+            context_embedder = CategoryEmbedder(
+                metadata_categories=metadata_categories,
+                embeddings_file_path=temp_file_path,
+                model=model,
+                combination_method=combination_method,
+                one_hot=False,
+            )
+            data_embedder = PlaceholderDataEmbedder()
 
-    # Attempt to create embeddings
-    with pytest.raises(ValueError) as excinfo:
-        embedder.create_embeddings(adata)
+            # Initialize the Embedder
+            embedder = Embedder(context_embedder=context_embedder, data_embedder=data_embedder)
 
-    # Check the error message
-    assert "Metadata category 'cell_type' not found in adata.obs." in str(excinfo.value)
+            # Attempt to create embeddings
+            with pytest.raises(ValueError) as excinfo:
+                embedder.create_embeddings(adata)
+
+            # Check the error message
+            assert "Metadata category 'cell_type' not found in adata.obs." in str(excinfo.value)
 
 
 def test_embeddings_dictionary_loading(monkeypatch):
     logger = logging.getLogger(__name__)
     logger.info("TEST: test_embeddings_dictionary_loading")
-    # Load the original test dataset
-    adata = anndata.read_h5ad("data/test_data/test_adata.h5ad")
-    # Set the embeddings file path
-    embeddings_file_path = "./data/emb_dicts/test_dict.pkl.gz"
-
-    # Initialize the CategoryEmbedder without an API key
-    metadata_categories = ["cell_type", "tissue"]
-    context_embedder = CategoryEmbedder(
-        metadata_categories=metadata_categories,
-        embeddings_file_path=embeddings_file_path,
-        model="text-embedding-3-small",
-        combination_method="concatenate",
-        one_hot=False,
-        unknown_threshold=20,
+    adata = create_test_anndata(
+        n_samples=20, n_features=100, cell_types=["B cell", "T cell", "NK cell"], tissues=["blood", "lymph"]
     )
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Define the temporary file path
+            temp_file_path = Path(tmpdirname) / "test_dict.pkl.gz"
+            # Copy the resource file to the temporary location
+            shutil.copy(resource_path, temp_file_path)
 
-    # Remove the API key from the environment (simulate missing API key)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+            # Initialize the CategoryEmbedder without an API key
+            metadata_categories = ["cell_type", "tissue"]
+            context_embedder = CategoryEmbedder(
+                metadata_categories=metadata_categories,
+                embeddings_file_path=temp_file_path,
+                model="text-embedding-3-small",
+                combination_method="concatenate",
+                one_hot=False,
+                unknown_threshold=20,
+            )
 
-    # Run the embedder
-    context_embedder.embed(adata)
+            # Remove the API key from the environment (simulate missing API key)
+            monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    # Check that embeddings are loaded from the dictionary
-    assert "cell_type_emb" in adata.obsm
-    assert "tissue_emb" in adata.obsm
+            # Run the embedder
+            context_embedder.embed(adata)
 
-    # Verify that no new embeddings were attempted to be generated
-    assert len(context_embedder.metadata_embeddings["cell_type"]) == 3  # Should be the original 3 cell types
-    assert len(context_embedder.metadata_embeddings["tissue"]) == 2  # Should be the original 2 tissues
+            # Check that embeddings are loaded from the dictionary
+            assert "cell_type_emb" in adata.obsm
+            assert "tissue_emb" in adata.obsm
+
+            # Verify that no new embeddings were attempted to be generated
+            assert len(context_embedder.metadata_embeddings["cell_type"]) == 3  # Should be the original 3 cell types
+            assert len(context_embedder.metadata_embeddings["tissue"]) == 2  # Should be the original 2 tissues
 
 
 def test_unknown_elements_less_than_threshold(monkeypatch):
     logger = logging.getLogger(__name__)
     logger.info("TEST: test_unknown_elements_less_than_threshold")
 
-    # Load the new test dataset with extra categories
-    adata = anndata.read_h5ad("data/test_data/new_test_adata.h5ad")
-
-    # Set the embeddings file path
-    embeddings_file_path = "./data/emb_dicts/test_dict.pkl"
-
-    # Initialize the CategoryEmbedder without an API key
-    metadata_categories = ["cell_type", "tissue"]
-    context_embedder = CategoryEmbedder(
-        metadata_categories=metadata_categories,
-        embeddings_file_path=embeddings_file_path,
-        model="text-embedding-3-small",
-        combination_method="concatenate",
-        one_hot=False,
-        unknown_threshold=10,  # Set threshold higher than the number of unknown elements
+    # make new adata with extra categories. Only cell_types = ["B cell", "T cell", "NK cell"], tissues=["blood", "lymph"] are in the embeddings dictionary
+    adata = create_test_anndata(
+        n_samples=25,
+        n_features=100,
+        cell_types=["B cell", "T cell", "NK cell", "Dendritic cell", "Monocyte"],  # New cell types
+        tissues=["blood", "lymph", "bone marrow", "brain"],  # New tissue types
     )
 
-    # Remove the API key from the environment (simulate missing API key)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Define the temporary file path
+            temp_file_path = Path(tmpdirname) / "test_dict.pkl.gz"
+            # Copy the resource file to the temporary location
+            shutil.copy(resource_path, temp_file_path)
 
-    # Run the embedder
-    context_embedder.embed(adata)
+            # Initialize the CategoryEmbedder without an API key
+            metadata_categories = ["cell_type", "tissue"]
+            context_embedder = CategoryEmbedder(
+                metadata_categories=metadata_categories,
+                embeddings_file_path=temp_file_path,
+                model="text-embedding-3-small",
+                combination_method="concatenate",
+                one_hot=False,
+                unknown_threshold=20,  # Set threshold higher than the number of unknown elements
+            )
 
-    # Check that embeddings are present
-    assert "cell_type_emb" in adata.obsm
-    assert "tissue_emb" in adata.obsm
+            # Remove the API key from the environment (simulate missing API key)
+            monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    # Verify that the embeddings for unknown elements are zero vectors
-    cell_type_embeddings = adata.obsm["cell_type_emb"]
-    tissue_embeddings = adata.obsm["tissue_emb"]
+            # Run the embedder
+            context_embedder.embed(adata)
 
-    # Find indices of unknown cell types
-    unknown_cell_types = ["Dendritic cell", "Monocyte"]
-    unknown_indices = adata.obs["cell_type"].isin(unknown_cell_types)
+            # Check that embeddings are present
+            assert "cell_type_emb" in adata.obsm
+            assert "tissue_emb" in adata.obsm
 
-    # Check that the embeddings for unknown cell types are zeros
-    assert (cell_type_embeddings[unknown_indices] == 0).all()
+            # Verify that the embeddings for unknown elements are zero vectors
+            cell_type_embeddings = adata.obsm["cell_type_emb"]
+            tissue_embeddings = adata.obsm["tissue_emb"]
 
-    # Similarly for tissues
-    unknown_tissues = ["bone marrow"]
-    unknown_indices = adata.obs["tissue"].isin(unknown_tissues)
-    assert (tissue_embeddings[unknown_indices] == 0).all()
+            # Find indices of unknown cell types
+            unknown_cell_types = ["Dendritic cell", "Monocyte"]
+            unknown_indices = adata.obs["cell_type"].isin(unknown_cell_types)
+
+            # Check that the embeddings for unknown cell types are zeros
+            assert (cell_type_embeddings[unknown_indices] == 0).all()
+
+            # Similarly for tissues
+            unknown_tissues = ["bone marrow"]
+            unknown_indices = adata.obs["tissue"].isin(unknown_tissues)
+            assert (tissue_embeddings[unknown_indices] == 0).all()
 
 
-def test_unknown_elements_exceed_threshold(monkeypatch):
+def test_unknown_elements_exceed_threshold_no_key(monkeypatch):
     logger = logging.getLogger(__name__)
-    logger.info("TEST: test_unknown_elements_exceed_threshold")
+    logger.info("TEST: test_unknown_elements_exceed_threshold_no_key")
     # Create a dataset with many unknown categories
     adata = create_test_anndata(
         n_samples=30,
@@ -134,29 +166,96 @@ def test_unknown_elements_exceed_threshold(monkeypatch):
         tissues=["Tissue" + str(i) for i in range(5)],  # 5 new tissues
     )
 
-    # Set the embeddings file path
-    embeddings_file_path = "./data/emb_dicts/test_dict.pkl"
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Define the temporary file path
+            temp_file_path = Path(tmpdirname) / "test_dict.pkl.gz"
+            # Copy the resource file to the temporary location
+            shutil.copy(resource_path, temp_file_path)
 
-    # Initialize the CategoryEmbedder without an API key
-    metadata_categories = ["cell_type", "tissue"]
-    context_embedder = CategoryEmbedder(
-        metadata_categories=metadata_categories,
-        embeddings_file_path=embeddings_file_path,
-        model="text-embedding-3-small",
-        combination_method="concatenate",
-        one_hot=False,
-        unknown_threshold=10,  # Set threshold lower than the number of unknown elements
+            # Initialize the CategoryEmbedder without an API key
+            metadata_categories = ["cell_type", "tissue"]
+            context_embedder = CategoryEmbedder(
+                metadata_categories=metadata_categories,
+                embeddings_file_path=temp_file_path,
+                model="text-embedding-3-small",
+                combination_method="concatenate",
+                one_hot=False,
+                unknown_threshold=10,  # Set threshold lower than the number of unknown elements
+            )
+
+            # Remove the API key from the environment (simulate missing API key)
+            monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+            # Attempt to run the embedder and expect an error
+            with pytest.raises(ValueError) as excinfo:
+                context_embedder.embed(adata)
+
+            # Check that the error message is as expected
+            assert "Unknown elements exceed the threshold" in str(excinfo.value)
+
+
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
+def test_unknown_elements_more_than_threshold_with_key():
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_unknown_elements_more_than_threshold_with_key")
+
+    # Create an AnnData object with one new category value
+    # Known cell_types: ["B cell", "T cell", "NK cell"]
+    # Known tissues: ["blood", "lymph"]
+    # Introduce one new cell_type: "Dendritic cell"
+
+    adata = create_test_anndata(
+        n_samples=25,
+        n_features=100,
+        cell_types=["B cell", "T cell", "NK cell", "Dendritic cell"],  # One new cell type
+        tissues=["blood", "lymph"],  # No new tissues
     )
 
-    # Remove the API key from the environment (simulate missing API key)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Define the temporary file path
+            temp_file_path = Path(tmpdirname) / "test_dict.pkl.gz"
+            # Copy the resource file to the temporary location
+            shutil.copy(resource_path, temp_file_path)
 
-    # Attempt to run the embedder and expect an error
-    with pytest.raises(ValueError) as excinfo:
-        context_embedder.embed(adata)
+            # Initialize the CategoryEmbedder with unknown_threshold=0
+            metadata_categories = ["cell_type", "tissue"]
+            context_embedder = CategoryEmbedder(
+                metadata_categories=metadata_categories,
+                embeddings_file_path=temp_file_path,
+                model="text-embedding-3-small",
+                combination_method="concatenate",
+                one_hot=False,
+                unknown_threshold=0,  # Threshold smaller than number of unknown elements
+            )
 
-    # Check that the error message is as expected
-    assert "Unknown elements exceed the threshold" in str(excinfo.value)
+            # Run the embedder
+            context_embedder.embed(adata)
+
+            # Check that embeddings are present
+            assert "cell_type_emb" in adata.obsm
+            assert "tissue_emb" in adata.obsm
+
+            # Verify that the embeddings for unknown elements are not zero vectors
+            cell_type_embeddings = adata.obsm["cell_type_emb"]
+
+            # Find indices of the unknown cell type
+            unknown_cell_types = ["Dendritic cell"]
+            unknown_indices = adata.obs["cell_type"].isin(unknown_cell_types).values
+
+            # Check that the embeddings for unknown cell types are not zeros
+            assert not (cell_type_embeddings[unknown_indices] == 0).all()
+
+            # Check that the new embedding was saved to the embeddings dictionary
+            with gzip.open(temp_file_path, "rb") as f:
+                updated_embeddings = pickle.load(f)
+            # Perform assertions on updated_embeddings
+            assert "Dendritic cell" in updated_embeddings["cell_type"].keys()
 
 
 def test_one_hot_encoding_metadata():
@@ -166,21 +265,30 @@ def test_one_hot_encoding_metadata():
 
     # Initialize the CategoryEmbedder with one-hot encoding enabled
     metadata_categories = ["cell_type", "tissue"]
-    embeddings_file_path = "./data/emb_dicts/test_dict.pkl"
-    context_embedder = CategoryEmbedder(
-        metadata_categories=metadata_categories, embeddings_file_path=embeddings_file_path, one_hot=True
-    )
 
-    # Run the embedder
-    context_embedder.embed(adata)
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Define the temporary file path
+            temp_file_path = Path(tmpdirname) / "test_dict.pkl.gz"
+            # Copy the resource file to the temporary location
+            shutil.copy(resource_path, temp_file_path)
 
-    # Check that one-hot encoded embeddings are stored in adata.obsm
-    assert "cell_type_emb" in adata.obsm
-    assert "tissue_emb" in adata.obsm
+            context_embedder = CategoryEmbedder(
+                metadata_categories=metadata_categories, embeddings_file_path=temp_file_path, one_hot=True
+            )
 
-    # Verify that the embeddings are indeed one-hot encoded
-    assert set(np.unique(adata.obsm["cell_type_emb"])) == {0, 1}
-    assert set(np.unique(adata.obsm["tissue_emb"])) == {0, 1}
+            # Run the embedder
+            context_embedder.embed(adata)
+
+            # Check that one-hot encoded embeddings are stored in adata.obsm
+            assert "cell_type_emb" in adata.obsm
+            assert "tissue_emb" in adata.obsm
+
+            # Verify that the embeddings are indeed one-hot encoded
+            assert set(np.unique(adata.obsm["cell_type_emb"])) == {0, 1}
+            assert set(np.unique(adata.obsm["tissue_emb"])) == {0, 1}
 
 
 def test_combination_methods():
@@ -191,24 +299,34 @@ def test_combination_methods():
 
     # Initialize the CategoryEmbedder with both combination methods
     metadata_categories = ["cell_type", "tissue"]
-    embeddings_file_path = "./data/emb_dicts/test_dict.pkl"
 
-    # Test 'concatenate' method
-    context_embedder_concat = CategoryEmbedder(
-        metadata_categories=metadata_categories,
-        embeddings_file_path=embeddings_file_path,
-        model="text-embedding-3-small",
-        combination_method="concatenate",
-    )
-    embeddings_concat = context_embedder_concat.embed(adata)
-    assert embeddings_concat.shape[1] == adata.obsm["cell_type_emb"].shape[1] + adata.obsm["tissue_emb"].shape[1]
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Define the temporary file path
+            temp_file_path = Path(tmpdirname) / "test_dict.pkl.gz"
+            # Copy the resource file to the temporary location
+            shutil.copy(resource_path, temp_file_path)
 
-    # Test 'average' method
-    context_embedder_avg = CategoryEmbedder(
-        metadata_categories=metadata_categories,
-        embeddings_file_path=embeddings_file_path,
-        model="text-embedding-3-small",
-        combination_method="average",
-    )
-    embeddings_avg = context_embedder_avg.embed(adata)
-    assert embeddings_avg.shape[1] == adata.obsm["cell_type_emb"].shape[1]
+            # Test 'concatenate' method
+            context_embedder_concat = CategoryEmbedder(
+                metadata_categories=metadata_categories,
+                embeddings_file_path=temp_file_path,
+                model="text-embedding-3-small",
+                combination_method="concatenate",
+            )
+            embeddings_concat = context_embedder_concat.embed(adata)
+            assert (
+                embeddings_concat.shape[1] == adata.obsm["cell_type_emb"].shape[1] + adata.obsm["tissue_emb"].shape[1]
+            )
+
+            # Test 'average' method
+            context_embedder_avg = CategoryEmbedder(
+                metadata_categories=metadata_categories,
+                embeddings_file_path=temp_file_path,
+                model="text-embedding-3-small",
+                combination_method="average",
+            )
+            embeddings_avg = context_embedder_avg.embed(adata)
+            assert embeddings_avg.shape[1] == adata.obsm["cell_type_emb"].shape[1]

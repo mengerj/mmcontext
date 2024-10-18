@@ -1,12 +1,12 @@
 # mmcontext/datasets/__init__.py
 
+import importlib.resources
 import logging
-import os
 
 import anndata
 
 
-def load_example_dataset(data_dir: str = "../../data/test_data/") -> anndata.AnnData:
+def load_example_dataset() -> anndata.AnnData:
     """
     Loads the example dataset for the mmcontext tutorial.
 
@@ -17,18 +17,9 @@ def load_example_dataset(data_dir: str = "../../data/test_data/") -> anndata.Ann
     """
     logger = logging.getLogger(__name__)
 
-    dataset_path = os.path.join(data_dir, "small_cellxgene.h5ad")
     logger.info("Loading the example dataset, which is taken from cellxgene...")
-    # Create the dataset directory if it doesn't exist
-    os.makedirs(data_dir, exist_ok=True)
 
-    # Check if the dataset already exists
-    if not os.path.isfile(dataset_path):
-        logger.info("Downloading the example dataset...")
-        # Download the dataset
-        logger.error("Download not implemented yet")
-        # print("Download complete.")
+    with importlib.resources.path("mmcontext.datasets", "small_cellxgene.h5ad") as dataset_path:
+        adata = anndata.read_h5ad(dataset_path)
 
-    # Load the dataset
-    adata = anndata.read_h5ad(dataset_path)
     return adata

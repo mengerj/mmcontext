@@ -1,3 +1,4 @@
+import importlib.resources
 import json
 import logging.config
 import os
@@ -10,13 +11,9 @@ __all__ = ["io", "pl", "pp", "tl"]
 __version__ = version("mmcontext")
 
 
-def setup_logging(logging_config_path=None):
-    if logging_config_path is None:
-        logging_config_path = os.path.join(os.path.dirname(__file__), "../../conf/logging_config.json")
-        print(logging_config_path)
-
+def setup_logging():
     # Load logging configuration from the specified file
-    with open(logging_config_path) as config_file:
+    with importlib.resources.open_text("mmcontext.conf", "logging_config.json") as config_file:
         config_dict = json.load(config_file)
 
     # Configure logging
