@@ -14,7 +14,14 @@
     pp.PCADataEmbedder
     pp.PlaceholderDataEmbedder
     pp.ContextEmbedder
+    pp.PlaceholderContextEmbedder
     pp.CategoryEmbedder
+    pp.MinMaxNormalizer
+    pp.ZScoreNormalizer
+    pp.DimAligner
+    pp.PCAReducer
+    pp.DataSetConstructor
+    pp.EmbeddingDataset
 ```
 
 ## Tools

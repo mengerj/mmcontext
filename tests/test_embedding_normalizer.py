@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import pytest
 
-from mmcontext.pp.embedding_normalizer import MinMaxNormalizer, ZScoreNormalizer
+from mmcontext.pp import MinMaxNormalizer, ZScoreNormalizer
 from mmcontext.utils import create_test_anndata
 
 
