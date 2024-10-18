@@ -11,7 +11,7 @@ Align embeddings of multiple modalities through context embeddings on a sample l
 ## Getting started
 
 Please refer to the [documentation][],
-in particular, the [API documentation][].
+in particular, the [API documentation][]. This project was build with the amazing [scverse cookie cutter template][]. Check it out!
 
 ## Installation
 
@@ -40,13 +40,13 @@ See the [changelog][].
 
 ## Contact
 
-For questions and help requests, you can reach out in the [scverse discourse][].
 If you found a bug, please use the [issue tracker][].
 
 ## Citation
 
 > t.b.a
 
+[scverse cookie cutter template]: https://github.com/scverse/cookiecutter-scverse
 [mambaforge]: https://github.com/conda-forge/miniforge#mambaforge
 [scverse discourse]: https://discourse.scverse.org/
 [issue tracker]: https://github.com/mengerj/mmcontext/issues
