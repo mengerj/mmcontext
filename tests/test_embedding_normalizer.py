@@ -1,4 +1,5 @@
 import logging
+import warnings
 
 import numpy as np
 import pytest
@@ -113,7 +114,13 @@ def test_constant_embeddings_minmax():
     normalizer = MinMaxNormalizer()
 
     # Expect no error, but normalized embeddings should be zeros due to min == max
-    normalizer.normalize(adata)
+    # Suppress RuntimeWarning for division by zero in normalization
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+
+        # Normalize the embeddings
+        normalizer.normalize(adata)
+
     assert np.isnan(
         adata.obsm["d_emb_norm"]
     ).all(), "Expected NaN values in d_emb_norm for constant embeddings in MinMaxNormalizer"
