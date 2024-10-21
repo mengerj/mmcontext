@@ -91,9 +91,12 @@ class DataSetConstructor:
         self.context_embeddings.append(c_emb)
         self.sample_ids.extend(sample_ids)
 
-    def construct_dataset(self) -> Dataset:
+    def construct_dataset(self, seq_length: int = None) -> Dataset:
         """
         Constructs and returns a PyTorch Dataset combining all added embeddings.
+
+        Args:
+            seq_length (int, optional): Length of sequences. If provided, data will be divided into sequences of this length.
 
         Returns
         -------
@@ -111,8 +114,21 @@ class DataSetConstructor:
         context_embeddings = np.vstack(self.context_embeddings)
         sample_ids = np.array(self.sample_ids)
 
-        # Create and return a PyTorch Dataset
-        dataset = EmbeddingDataset(data_embeddings, context_embeddings, sample_ids)
+        if seq_length is not None:
+            # Use the create_sequences method to split data into sequences
+            (
+                data_embeddings_seq,
+                context_embeddings_seq,
+                sample_ids_seq,
+            ) = self.create_sequences(data_embeddings, context_embeddings, sample_ids, seq_length)
+            # Create and return a PyTorch Dataset with sequences
+            dataset = EmbeddingDataset(
+                data_embeddings_seq, context_embeddings_seq, sample_ids_seq, seq_length=seq_length
+            )
+        else:
+            # Create and return a PyTorch Dataset with individual samples
+            dataset = EmbeddingDataset(data_embeddings, context_embeddings, sample_ids, seq_length=None)
+
         return dataset
 
     def initialize_dataset(self):
@@ -121,54 +137,105 @@ class DataSetConstructor:
         self.context_embeddings = []
         self.sample_ids = []
 
+    def create_sequences(self, data_embeddings, context_embeddings, sample_ids, seq_length=64):
+        """
+        Splits embeddings and sample IDs into sequences of a specified length.
+
+        Args:
+        data_embeddings (np.ndarray): Data embeddings of shape (num_samples, embedding_dim).
+        context_embeddings (np.ndarray): Context embeddings of shape (num_samples, embedding_dim).
+        sample_ids (np.ndarray): Sample IDs of shape (num_samples,).
+        seq_length (int): The desired sequence length.
+
+        Returns
+        -------
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing:
+                - data_embeddings_seq: Data embeddings reshaped into sequences.
+                - context_embeddings_seq: Context embeddings reshaped into sequences.
+                - sample_ids_seq: Sample IDs reshaped into sequences.
+        """
+        num_samples = data_embeddings.shape[0]
+        num_sequences = num_samples // seq_length
+
+        # Calculate the total number of samples that can be evenly divided into sequences
+        total_samples = num_sequences * seq_length
+
+        # Truncate the arrays to have total_samples
+        data_embeddings = data_embeddings[:total_samples]
+        context_embeddings = context_embeddings[:total_samples]
+        sample_ids = sample_ids[:total_samples]
+
+        # Reshape into sequences
+        data_embeddings_seq = data_embeddings.reshape(num_sequences, seq_length, -1)
+        context_embeddings_seq = context_embeddings.reshape(num_sequences, seq_length, -1)
+        sample_ids_seq = sample_ids.reshape(num_sequences, seq_length)
+
+        return data_embeddings_seq, context_embeddings_seq, sample_ids_seq
+
 
 class EmbeddingDataset(Dataset):
-    """
-    A PyTorch Dataset class for embeddings.
+    """A PyTorch Dataset class for embeddings, supporting both individual samples and sequences."""
 
-    This class provides an interface to access data and context embeddings along with their sample IDs.
-    It can be used to create a DataLoader for training PyTorch models.
-    """
-
-    def __init__(self, data_embeddings: np.ndarray, context_embeddings: np.ndarray, sample_ids: np.ndarray):
+    def __init__(
+        self,
+        data_embeddings: np.ndarray,
+        context_embeddings: np.ndarray,
+        sample_ids: np.ndarray,
+        seq_length: int = None,
+    ):
         """
         Initializes the Dataset with data and context embeddings.
 
         Args:
-            data_embeddings (np.ndarray): Data embeddings.
-            context_embeddings (np.ndarray): Context embeddings.
+            data_embeddings (np.ndarray): Data embeddings of shape (num_samples, embedding_dim) or (num_sequences, seq_length, embedding_dim).
+            context_embeddings (np.ndarray): Context embeddings of shape matching data_embeddings.
             sample_ids (np.ndarray): Sample IDs corresponding to the embeddings.
+            seq_length (int, optional): Length of sequences. If provided, data will be divided into sequences of this length.
         """
+        self.seq_length = seq_length
+
+        # Convert numpy arrays to torch tensors
         self.data_embeddings = torch.tensor(data_embeddings, dtype=torch.float32)
         self.context_embeddings = torch.tensor(context_embeddings, dtype=torch.float32)
-        self.sample_ids = sample_ids
+        self.sample_ids = sample_ids  # Keep as numpy array for IDs
+
+        # Determine data structure (individual samples or sequences)
+        if seq_length is not None:
+            # If seq_length is provided, ensure data is in sequences
+            if self.data_embeddings.ndim != 3:
+                raise ValueError("Data embeddings must be 3-dimensional when seq_length is specified.")
+            self.num_sequences = self.data_embeddings.shape[0]
+        else:
+            # If seq_length is not provided, data can be individual samples
+            if self.data_embeddings.ndim != 2:
+                raise ValueError("Data embeddings must be 2-dimensional when seq_length is not specified.")
 
     def __len__(self):
-        """
-        Returns the total number of samples in the dataset.
-
-        Returns
-        -------
-            int: Number of samples.
-        """
-        return len(self.sample_ids)
+        if self.seq_length is not None:
+            return self.num_sequences
+        else:
+            return len(self.sample_ids)
 
     def __getitem__(self, idx):
-        """
-        Retrieves the data at the specified index.
+        if self.seq_length is not None:
+            # Return sequence
+            data_seq = self.data_embeddings[idx]
+            context_seq = self.context_embeddings[idx]
+            sample_ids_seq = self.sample_ids[idx]
 
-        Args:
-            idx (int): Index of the sample to retrieve.
+            return {
+                "data_embedding": data_seq,  # Shape: (seq_length, embedding_dim)
+                "context_embedding": context_seq,  # Shape: (seq_length, embedding_dim)
+                "sample_id": sample_ids_seq,  # Shape: (seq_length,)
+            }
+        else:
+            # Return individual sample
+            data_sample = self.data_embeddings[idx]
+            context_sample = self.context_embeddings[idx]
+            sample_id = self.sample_ids[idx]
 
-        Returns
-        -------
-            dict: A dictionary containing:
-                - 'data_embedding': The data embedding tensor at index `idx`.
-                - 'context_embedding': The context embedding tensor at index `idx`.
-                - 'sample_id': The sample ID corresponding to index `idx`.
-        """
-        return {
-            "data_embedding": self.data_embeddings[idx],
-            "context_embedding": self.context_embeddings[idx],
-            "sample_id": self.sample_ids[idx],
-        }
+            return {
+                "data_embedding": data_sample,  # Shape: (embedding_dim,)
+                "context_embedding": context_sample,  # Shape: (embedding_dim,)
+                "sample_id": sample_id,  # Scalar
+            }
