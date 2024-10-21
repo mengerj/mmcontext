@@ -39,9 +39,11 @@ def create_test_anndata(n_samples=20, n_features=100, cell_types=None, tissues=N
             "sample_id": np.arange(n_samples),
         }
     )
+    obs.index = [f"Cell_{i}" for i in range(n_samples)]
 
     # Create variable (gene) metadata
     var = pd.DataFrame({"gene_symbols": [f"Gene_{i}" for i in range(n_features)]})
+    var.index = [f"Gene_{i}" for i in range(n_features)]
 
     # Create the AnnData object
     adata = anndata.AnnData(X=X, obs=obs, var=var)
