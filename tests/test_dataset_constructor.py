@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import pytest
+from torch.utils.data import DataLoader
 
 from mmcontext.pp import DataSetConstructor
 
@@ -176,3 +177,102 @@ def test_embedding_dataset_length_and_getitem():
         assert "sample_id" in sample
         assert sample["data_embedding"].shape[0] == emb_dim
         assert sample["context_embedding"].shape[0] == emb_dim
+
+
+def test_dataset_construction_with_sequences():
+    """Test that the DataSetConstructor successfully constructs a dataset with sequences."""
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_dataset_construction_with_sequences")
+
+    # First AnnData object
+    adata1 = create_test_emb_anndata(n_samples=128, emb_dim=64)
+    # Second AnnData object
+    adata2 = create_test_emb_anndata(n_samples=96, emb_dim=64, sample_ids=np.arange(128, 224))
+
+    dataset_constructor = DataSetConstructor()
+    dataset_constructor.add_anndata(adata1)
+    dataset_constructor.add_anndata(adata2)
+
+    seq_length = 32  # Sequence length
+    dataset = dataset_constructor.construct_dataset(seq_length=seq_length)
+
+    # Verify the dataset length (number of sequences)
+    total_samples = 128 + 96  # 224 samples
+    expected_num_sequences = total_samples // seq_length  # Should be 7 sequences (truncated to fit)
+    assert len(dataset) == expected_num_sequences
+
+    # Verify embeddings dimensions
+    sample = dataset[0]
+    assert sample["data_embedding"].shape == (seq_length, 64)
+    assert sample["context_embedding"].shape == (seq_length, 64)
+    assert sample["sample_id"].shape == (seq_length,)
+
+    # Check that the last sequence is correctly handled
+    last_sample = dataset[-1]
+    assert last_sample["data_embedding"].shape == (seq_length, 64)
+    assert last_sample["context_embedding"].shape == (seq_length, 64)
+    assert last_sample["sample_id"].shape == (seq_length,)
+
+
+def test_dataloader_with_individual_samples():
+    """Test that a DataLoader can be constructed and used with individual samples."""
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_dataloader_with_individual_samples")
+
+    # Create test AnnData objects
+    adata1 = create_test_emb_anndata(n_samples=100, emb_dim=64)
+    adata2 = create_test_emb_anndata(n_samples=50, emb_dim=64, sample_ids=np.arange(100, 150))
+
+    dataset_constructor = DataSetConstructor()
+    dataset_constructor.add_anndata(adata1)
+    dataset_constructor.add_anndata(adata2)
+
+    # Construct dataset without sequences
+    dataset = dataset_constructor.construct_dataset(seq_length=None)
+
+    # Create DataLoader
+    batch_size = 16
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    # Iterate over DataLoader and verify batch shapes
+    for batch in data_loader:
+        data_embeddings = batch["data_embedding"]  # Shape: (batch_size, embedding_dim)
+        context_embeddings = batch["context_embedding"]  # Shape: (batch_size, embedding_dim)
+        sample_ids = batch["sample_id"]  # Shape: (batch_size,)
+
+        assert data_embeddings.shape == (batch_size, 64)
+        assert context_embeddings.shape == (batch_size, 64)
+        assert sample_ids.shape == (batch_size,)
+        break  # Only need to check the first batch
+
+
+def test_dataloader_with_sequences():
+    """Test that a DataLoader can be constructed and used with sequences."""
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_dataloader_with_sequences")
+
+    # Create test AnnData objects
+    adata1 = create_test_emb_anndata(n_samples=128, emb_dim=64)
+    adata2 = create_test_emb_anndata(n_samples=96, emb_dim=64, sample_ids=np.arange(128, 224))
+
+    dataset_constructor = DataSetConstructor()
+    dataset_constructor.add_anndata(adata1)
+    dataset_constructor.add_anndata(adata2)
+
+    seq_length = 32
+    dataset = dataset_constructor.construct_dataset(seq_length=seq_length)
+
+    # Create DataLoader
+    batch_size = 4  # Number of sequences per batch
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    # Iterate over DataLoader and verify batch shapes
+    for batch in data_loader:
+        data_embeddings = batch["data_embedding"]  # Shape: (batch_size, seq_length, embedding_dim)
+        context_embeddings = batch["context_embedding"]  # Shape: (batch_size, seq_length, embedding_dim)
+        sample_ids = batch["sample_id"]  # Shape: (batch_size, seq_length)
+
+        assert data_embeddings.shape == (batch_size, seq_length, 64)
+        assert context_embeddings.shape == (batch_size, seq_length, 64)
+        assert sample_ids.shape == (batch_size, seq_length)
+        break  # Only need to check the first batch
