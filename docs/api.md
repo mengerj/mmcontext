@@ -22,6 +22,14 @@
     pp.PCAReducer
     pp.DataSetConstructor
     pp.EmbeddingDataset
+    engine.BaseModel
+    engine.CustomTransformerEncoderLayer
+    engine.MMContextEncoder
+    engine.LossFunction
+    engine.ContrastiveLoss
+    engine.ReconstructionLoss
+    engine.LossManager
+
 ```
 
 ## Tools
