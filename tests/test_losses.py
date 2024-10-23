@@ -49,7 +49,13 @@ def test_contrastive_loss_different_modes():
     ]
 
     for target_mode, current_mode in modes:
-        loss_fn = ContrastiveLoss(target_mode=target_mode, current_mode=current_mode, similarity_metric="cosine")
+        loss_fn = ContrastiveLoss(
+            target_mode=target_mode,
+            current_mode=current_mode,
+            similarity_metric="cosine",
+            data_emb_key="data_embeddings",
+            context_emb_key="context_embeddings",
+        )
         try:
             loss = loss_fn.compute_loss(outputs, targets)
             assert loss.item() >= 0, f"Loss should be non-negative, got {loss.item()}"
@@ -75,7 +81,13 @@ def test_similarity_matrix_symmetry():
     embeddings_flat = embeddings_a.view(-1, embedding_dim)
 
     # Create loss function
-    loss_fn = ContrastiveLoss(target_mode="data_data", current_mode="data_data", similarity_metric="cosine")
+    loss_fn = ContrastiveLoss(
+        target_mode="data_data",
+        current_mode="data_data",
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
+    )
     # compute similarity matrix
     sim_matrix = loss_fn.get_similarity_matrix({"data_embeddings": embeddings_a}, "data_data")
 
@@ -118,7 +130,13 @@ def test_contrastive_loss_missing_modified_context_embeddings():
     target_mode = "data_data"
     current_mode = "data_context"  # Requires 'context_embeddings' in outputs
 
-    loss_fn = ContrastiveLoss(target_mode=target_mode, current_mode=current_mode, similarity_metric="cosine")
+    loss_fn = ContrastiveLoss(
+        target_mode=target_mode,
+        current_mode=current_mode,
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
+    )
 
     with pytest.raises(KeyError) as excinfo:
         loss_fn.compute_loss(outputs, targets)
@@ -149,7 +167,13 @@ def test_contrastive_loss_zero_when_embeddings_identical():
     target_mode = "data_data"
     current_mode = "data_data"
 
-    loss_fn = ContrastiveLoss(target_mode=target_mode, current_mode=current_mode, similarity_metric="cosine")
+    loss_fn = ContrastiveLoss(
+        target_mode=target_mode,
+        current_mode=current_mode,
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
+    )
     loss = loss_fn.compute_loss(outputs, targets)
     assert torch.isclose(
         loss, torch.tensor(0.0), atol=1e-6
@@ -180,7 +204,13 @@ def test_contrastive_loss_positive_when_embeddings_different():
     target_mode = "data_data"
     current_mode = "data_data"
 
-    loss_fn = ContrastiveLoss(target_mode=target_mode, current_mode=current_mode, similarity_metric="cosine")
+    loss_fn = ContrastiveLoss(
+        target_mode=target_mode,
+        current_mode=current_mode,
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
+    )
     loss = loss_fn.compute_loss(outputs, targets)
     assert loss.item() > 0, f"Loss should be positive when embeddings differ, got {loss.item()}"
 
@@ -203,7 +233,7 @@ def test_reconstruction_loss():
     targets = {"data_embeddings": data_embeddings}
 
     # Initialize ReconstructionLoss
-    loss_fn = ReconstructionLoss(reduction="mean")
+    loss_fn = ReconstructionLoss(reduction="mean", data_emb_key="data_embeddings", context_emb_key="context_embeddings")
     loss = loss_fn.compute_loss(outputs, targets)
     assert loss.item() >= 0, f"Reconstruction loss should be non-negative, got {loss.item()}"
 
@@ -230,12 +260,22 @@ def test_loss_manager_combines_losses():
     # Initialize LossManager and add losses
     loss_manager = LossManager()
     contrastive_loss_fn1 = ContrastiveLoss(
-        target_mode="data_data", current_mode="data_data", similarity_metric="cosine"
+        target_mode="data_data",
+        current_mode="data_data",
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
     )
     contrastive_loss_fn2 = ContrastiveLoss(
-        target_mode="context_context", current_mode="data_data", similarity_metric="cosine"
+        target_mode="context_context",
+        current_mode="data_data",
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
     )
-    reconstruction_loss_fn = ReconstructionLoss(reduction="mean")
+    reconstruction_loss_fn = ReconstructionLoss(
+        reduction="mean", data_emb_key="data_embeddings", context_emb_key="context_embeddings"
+    )
 
     loss_manager.add_loss(contrastive_loss_fn1, weight=1.0)
     loss_manager.add_loss(contrastive_loss_fn2, weight=1.0)
@@ -266,7 +306,13 @@ def test_contrastive_loss_invalid_mode():
     target_mode = "invalid_mode"
     current_mode = "data_data"
 
-    loss_fn = ContrastiveLoss(target_mode=target_mode, current_mode=current_mode, similarity_metric="cosine")
+    loss_fn = ContrastiveLoss(
+        target_mode=target_mode,
+        current_mode=current_mode,
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
+    )
 
     with pytest.raises(ValueError) as excinfo:
         loss_fn.compute_loss(outputs, targets)
@@ -295,7 +341,13 @@ def test_contrastive_loss_invalid_similarity_metric():
     current_mode = "data_data"
     similarity_metric = "unsupported_metric"
 
-    loss_fn = ContrastiveLoss(target_mode=target_mode, current_mode=current_mode, similarity_metric=similarity_metric)
+    loss_fn = ContrastiveLoss(
+        target_mode=target_mode,
+        current_mode=current_mode,
+        similarity_metric=similarity_metric,
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
+    )
 
     with pytest.raises(ValueError) as excinfo:
         loss_fn.compute_loss(outputs, targets)
@@ -327,7 +379,13 @@ def test_contrastive_loss_mismatched_embedding_dims():
     target_mode = "data_context"
     current_mode = "data_context"
 
-    loss_fn = ContrastiveLoss(target_mode=target_mode, current_mode=current_mode, similarity_metric="cosine")
+    loss_fn = ContrastiveLoss(
+        target_mode=target_mode,
+        current_mode=current_mode,
+        similarity_metric="cosine",
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
+    )
 
     with pytest.raises(RuntimeError) as excinfo:
         loss_fn.compute_loss(outputs, targets)
@@ -356,7 +414,12 @@ def test_contrastive_loss_infoNCE():
 
     # Initialize ContrastiveLoss with 'infoNCE' target_mode
     loss_fn = ContrastiveLoss(
-        target_mode="infoNCE", current_mode="data_context", similarity_metric="cosine", temperature=0.07
+        target_mode="infoNCE",
+        current_mode="data_context",
+        similarity_metric="cosine",
+        temperature=0.07,
+        data_emb_key="data_embeddings",
+        context_emb_key="context_embeddings",
     )
     # labels = loss_fn.get_similarity_matrix(targets, 'infoNCE')
     logits = loss_fn.get_similarity_matrix(outputs, "data_context")
