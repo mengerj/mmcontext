@@ -82,14 +82,19 @@ class MMContextEncoder(BaseModel):
         """
         Forward pass for the MMContextEncoder.
 
-        Args:
-            in_main (Tensor): Source tensor (data embeddings) of shape (batch_size, seq_length, embedding_dim).
-            in_main_key_padding_mask (Tensor, optional): Mask for the source keys per batch. If provided, should be a
-                ByteTensor or BoolTensor of shape (batch_size, seq_length) where True values indicate padding positions.
+        Parameters
+        ----------
+            in_main (Tensor):
+                Source tensor (data embeddings) of shape (batch_size, seq_length, embedding_dim).
+            in_main_key_padding_mask (Tensor, optional):
+                Mask for the source keys per batch.
+                If provided, should be a ByteTensor or BoolTensor of shape (batch_size, seq_length) where True values indicate padding positions.
                 Default is None.
-            in_cross (Tensor, optional): Input tensor for cross-attention of shape (batch_size, seq_length, embedding_dim).
+            in_cross (Tensor, optional):
+                Input tensor for cross-attention of shape (batch_size, seq_length, embedding_dim).
                 Required when `use_cross_attention` is True. Default is None.
-            in_cross_key_padding_mask (Tensor, optional): Mask for the in_cross keys per batch. If provided, should be a
+            in_cross_key_padding_mask (Tensor, optional):
+                Mask for the in_cross keys per batch. If provided, should be a
                 ByteTensor or BoolTensor of shape (batch_size, seq_length). Default is None.
 
         Returns

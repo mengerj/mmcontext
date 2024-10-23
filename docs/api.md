@@ -9,19 +9,6 @@
 .. autosummary::
     :toctree: generated/
 
-    pp.Embedder
-    pp.DataEmbedder
-    pp.PCADataEmbedder
-    pp.PlaceholderDataEmbedder
-    pp.ContextEmbedder
-    pp.PlaceholderContextEmbedder
-    pp.CategoryEmbedder
-    pp.MinMaxNormalizer
-    pp.ZScoreNormalizer
-    pp.DimAligner
-    pp.PCAReducer
-    pp.DataSetConstructor
-    pp.EmbeddingDataset
 
 ```
 
@@ -34,14 +21,6 @@
 .. autosummary::
     :toctree: generated/
 
-    engine.BaseModel
-    engine.CustomTransformerEncoderLayer
-    engine.MMContextEncoder
-    engine.LossFunction
-    engine.ContrastiveLoss
-    engine.ReconstructionLoss
-    engine.LossManager
-    engine.Trainer
 ```
 
 ## Plotting
