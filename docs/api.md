@@ -22,6 +22,18 @@
     pp.PCAReducer
     pp.DataSetConstructor
     pp.EmbeddingDataset
+
+```
+
+## engine
+
+```{eval-rst}
+.. module:: mmcontext.engine
+.. currentmodule:: mmcontext
+
+.. autosummary::
+    :toctree: generated/
+
     engine.BaseModel
     engine.CustomTransformerEncoderLayer
     engine.MMContextEncoder
@@ -30,17 +42,6 @@
     engine.ReconstructionLoss
     engine.LossManager
     engine.Trainer
-
-```
-
-## Tools
-
-```{eval-rst}
-.. module:: mmcontext.tl
-.. currentmodule:: mmcontext
-
-.. autosummary::
-    :toctree: generated
 ```
 
 ## Plotting
