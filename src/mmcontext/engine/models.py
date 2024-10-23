@@ -47,7 +47,7 @@ class MMContextEncoder(BaseModel):
     def __init__(
         self,
         embedding_dim,
-        hidden_dim,
+        hidden_dim=64,
         num_layers=2,
         num_heads=4,
         use_self_attention=False,
@@ -78,18 +78,18 @@ class MMContextEncoder(BaseModel):
             f"MMContextEncoder initialized with embedding_dim = {embedding_dim}, num_layers = {num_layers}, use_self_attention = {use_self_attention}, use_cross_attention = {use_cross_attention}."
         )
 
-    def forward(self, src, src_key_padding_mask=None, context=None, context_key_padding_mask=None):
+    def forward(self, in_main, in_main_key_padding_mask=None, in_cross=None, in_cross_key_padding_mask=None):
         """
         Forward pass for the MMContextEncoder.
 
         Args:
-            src (Tensor): Source tensor (data embeddings) of shape (batch_size, seq_length, embedding_dim).
-            src_key_padding_mask (Tensor, optional): Mask for the source keys per batch. If provided, should be a
+            in_main (Tensor): Source tensor (data embeddings) of shape (batch_size, seq_length, embedding_dim).
+            in_main_key_padding_mask (Tensor, optional): Mask for the source keys per batch. If provided, should be a
                 ByteTensor or BoolTensor of shape (batch_size, seq_length) where True values indicate padding positions.
                 Default is None.
-            context (Tensor, optional): Context tensor for cross-attention of shape (batch_size, seq_length, embedding_dim).
+            in_cross (Tensor, optional): Input tensor for cross-attention of shape (batch_size, seq_length, embedding_dim).
                 Required when `use_cross_attention` is True. Default is None.
-            context_key_padding_mask (Tensor, optional): Mask for the context keys per batch. If provided, should be a
+            in_cross_key_padding_mask (Tensor, optional): Mask for the in_cross keys per batch. If provided, should be a
                 ByteTensor or BoolTensor of shape (batch_size, seq_length). Default is None.
 
         Returns
@@ -98,43 +98,42 @@ class MMContextEncoder(BaseModel):
 
         Raises
         ------
-            ValueError: If `use_cross_attention` is True and `context` is None.
+            ValueError: If `use_cross_attention` is True and `in_cross` is None.
 
         Note:
-            We implement a custom `forward` method to pass the `context` embeddings to each encoder layer during the forward pass.
+            We implement a custom `forward` method to pass the `in_cross` embeddings to each encoder layer during the forward pass.
             This is necessary because the default `nn.TransformerEncoder` does not support passing additional arguments
-            like `context` to its layers. By overriding the `forward` method, we ensure that `context` embeddings are
+            like `in_cross` to its layers. By overriding the `forward` method, we ensure that `in_cross` embeddings are
             provided to each layer when cross-attention is used, enabling the model to perform cross-attention operations.
         """
-        if self.use_cross_attention and context is None:
-            self.logger.error("Context embeddings are required when using cross-attention.")
-            raise ValueError("Context embeddings are required when using cross-attention.")
+        if self.use_cross_attention and in_cross is None:
+            self.logger.error("in_cross embeddings are required when using cross-attention.")
+            raise ValueError("in_cross embeddings are required when using cross-attention.")
 
         # Add dimension checks
-        if src.dim() != 3:
+        if in_main.dim() != 3:
             self.logger.error(
-                f"Expected src to have 3 dimensions (batch_size, seq_length, embedding_dim), but got {src.dim()} dimensions."
+                f"Expected in_main to have 3 dimensions (batch_size, seq_length, embedding_dim), but got {in_main.dim()} dimensions."
             )
             raise ValueError(
-                f"Expected src to have 3 dimensions (batch_size, seq_length, embedding_dim), but got {src.dim()} dimensions."
+                f"Expected in_main to have 3 dimensions (batch_size, seq_length, embedding_dim), but got {in_main.dim()} dimensions."
             )
-        if src.size(2) != self.encoder.layers[0].embedding_dim:
+        if in_main.size(2) != self.encoder.layers[0].embedding_dim:
             self.logger.error(
-                f"Expected src embedding dimension to be {self.encoder.layers[0].embedding_dim}, but got {src.size(2)}."
+                f"Expected in_main embedding dimension to be {self.encoder.layers[0].embedding_dim}, but got {in_main.size(2)}."
             )
             raise ValueError(
-                f"Expected src embedding dimension to be {self.encoder.layers[0].embedding_dim}, but got {src.size(2)}."
+                f"Expected in_main embedding dimension to be {self.encoder.layers[0].embedding_dim}, but got {in_main.size(2)}."
             )
 
-        output = src
+        output = in_main
         for mod in self.encoder.layers:
             output = mod(
-                src=output,
-                src_key_padding_mask=src_key_padding_mask,
-                context=context,
-                context_key_padding_mask=context_key_padding_mask,
+                in_main=output,
+                in_main_key_padding_mask=in_main_key_padding_mask,
+                in_cross=in_cross,
+                in_cross_key_padding_mask=in_cross_key_padding_mask,
             )
-        self.logger.info(f"Forward pass completed with output shape: {output.shape}")
         return output
 
 
@@ -201,33 +200,33 @@ class CustomTransformerEncoderLayer(nn.Module):
         # Dropout
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, src, src_key_padding_mask=None, context=None, context_key_padding_mask=None):
+    def forward(self, in_main, in_main_key_padding_mask=None, in_cross=None, in_cross_key_padding_mask=None):
         """
         Forward pass for the encoder layer.
 
         Args:
-            src (Tensor): Input tensor of shape (batch_size, seq_length, embedding_dim).
-            src_key_padding_mask (Tensor, optional): Mask for src keys per batch (optional).
-            context (Tensor, optional): Context tensor for cross-attention (batch_size, seq_length, embedding_dim).
-            context_key_padding_mask (Tensor, optional): Mask for context keys per batch (optional).
+            in_main (Tensor): Input tensor of shape (batch_size, seq_length, embedding_dim).
+            in_main_key_padding_mask (Tensor, optional): Mask for in_main keys per batch (optional).
+            in_cross (Tensor, optional): Input tensor for cross-attention (batch_size, seq_length, embedding_dim).
+            in_cross_key_padding_mask (Tensor, optional): Mask for in_cross keys per batch (optional).
 
         Returns
         -------
             Tensor: Output tensor of shape (batch_size, seq_length, embedding_dim).
         """
-        x = src
+        x = in_main
 
         # Self-Attention
         if self.use_self_attention:
-            attn_output, _ = self.self_attn(x, x, x, key_padding_mask=src_key_padding_mask)
+            attn_output, _ = self.self_attn(x, x, x, key_padding_mask=in_main_key_padding_mask)
             x = x + self.dropout(attn_output)
             x = self.norm1(x)
 
         # Cross-Attention
         if self.use_cross_attention:
-            if context is None:
-                raise ValueError("Context embeddings are required for cross-attention.")
-            attn_output, _ = self.cross_attn(x, context, context, key_padding_mask=context_key_padding_mask)
+            if in_cross is None:
+                raise ValueError("in_cross embeddings are required for cross-attention.")
+            attn_output, _ = self.cross_attn(x, in_cross, in_cross, key_padding_mask=in_cross_key_padding_mask)
             x = x + self.dropout(attn_output)
             x = self.norm2(x)
 

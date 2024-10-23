@@ -91,12 +91,21 @@ class DataSetConstructor:
         self.context_embeddings.append(c_emb)
         self.sample_ids.extend(sample_ids)
 
-    def construct_dataset(self, seq_length: int = None) -> Dataset:
+    def construct_dataset(
+        self,
+        seq_length: int = None,
+        data_emb_key="data_embedding",
+        context_emb_key="context_embedding",
+        sample_id_key="sample_id",
+    ) -> Dataset:
         """
         Constructs and returns a PyTorch Dataset combining all added embeddings.
 
         Args:
             seq_length (int, optional): Length of sequences. If provided, data will be divided into sequences of this length.
+            data_emb_key (str): Key for data embeddings in the Dataset. Default is `'data_embedding'`.
+            context_emb_key (str): Key for context embeddings in the Dataset. Default is `'context_embedding'`.
+            sample_id_key (str): Key for sample IDs in the Dataset. Default is `'sample_id'`.
 
         Returns
         -------
@@ -123,11 +132,25 @@ class DataSetConstructor:
             ) = self.create_sequences(data_embeddings, context_embeddings, sample_ids, seq_length)
             # Create and return a PyTorch Dataset with sequences
             dataset = EmbeddingDataset(
-                data_embeddings_seq, context_embeddings_seq, sample_ids_seq, seq_length=seq_length
+                data_embeddings_seq,
+                context_embeddings_seq,
+                sample_ids_seq,
+                seq_length=seq_length,
+                data_emb_key=data_emb_key,
+                context_emb_key=context_emb_key,
+                sample_id_key=sample_id_key,
             )
         else:
             # Create and return a PyTorch Dataset with individual samples
-            dataset = EmbeddingDataset(data_embeddings, context_embeddings, sample_ids, seq_length=None)
+            dataset = EmbeddingDataset(
+                data_embeddings,
+                context_embeddings,
+                sample_ids,
+                seq_length=None,
+                data_emb_key=data_emb_key,
+                context_emb_key=context_emb_key,
+                sample_id_key=sample_id_key,
+            )
 
         return dataset
 
@@ -182,6 +205,9 @@ class EmbeddingDataset(Dataset):
         context_embeddings: np.ndarray,
         sample_ids: np.ndarray,
         seq_length: int = None,
+        data_emb_key: str = "data_embedding",
+        context_emb_key: str = "context_embedding",
+        sample_id_key: str = "sample_id",
     ):
         """
         Initializes the Dataset with data and context embeddings.
@@ -194,6 +220,9 @@ class EmbeddingDataset(Dataset):
         """
         self.seq_length = seq_length
 
+        self.data_emb_key = data_emb_key
+        self.context_emb_key = context_emb_key
+        self.sample_id_key = sample_id_key
         # Convert numpy arrays to torch tensors
         self.data_embeddings = torch.tensor(data_embeddings, dtype=torch.float32)
         self.context_embeddings = torch.tensor(context_embeddings, dtype=torch.float32)
@@ -224,9 +253,9 @@ class EmbeddingDataset(Dataset):
             sample_ids_seq = self.sample_ids[idx]
 
             return {
-                "data_embedding": data_seq,  # Shape: (seq_length, embedding_dim)
-                "context_embedding": context_seq,  # Shape: (seq_length, embedding_dim)
-                "sample_id": sample_ids_seq,  # Shape: (seq_length,)
+                self.data_emb_key: data_seq,  # Shape: (seq_length, embedding_dim)
+                self.context_emb_key: context_seq,  # Shape: (seq_length, embedding_dim)
+                self.sample_id_key: sample_ids_seq,  # Shape: (seq_length,)
             }
         else:
             # Return individual sample
@@ -235,7 +264,7 @@ class EmbeddingDataset(Dataset):
             sample_id = self.sample_ids[idx]
 
             return {
-                "data_embedding": data_sample,  # Shape: (embedding_dim,)
-                "context_embedding": context_sample,  # Shape: (embedding_dim,)
-                "sample_id": sample_id,  # Scalar
+                self.data_emb_key: data_sample,  # Shape: (embedding_dim,)
+                self.context_emb_key: context_sample,  # Shape: (embedding_dim,)
+                self.sample_id_key: sample_id,  # Scalar
             }

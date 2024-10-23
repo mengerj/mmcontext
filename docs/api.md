@@ -29,6 +29,7 @@
     engine.ContrastiveLoss
     engine.ReconstructionLoss
     engine.LossManager
+    engine.Trainer
 
 ```
 
