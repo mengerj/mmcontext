@@ -28,7 +28,8 @@ class EmbeddingNormalizer(ABC):
 
         Raises
         ------
-        KeyError: If either 'd_emb' or 'c_emb' is missing in adata.obsm.
+        KeyError
+            If either 'd_emb' or 'c_emb' is missing in adata.obsm.
         """
         if "d_emb" not in adata.obsm:
             self.logger.error("Missing 'd_emb' in adata.obsm")

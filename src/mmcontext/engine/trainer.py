@@ -9,45 +9,44 @@ from mmcontext.engine.losses import ContrastiveLoss, LossManager
 
 
 class Trainer:
-    """
-    Trainer class to handle the training and evaluation of models.
-
-    Attributes
-    ----------
-        model (torch.nn.Module): The neural network model to train.
-        loss_manager (LossManager): Manages multiple loss functions.
-        optimizer (torch.optim.Optimizer): Optimizer for updating model parameters.
-        device (torch.device): Device to run the model on ('cuda' or 'cpu').
-        logger (logging.Logger): Logger for tracking training progress.
-    """
+    """Trainer class to handle the training and evaluation of models."""
 
     def __init__(
         self,
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
-        loss_manager: LossManager = None,
+        loss_manager: LossManager | None = None,
         device: torch.device | None = None,
         logger: logging.Logger | None = None,
         input_embeddings: dict | None = None,
-        data_emb_key="data_embedding",
-        context_emb_key="context_embedding",
-        sample_id_key="sample_id",
+        data_emb_key: str = "data_embedding",
+        context_emb_key: str = "context_embedding",
+        sample_id_key: str = "sample_id",
     ):
         """
         Initializes the Trainer.
 
-        Args:
-            model (torch.nn.Module): The neural network model to train.
-            loss_manager (LossManager): Manages multiple loss functions. Not needed for inference.
-            optimizer (torch.optim.Optimizer): Optimizer for updating model parameters.
-            device (torch.device, optional): Device to run the model on ('cuda' or 'cpu'). Defaults to CUDA if available.
-            logger (logging.Logger, optional): Logger for tracking training progress. If None, a default logger is created.
-            input_embeddings (dict, optional): Dict of embeddings to pass to the model.
-                Should be have keys 'main' and 'cross'. Values should correspond to names of embeddings in the batch.
-                Defaults to {'main': 'data_embedding', 'cross': 'context_embedding'}. Only the embeddings from main are modified.
-                The embeddings corresponding cross are used for cross-attention if the model was configured with use_cross_attention = True.
-            data_emb_key (str, optional): Key for data embeddings in the batch. Defaults to 'data_embedding'.
-            context_emb_key (str, optional): Key for context embeddings in the batch. Defaults to 'context_embedding'.
+        Parameters
+        ----------
+        model
+            The neural network model to train.
+        loss_manager
+            Manages multiple loss functions. Not needed for inference.
+        optimizer
+            Optimizer for updating model parameters.
+        device
+            Device to run the model on 'cuda' or 'cpu'. Defaults to CUDA if available.
+        logger
+            Logger for tracking training progress. If None, a default logger is created.
+        input_embeddings
+            Dict of embeddings to pass to the model.
+            Should be have keys 'main' and 'cross'. Values should correspond to names of embeddings in the batch.
+            Defaults to `{'main': 'data_embedding', 'cross': 'context_embedding'}`. Only the embeddings from main are modified.
+            The embeddings corresponding cross are used for cross-attention if the model was configured with use_cross_attention = True.
+        data_emb_key
+            Key for data embeddings in the batch. Defaults to 'data_embedding'.
+        context_emb_key
+            Key for context embeddings in the batch. Defaults to 'context_embedding'.
         """
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
@@ -107,12 +106,14 @@ class Trainer:
         """
         Trains the model for one epoch.
 
-        Args:
-            data_loader (DataLoader): DataLoader for training data.
+        Parameters
+        ----------
+        data_loader
+            DataLoader for training data.
 
         Returns
         -------
-            float: Average training loss for the epoch.
+            Average training loss for the epoch. (dtype `float`)
         """
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
@@ -163,12 +164,14 @@ class Trainer:
         """
         Evaluates the model on a validation set.
 
-        Args:
-            data_loader (DataLoader): DataLoader for validation data.
+        Parameters
+        ----------
+        data_loader
+            DataLoader for validation data.
 
         Returns
         -------
-            float: Average validation loss.
+            Average validation loss. (dtype `float`)
         """
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
@@ -222,11 +225,23 @@ class Trainer:
         """
         Trains the model for a specified number of epochs and optionally evaluates on a validation set.
 
-        Args:
-            train_loader (DataLoader): DataLoader for training data.
-            val_loader (DataLoader, optional): DataLoader for validation data. Defaults to None.
-            epochs (int, optional): Number of epochs to train. Defaults to 10.
-            save_path (str, optional): Path to save the model checkpoints. Defaults to None.
+        Parameters
+        ----------
+        train_loader
+            DataLoader for training data.
+        val_loader
+            DataLoader for validation data. Defaults to None.
+        epochs
+            Number of epochs to train. Defaults to 10.
+        save_path
+            Path to save the model checkpoints. Defaults to None.
+
+        Raises
+        ------
+        ValueError
+            If Loss Manager does not contain any loss functions
+        ValueError
+            If Validation DataLoader is not provided when save_path is specified.
         """
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
@@ -259,11 +274,11 @@ class Trainer:
         Generates modified embeddings using the trained model.
 
         Args:
-            data_loader (DataLoader): DataLoader for embeddings to be modified.
+            data_loader: DataLoader for embeddings to be modified.
 
         Returns
         -------
-            Dict[str, torch.Tensor]: Dictionary containing lists of embeddings.
+            modified_embeddings : Dict[str, torch.Tensor] Dictionary containing lists of embeddings. (dtype `dict`)
         """
         self.model.eval()
         modified_embeddings = {self.data_emb_key: [], self.context_emb_key: [], self.sample_id_key: []}
