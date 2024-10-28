@@ -5,7 +5,7 @@
 ```{toctree}
 :hidden: true
 :maxdepth: 1
-api.md
+api/index
 changelog.md
 contributing.md
 references.md

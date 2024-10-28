@@ -99,7 +99,7 @@ intersphinx_mapping = {
     "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
     "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    #    "torch": ("https://pytorch.org/docs/stable/", None),
+    "torch": ("https://pytorch.org/docs/stable/", None),
 }
 
 # List of patterns, relative to source directory, that match files and
@@ -132,5 +132,14 @@ nitpick_ignore = [
     # If building the documentation fails because of a missing link that is outside your control,
     # you can add an exception to this list.
     #     ("py:class", "igraph.Graph"),
-    ("py:class", "torch.nn.modules.module.Module")
+    ("py:class", "torch.nn.modules.module.Module"),
+    ("py:class", "torch.utils.hooks.RemovableHandle"),
+    ("py:attr", "torch.nn.modules.module.Module"),
+]
+
+suppress_warnings = [
+    "docutils",
+    "ref.class",  # To suppress warnings related to unresolved class references
+    "ref.attr",
+    "ref.func",
 ]
