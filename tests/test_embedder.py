@@ -1,11 +1,13 @@
 # tests/test_embedder.py
 
+import importlib.resources
 import logging
+import shutil
 
 import numpy as np
 import pytest
 
-from mmcontext.pp.context_embedder import PlaceholderContextEmbedder
+from mmcontext.pp.context_embedder import CategoryEmbedder, PlaceholderContextEmbedder
 from mmcontext.pp.data_embedder import PlaceholderDataEmbedder
 
 # Import the Embedder and embedders from your package
@@ -187,3 +189,38 @@ def test_embedder_with_non_numpy_embeddings():
 
     # Check the error message
     assert "The provided d_emb embeddings must be a numpy.ndarray, but got list." in str(excinfo.value)
+
+
+def test_embedder_with_onehot_context(tmp_path):
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_embedder_with_onehot_context")
+    adata = create_test_anndata()
+    n_samples = adata.n_obs
+    data_embedding_dim = 64
+
+    # Create external context embeddings
+    external_data_embeddings = np.random.randint(0, 2, (n_samples, data_embedding_dim))
+
+    metadata_categories = ["cell_type", "tissue"]
+
+    # Access the test dictionary file from package resources
+    with importlib.resources.path("mmcontext.data", "test_dict.pkl.gz") as resource_path:
+        # Create a temporary directory
+        temp_file_path = tmp_path / "test_dict.pkl.gz"
+
+        # Copy the resource file to the temporary location
+        shutil.copy(resource_path, temp_file_path)
+
+        context_embedder = CategoryEmbedder(
+            metadata_categories=metadata_categories,
+            embeddings_file_path=temp_file_path,
+            one_hot=True,
+            model="text-embedding-3-small",
+            combination_method="concatenate",
+        )
+        embedder = Embedder(context_embedder=context_embedder)
+
+        embedder.create_embeddings(adata, data_embeddings=external_data_embeddings)
+        # Confirm the shape of the context embeddings
+        assert set(np.unique(adata.obsm["cell_type_emb"])) == {0, 1}
+        assert set(np.unique(adata.obsm["tissue_emb"])) == {0, 1}

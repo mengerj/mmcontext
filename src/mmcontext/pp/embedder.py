@@ -28,25 +28,6 @@ class Embedder:
         self.context_embedder = context_embedder
         self.logger = logging.getLogger(__name__)
 
-    def check_embeddings(self, adata: anndata.AnnData) -> tuple[bool, bool]:
-        """
-        Checks if data and context embeddings are present in the AnnData object.
-
-        Parameters
-        ----------
-        adata
-            The AnnData object to check for embeddings.
-
-        Returns
-        -------
-        tuple
-            A tuple of two boolean values indicating if data embeddings ('d_emb')
-            and context embeddings ('c_emb') are present in `adata.obsm`.
-        """
-        has_data_emb = "d_emb" in adata.obsm
-        has_context_emb = "c_emb" in adata.obsm
-        return has_data_emb, has_context_emb
-
     def create_embeddings(
         self,
         adata: anndata.AnnData,
@@ -76,31 +57,25 @@ class Embedder:
         if data_embeddings is not None:
             self.logger.info("Using external data embeddings provided.")
             self.store_embeddings(adata, data_embeddings, key="d_emb")
+        elif self.data_embedder is not None:
+            self.logger.info("Creating data embeddings...")
+            data_embeddings = self.data_embedder.embed(adata)
+            self.store_embeddings(adata, data_embeddings, key="d_emb")
         else:
-            has_data_emb, _ = self.check_embeddings(adata)
-            if not has_data_emb:
-                if self.data_embedder is not None:
-                    self.logger.info("Creating data embeddings...")
-                    data_embeddings = self.data_embedder.embed(adata)
-                    self.store_embeddings(adata, data_embeddings, key="d_emb")
-                else:
-                    self.logger.error("Data embeddings are missing, and no data embedder is provided.")
-                    raise ValueError("Data embeddings are missing, and no data embedder is provided.")
+            self.logger.error("Data embeddings are missing, and no data embedder is provided.")
+            raise ValueError("Data embeddings are missing, and no data embedder is provided.")
 
         # Store external context embeddings if provided
         if context_embeddings is not None:
             self.logger.info("Using external context embeddings provided.")
             self.store_embeddings(adata, context_embeddings, key="c_emb")
+        elif self.context_embedder is not None:
+            self.logger.info("Creating context embeddings...")
+            context_embeddings = self.context_embedder.embed(adata)
+            self.store_embeddings(adata, context_embeddings, key="c_emb")
         else:
-            _, has_context_emb = self.check_embeddings(adata)
-            if not has_context_emb:
-                if self.context_embedder is not None:
-                    self.logger.info("Creating context embeddings...")
-                    context_embeddings = self.context_embedder.embed(adata)
-                    self.store_embeddings(adata, context_embeddings, key="c_emb")
-                else:
-                    self.logger.error("Context embeddings are missing, and no context embedder is provided.")
-                    raise ValueError("Context embeddings are missing, and no context embedder is provided.")
+            self.logger.error("Context embeddings are missing, and no context embedder is provided.")
+            raise ValueError("Context embeddings are missing, and no context embedder is provided.")
 
     def store_embeddings(self, adata: anndata.AnnData, embeddings: np.ndarray, key: str):
         """

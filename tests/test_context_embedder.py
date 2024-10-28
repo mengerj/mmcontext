@@ -276,7 +276,6 @@ def test_one_hot_encoding_metadata(tmp_path):
         # Check that one-hot encoded embeddings are stored in adata.obsm
         assert "cell_type_emb" in adata.obsm
         assert "tissue_emb" in adata.obsm
-
         # Verify that the embeddings are indeed one-hot encoded
         assert set(np.unique(adata.obsm["cell_type_emb"])) == {0, 1}
         assert set(np.unique(adata.obsm["tissue_emb"])) == {0, 1}
