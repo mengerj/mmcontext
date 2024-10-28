@@ -70,7 +70,7 @@ features = [ "dev" ]
 [tool.hatch.envs.docs]
 features = [ "doc" ]
 scripts.build = "sphinx-build -M html docs docs/_build {args}"
-scripts.open = "python -m webbrowser -t docs/_build/html/index.html"
+scripts.open = "python -c \"import webbrowser; from pathlib import Path; webbrowser.open(Path('docs/_build/html/index.html').resolve().as_uri())\""
 scripts.clean = "git clean -fdX -- {args:docs}"
 
 [tool.hatch.envs.hatch-test]
