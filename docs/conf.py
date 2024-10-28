@@ -142,4 +142,5 @@ suppress_warnings = [
     "ref.class",  # To suppress warnings related to unresolved class references
     "ref.attr",
     "ref.func",
+    "ref.meth",
 ]
