@@ -104,6 +104,9 @@ class CategoryEmbedder(ContextEmbedder):
         self.metadata_embeddings = self.load_metadata_embeddings()
         self.unknown_threshold = unknown_threshold
 
+        if one_hot and combination_method == "average":
+            raise ValueError("Combination method 'average' is not supported with one-hot encoding.")
+
     def embed(self, adata: anndata.AnnData) -> np.ndarray:
         """
         Generates or updates embeddings for the AnnData object and combines them.

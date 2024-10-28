@@ -24,10 +24,12 @@ classifiers = [
 dependencies = [
   "anndata",
   "ipykernel",
+  "matplotlib",
   "numpy",
   "openai",
   "python-json-logger",
   "scikit-learn",
+  "seaborn",
   "session-info",
   "torch",
 ]

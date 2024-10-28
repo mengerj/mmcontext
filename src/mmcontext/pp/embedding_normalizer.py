@@ -92,17 +92,26 @@ class ZScoreNormalizer(EmbeddingNormalizer):
 
         # Normalize data embeddings (d_emb)
         d_emb = adata.obsm["d_emb"]
-        self.means_d = np.mean(d_emb, axis=0)
-        self.stds_d = np.std(d_emb, axis=0)
-        d_emb_norm = (d_emb - self.means_d) / self.stds_d
-        adata.obsm["d_emb_norm"] = d_emb_norm
+
+        if set(np.unique(adata.obsm["d_emb"])) == {0, 1}:
+            self.logger.info("Data embeddings are already binary.")
+            adata.obsm["d_emb_norm"] = d_emb
+        else:
+            self.means_d = np.mean(d_emb, axis=0)
+            self.stds_d = np.std(d_emb, axis=0)
+            d_emb_norm = (d_emb - self.means_d) / self.stds_d
+            adata.obsm["d_emb_norm"] = d_emb_norm
 
         # Normalize context embeddings (c_emb)
         c_emb = adata.obsm["c_emb"]
-        self.means_c = np.mean(c_emb, axis=0)
-        self.stds_c = np.std(c_emb, axis=0)
-        c_emb_norm = (c_emb - self.means_c) / self.stds_c
-        adata.obsm["c_emb_norm"] = c_emb_norm
+        if set(np.unique(adata.obsm["c_emb"])) == {0, 1}:
+            self.logger.info("Context embeddings are already binary.")
+            adata.obsm["c_emb_norm"] = c_emb
+        else:
+            self.means_c = np.mean(c_emb, axis=0)
+            self.stds_c = np.std(c_emb, axis=0)
+            c_emb_norm = (c_emb - self.means_c) / self.stds_c
+            adata.obsm["c_emb_norm"] = c_emb_norm
 
 
 class MinMaxNormalizer(EmbeddingNormalizer):
@@ -141,14 +150,22 @@ class MinMaxNormalizer(EmbeddingNormalizer):
 
         # Normalize data embeddings (d_emb)
         d_emb = adata.obsm["d_emb"]
-        self.mins_d = np.min(d_emb, axis=0)
-        self.maxs_d = np.max(d_emb, axis=0)
-        d_emb_norm = (d_emb - self.mins_d) / (self.maxs_d - self.mins_d)
-        adata.obsm["d_emb_norm"] = d_emb_norm
+        if set(np.unique(adata.obsm["d_emb"])) == {0, 1}:
+            self.logger.info("Data embeddings are already binary.")
+            adata.obsm["d_emb_norm"] = d_emb
+        else:
+            self.mins_d = np.min(d_emb, axis=0)
+            self.maxs_d = np.max(d_emb, axis=0)
+            d_emb_norm = (d_emb - self.mins_d) / (self.maxs_d - self.mins_d)
+            adata.obsm["d_emb_norm"] = d_emb_norm
 
         # Normalize context embeddings (c_emb)
         c_emb = adata.obsm["c_emb"]
-        self.mins_c = np.min(c_emb, axis=0)
-        self.maxs_c = np.max(c_emb, axis=0)
-        c_emb_norm = (c_emb - self.mins_c) / (self.maxs_c - self.mins_c)
-        adata.obsm["c_emb_norm"] = c_emb_norm
+        if set(np.unique(adata.obsm["c_emb"])) == {0, 1}:
+            self.logger.info("Context embeddings are already binary.")
+            adata.obsm["c_emb_norm"] = c_emb
+        else:
+            self.mins_c = np.min(c_emb, axis=0)
+            self.maxs_c = np.max(c_emb, axis=0)
+            c_emb_norm = (c_emb - self.mins_c) / (self.maxs_c - self.mins_c)
+            adata.obsm["c_emb_norm"] = c_emb_norm
