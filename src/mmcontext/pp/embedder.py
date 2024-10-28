@@ -1,60 +1,76 @@
 # pp/embedder.py
 import logging
 
+import anndata
 import numpy as np
+
+from mmcontext.pp import ContextEmbedder, DataEmbedder
 
 
 class Embedder:
     """
     A class that handles both data and context embeddings for AnnData objects.
 
-    Args:
-        data_embedder (DataEmbedder, optional): An instance of a data embedder class. Defaults to None.
-        context_embedder (ContextEmbedder, optional): An instance of a context embedder class. Defaults to None.
+    This class can take data and context embedders as input to create embeddings.
+    Instead of providing emvedders, external embeddings can be provided to the create embeddings method.
+
+    Parameters
+    ----------
+    data_embedder
+        An instance of a data embedder class. Defaults to None.
+    context_embedder
+        An instance of a context embedder class. Defaults to None.
     """
 
-    def __init__(self, data_embedder=None, context_embedder=None):
-        """
-        Initializes the Embedder with optional data and context embedders.
-
-        Args:
-            data_embedder (DataEmbedder, optional): An instance of a data embedder class. Defaults to None.
-            context_embedder (ContextEmbedder, optional): An instance of a context embedder class. Defaults to None.
-        """
+    def __init__(self, data_embedder: DataEmbedder | None = None, context_embedder: ContextEmbedder | None = None):
+        """Initializes the Embedder with optional data and context embedders."""
         self.data_embedder = data_embedder
         self.context_embedder = context_embedder
         self.logger = logging.getLogger(__name__)
 
-    def check_embeddings(self, adata):
+    def check_embeddings(self, adata: anndata.AnnData) -> tuple[bool, bool]:
         """
         Checks if data and context embeddings are present in the AnnData object.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object to check for embeddings.
+        Parameters
+        ----------
+        adata
+            The AnnData object to check for embeddings.
 
         Returns
         -------
-            tuple: A tuple of two boolean values indicating if data embeddings ('d_emb')
-                   and context embeddings ('c_emb') are present in `adata.obsm`.
+        tuple
+            A tuple of two boolean values indicating if data embeddings ('d_emb')
+            and context embeddings ('c_emb') are present in `adata.obsm`.
         """
         has_data_emb = "d_emb" in adata.obsm
         has_context_emb = "c_emb" in adata.obsm
         return has_data_emb, has_context_emb
 
-    def create_embeddings(self, adata, data_embeddings=None, context_embeddings=None):
+    def create_embeddings(
+        self,
+        adata: anndata.AnnData,
+        data_embeddings: np.ndarray | None = None,
+        context_embeddings: np.ndarray | None = None,
+    ):
         """
         Creates or stores embeddings and adds them to adata.obsm.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object containing the dataset.
-            data_embeddings (numpy.ndarray, optional): External data embeddings to store.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the dataset.
+        data_embeddings
+            External data embeddings to store.
             Shape should be (n_samples, data_embedding_dim).
-            context_embeddings (numpy.ndarray, optional): External context embeddings to store.
+        context_embeddings
+            External context embeddings to store.
             Shape should be (n_samples, context_embedding_dim).
 
         Raises
         ------
-        ValueError: If embeddings are missing and no embedder is provided to create them.
+        ValueError
+            If embeddings are missing and no embedder is provided to create them.
         """
         # Store external data embeddings if provided
         if data_embeddings is not None:
@@ -86,19 +102,25 @@ class Embedder:
                     self.logger.error("Context embeddings are missing, and no context embedder is provided.")
                     raise ValueError("Context embeddings are missing, and no context embedder is provided.")
 
-    def store_embeddings(self, adata, embeddings, key):
+    def store_embeddings(self, adata: anndata.AnnData, embeddings: np.ndarray, key: str):
         """
         Stores embeddings in adata.obsm with the given key, after validating the shape.
 
-        Args:
-            adata (AnnData): The AnnData object.
-            embeddings (np.ndarray): Embeddings to store.
-            key (str): Key under which to store the embeddings in adata.obsm.
+        Parameters
+        ----------
+        adata
+            The AnnData object into which to store the embeddings.
+        embeddings
+            Embeddings to store.
+        key
+            Key under which to store the embeddings in adata.obsm.
 
         Raises
         ------
-            TypeError: If the embeddings are not a numpy.ndarray.
-            ValueError: If the number of samples in embeddings does not match adata.n_obs.
+        TypeError
+            If the embeddings are not a numpy.ndarray.
+        ValueError
+            If the number of samples in embeddings does not match adata.n_obs.
         """
         # Check if embeddings are a NumPy array
         if not isinstance(embeddings, np.ndarray):

@@ -20,22 +20,26 @@ class BaseModel(nn.Module, metaclass=abc.ABCMeta):
         """Forward pass to be implemented by subclasses."""
         pass
 
-    def save(self, file_path):
+    def save(self, file_path: str):
         """
         Saves model state dictionary to the specified file path.
 
-        Args:
-            file_path (str): Path to save the model state dictionary.
+        Parameters
+        ----------
+        file_path
+            Path to save the model state dictionary.
         """
         self.logger.info(f"Saving model state dictionary to {file_path}")
         torch.save(self.state_dict(), file_path)
 
-    def load(self, file_path):
+    def load(self, file_path: str):
         """
         Loads model state dictionary from the specified file path.
 
-        Args:
-            file_path (str): Path to load the model state dictionary from.
+        Parameters
+        ----------
+        file_path
+            Path to load the model state dictionary from.
         """
         self.logger.info(f"Loading model state dictionary from {file_path}")
         self.load_state_dict(torch.load(file_path, weights_only=True))
@@ -46,14 +50,14 @@ class MMContextEncoder(BaseModel):
 
     def __init__(
         self,
-        embedding_dim,
-        hidden_dim=64,
-        num_layers=2,
-        num_heads=4,
-        use_self_attention=False,
-        use_cross_attention=False,
-        activation="relu",
-        dropout=0.1,
+        embedding_dim: int,
+        hidden_dim: int = 64,
+        num_layers: int = 2,
+        num_heads: int = 4,
+        use_self_attention: bool = False,
+        use_cross_attention: bool = False,
+        activation: str = "relu",
+        dropout: float = 0.1,
     ):
         super().__init__()
 
@@ -78,38 +82,45 @@ class MMContextEncoder(BaseModel):
             f"MMContextEncoder initialized with embedding_dim = {embedding_dim}, num_layers = {num_layers}, use_self_attention = {use_self_attention}, use_cross_attention = {use_cross_attention}."
         )
 
-    def forward(self, in_main, in_main_key_padding_mask=None, in_cross=None, in_cross_key_padding_mask=None):
+    def forward(
+        self,
+        in_main: torch.Tensor,
+        in_main_key_padding_mask: torch.ByteTensor | torch.BoolTensor | None = None,
+        in_cross: torch.Tensor | None = None,
+        in_cross_key_padding_mask: torch.ByteTensor | torch.BoolTensor | None = None,
+    ) -> torch.Tensor:
         """
         Forward pass for the MMContextEncoder.
 
         Parameters
         ----------
-            in_main (Tensor):
-                Source tensor (data embeddings) of shape (batch_size, seq_length, embedding_dim).
-            in_main_key_padding_mask (Tensor, optional):
-                Mask for the source keys per batch.
-                If provided, should be a ByteTensor or BoolTensor of shape (batch_size, seq_length) where True values indicate padding positions.
-                Default is None.
-            in_cross (Tensor, optional):
-                Input tensor for cross-attention of shape (batch_size, seq_length, embedding_dim).
-                Required when `use_cross_attention` is True. Default is None.
-            in_cross_key_padding_mask (Tensor, optional):
-                Mask for the in_cross keys per batch. If provided, should be a
-                ByteTensor or BoolTensor of shape (batch_size, seq_length). Default is None.
+        in_main
+            Source tensor of shape (batch_size, seq_length, embedding_dim). These inputs will be passed through the MLP and self-attention layers.
+        in_main_key_padding_mask
+            Mask for the source keys per batch.
+            If provided, should be a ByteTensor or BoolTensor of shape (batch_size, seq_length) where True values indicate padding positions.
+        in_cross
+            Input tensor for cross-attention of shape (batch_size, seq_length, embedding_dim).
+            Required when `use_cross_attention` is True.
+        in_cross_key_padding_mask
+            Mask for the in_cross keys per batch. If provided, should be a
+            ByteTensor or BoolTensor of shape (batch_size, seq_length).
 
         Returns
         -------
-            Tensor: Output tensor of shape (batch_size, seq_length, embedding_dim).
+        Output tensor of shape (batch_size, seq_length, embedding_dim).
 
         Raises
         ------
-            ValueError: If `use_cross_attention` is True and `in_cross` is None.
+        ValueError
+            If `use_cross_attention` is True and `in_cross` is None.
 
-        Note:
-            We implement a custom `forward` method to pass the `in_cross` embeddings to each encoder layer during the forward pass.
-            This is necessary because the default `nn.TransformerEncoder` does not support passing additional arguments
-            like `in_cross` to its layers. By overriding the `forward` method, we ensure that `in_cross` embeddings are
-            provided to each layer when cross-attention is used, enabling the model to perform cross-attention operations.
+        Note
+        ----------
+        We implement a custom `forward` method to pass the `in_cross` embeddings to each encoder layer during the forward pass.
+        This is necessary because the default `nn.TransformerEncoder` does not support passing additional arguments
+        like `in_cross` to its layers. By overriding the `forward` method, we ensure that `in_cross` embeddings are
+        provided to each layer when cross-attention is used, enabling the model to perform cross-attention operations.
         """
         if self.use_cross_attention and in_cross is None:
             self.logger.error("in_cross embeddings are required when using cross-attention.")
@@ -147,25 +158,33 @@ class CustomTransformerEncoderLayer(nn.Module):
 
     def __init__(
         self,
-        embedding_dim,
-        hidden_dim,
-        num_heads=4,
-        use_self_attention=False,
-        use_cross_attention=False,
-        activation="relu",
-        dropout=0.1,
+        embedding_dim: int,
+        hidden_dim: int,
+        num_heads: int,
+        use_self_attention: bool = False,
+        use_cross_attention: bool = False,
+        activation: str = "relu",
+        dropout: float = 0.1,
     ):
         """
         Initializes the CustomTransformerEncoderLayer.
 
-        Args:
-            embedding_dim (int): Input and output embedding dimension.
-            hidden_dim (int): Dimension of the feedforward network (MLP).
-            num_heads (int): Number of attention heads (used if attention is enabled).
-            use_self_attention (bool): Whether to include self-attention.
-            use_cross_attention (bool): Whether to include cross-attention.
-            activation (str or callable): Activation function for the feedforward network.
-            dropout (float): Dropout probability.
+        Parameters
+        ----------
+        embedding_dim
+            Input and output embedding dimension.
+        hidden_dim
+            Dimension of the feedforward network (MLP).
+        num_heads
+            Number of attention heads (used if attention is enabled).
+        use_self_attention
+            Whether to include self-attention.
+        use_cross_attention
+            Whether to include cross-attention.
+        activation
+            Activation function for the feedforward network. Can be "relu" or a callable.
+        dropout
+            Dropout probability.
         """
         super().__init__()
 
@@ -205,19 +224,30 @@ class CustomTransformerEncoderLayer(nn.Module):
         # Dropout
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, in_main, in_main_key_padding_mask=None, in_cross=None, in_cross_key_padding_mask=None):
+    def forward(
+        self,
+        in_main: torch.Tensor,
+        in_main_key_padding_mask: torch.ByteTensor | torch.BoolTensor | None = None,
+        in_cross: torch.Tensor | None = None,
+        in_cross_key_padding_mask: torch.ByteTensor | torch.BoolTensor | None = None,
+    ) -> torch.Tensor:
         """
-        Forward pass for the encoder layer.
+        Forward pass for the encoder layer. Will be called by the MMContextEncoder and passed through several times, depending on the number of layers set there.
 
-        Args:
-            in_main (Tensor): Input tensor of shape (batch_size, seq_length, embedding_dim).
-            in_main_key_padding_mask (Tensor, optional): Mask for in_main keys per batch (optional).
-            in_cross (Tensor, optional): Input tensor for cross-attention (batch_size, seq_length, embedding_dim).
-            in_cross_key_padding_mask (Tensor, optional): Mask for in_cross keys per batch (optional).
+        Parameters
+        ----------
+        in_main
+            Input tensor of shape (batch_size, seq_length, embedding_dim).
+        in_main_key_padding_mask
+            Mask for in_main keys per batch
+        in_cross
+            Input tensor for cross-attention (batch_size, seq_length, embedding_dim).
+        in_cross_key_padding_mask
+            Mask for in_cross keys per batch
 
         Returns
         -------
-            Tensor: Output tensor of shape (batch_size, seq_length, embedding_dim).
+        Output tensor of shape (batch_size, seq_length, embedding_dim).
         """
         x = in_main
 

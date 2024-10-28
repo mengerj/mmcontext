@@ -13,7 +13,7 @@ from mmcontext.utils import create_test_emb_anndata
 
 
 def create_test_dataloader(
-    batch_size=4, seq_length=10, emb_dim=64, data_emb_key="data_embedding", context_emb_key="context_embedding"
+    batch_size=4, seq_length=10, emb_dim=64, data_key="data_embedding", context_key="context_embedding"
 ):
     """
     Creates a dummy DataLoader using random embeddings for testing.
@@ -29,13 +29,11 @@ def create_test_dataloader(
     adata1 = create_test_emb_anndata(n_samples=100, emb_dim=emb_dim)
     adata2 = create_test_emb_anndata(n_samples=20, emb_dim=emb_dim, sample_ids=np.arange(100, 120))
 
-    dataset_constructor = DataSetConstructor()
+    dataset_constructor = DataSetConstructor(out_data_key=data_key, out_context_key=context_key)
     dataset_constructor.add_anndata(adata1)
     dataset_constructor.add_anndata(adata2)
 
-    dataset = dataset_constructor.construct_dataset(
-        seq_length=seq_length, data_emb_key=data_emb_key, context_emb_key=context_emb_key
-    )
+    dataset = dataset_constructor.construct_dataset(seq_length=seq_length)
 
     # Create DataLoader
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
@@ -83,17 +81,17 @@ def test_trainer_successful_training():
     # Initialize optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # display one batch of the data loader
-    data_emb_key = "data_embedding"
-    context_emb_key = "context_embedding"
+    data_key = "data_embedding"
+    context_key = "context_embedding"
     # Initialize Trainer with all required embeddings
     trainer = Trainer(
         model=model,
         loss_manager=loss_manager,
         optimizer=optimizer,
         device=torch.device("cpu"),
-        input_embeddings={"main": data_emb_key, "cross": context_emb_key},
-        data_emb_key=data_emb_key,
-        context_emb_key=context_emb_key,
+        input_embeddings={"main": data_key, "cross": context_key},
+        data_key=data_key,
+        context_key=context_key,
     )
 
     # Perform one training epoch
@@ -261,19 +259,19 @@ def test_trainer_custom_dict_keys():
     logger = logging.getLogger(__name__)
     logger.info("TEST: test_trainer_default_values")
     emb_dim = 64
-    data_loader = create_test_dataloader(emb_dim=emb_dim, data_emb_key="data_emb", context_emb_key="context_emb")
+    data_loader = create_test_dataloader(emb_dim=emb_dim, data_key="data_emb", context_key="context_emb")
 
     # Model and loss setup
     model = MMContextEncoder(embedding_dim=emb_dim)
-    loss_manager = LossManager()
-    loss_manager.add_loss(ContrastiveLoss(data_emb_key="data_emb", context_emb_key="context_emb"))
+    loss_manager = LossManager(data_key="data_emb", context_key="context_emb")
+    loss_manager.add_loss(ContrastiveLoss())
     # Initialize Trainer with default settings
     trainer = Trainer(
         model=model,
         loss_manager=loss_manager,
         optimizer=torch.optim.Adam(model.parameters()),
-        data_emb_key="data_emb",
-        context_emb_key="context_emb",
+        data_key="data_emb",
+        context_key="context_emb",
     )
 
     train_loss = trainer.train_epoch(data_loader)
