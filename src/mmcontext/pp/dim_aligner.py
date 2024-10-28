@@ -15,18 +15,30 @@ class DimAligner(ABC):
     This class defines the interface for dimension alignment, including methods for
     reducing and extending embeddings to achieve a consistent target dimension.
 
-    Args:
-        latent_dim (int): Target dimension for alignment (default: 64).
+    Parameters
+    ----------
+    latent_dim
+        Target dimension for alignment (default: 64).
     """
 
-    def __init__(self, logger=None, latent_dim: int = 64, context_key="c_emb_norm", data_key="d_emb_norm"):
+    def __init__(
+        self,
+        logger: logging.Logger | None = None,
+        latent_dim: int = 64,
+        context_key: str = "c_emb_norm",
+        data_key: str = "d_emb_norm",
+    ):
         """
         Initializes the DimAligner with the target latent dimension.
 
-        Args:
-            latent_dim (int): The target dimension to align embeddings to.
-            context_key (str): The key for context embeddings in adata.obsm. Defaults are normalized embeddings
-            data_key (str): The key for data embeddings in adata.obsm. Defaults are normalized embeddings
+        Parameters
+        ----------
+        latent_dim
+            The target dimension to align embeddings to.
+        context_key
+            The key for context embeddings in adata.obsm. Defaults are normalized embeddings
+        data_key
+            The key for data embeddings in adata.obsm. Defaults are normalized embeddings
         """
         self.latent_dim = latent_dim
         self.context_key = context_key
@@ -43,12 +55,15 @@ class DimAligner(ABC):
         If an embedding's dimension is larger than the target dimension, it is reduced.
         If it is smaller, it is extended (padded).
 
-        Args:
-            adata (AnnData): The AnnData object containing embeddings in 'd_emb' and 'c_emb'.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing embeddings in 'd_emb' and 'c_emb'.
 
         Raises
         ------
-            ValueError: If embeddings are missing from adata.obsm.
+        ValueError
+            If embeddings are missing from adata.obsm.
         """
         if self.data_key not in adata.obsm or self.context_key not in adata.obsm:
             raise ValueError(f"Embeddings {self.data_key} and {self.context_key} must be present in adata.obsm.")
@@ -81,12 +96,14 @@ class DimAligner(ABC):
         """
         Reduces the dimensions of the embeddings to the target dimension.
 
-        Args:
-            embeddings (np.ndarray): The embeddings to reduce.
+        Parameters
+        ----------
+        embeddings
+            The embeddings to reduce.
 
         Returns
         -------
-            np.ndarray: The dimensionally reduced embeddings.
+        The dimensionally reduced embeddings.
         """
         pass
 
@@ -94,12 +111,14 @@ class DimAligner(ABC):
         """
         Extends the dimensions of the embeddings to the target dimension by zero-padding.
 
-        Args:
-            embeddings (np.ndarray): The embeddings to extend.
+        Parameters
+        ----------
+        embeddings
+            The embeddings to extend.
 
         Returns
         -------
-            np.ndarray: The dimensionally extended embeddings.
+        The dimensionally extended embeddings.
         """
         current_dim = embeddings.shape[1]
         if current_dim >= self.latent_dim:
@@ -116,23 +135,38 @@ class PCAReducer(DimAligner):
 
     This class reduces the dimensions of embeddings to the target latent dimension using PCA.
 
-    Args:
-        latent_dim (int): Target dimension for alignment (default: 64).
-        context_key (str): Key for context embeddings in adata.obsm.
-        data_key (str): Key for data embeddings in adata.obsm.
-        max_samples (int): Maximum number of samples to use for fitting PCA (default: 10000).
-        random_state (int): Random seed for reproducibility (default: None).
+    Parameters
+    ----------
+    latent_dim
+        Target dimension for alignment.
+    context_key
+        Key for context embeddings in adata.obsm.
+    data_key
+        Key for data embeddings in adata.obsm.
+    max_samples
+        Maximum number of samples to use for fitting PCA.
+    random_state
+        Random seed for reproducibility.
     """
 
-    def __init__(self, logger=None, *args, max_samples: int = 10000, random_state: int = None, **kwargs):
+    def __init__(
+        self, logger: logging.Logger | None = None, *args, max_samples: int = 10000, random_state: int = None, **kwargs
+    ):
         """
         Initializes the PCAReducer with the target latent dimension and parameters.
 
-        Args:
-            max_samples (int): Maximum number of samples to use for fitting PCA.
-            random_state (int): Random seed for reproducibility.
-            *args: Positional arguments for the base class.
-            **kwargs: Keyword arguments for the base class (e.g., latent_dim, context_key, data_key).
+        Parameters
+        ----------
+        max_samples
+            Maximum number of samples to use for fitting PCA.
+        random_state
+            Random seed for reproducibility.
+        logger
+            An optional logger object to use for logging.
+        *args
+            Positional arguments for the base class.
+        **kwargs
+            Keyword arguments for the base class (e.g., latent_dim, context_key, data_key).
         """
         super().__init__(logger, *args, **kwargs)
         self.max_samples = max_samples
@@ -144,12 +178,14 @@ class PCAReducer(DimAligner):
 
         Fits the PCA model on a subset of the data if necessary and transforms the embeddings.
 
-        Args:
-            embeddings (np.ndarray): The embeddings to reduce.
+        Parameters
+        ----------
+        embeddings
+            The embeddings to reduce.
 
         Returns
         -------
-            np.ndarray: The dimensionally reduced embeddings.
+        The dimensionally reduced embeddings.
         """
         n_samples = embeddings.shape[0]
         if n_samples > self.max_samples:

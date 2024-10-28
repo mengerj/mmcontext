@@ -9,7 +9,40 @@ from mmcontext.engine.losses import ContrastiveLoss, LossManager
 
 
 class Trainer:
-    """Trainer class to handle the training and evaluation of models."""
+    """
+    Trainer class to handle the training and evaluation of models.
+
+    Parameters
+    ----------
+    model
+        The neural network model to train.
+    loss_manager
+        Manages multiple loss functions. Not needed for inference.
+    optimizer
+        Optimizer for updating model parameters.
+    device
+        Device to run the model on 'cuda' or 'cpu'. Defaults to CUDA if available.
+    logger
+        Logger for tracking training progress. If None, a default logger is created.
+    input_embeddings
+        Dict of embeddings to pass to the model.
+        Should be have keys 'main' and 'cross'. Values should correspond to names of embeddings in the batch.
+        Defaults to `{'main': 'data_embedding', 'cross': 'context_embedding'}`. Only the embeddings from main are modified.
+        The embeddings corresponding cross are used for cross-attention if the model was configured with use_cross_attention = True.
+    data_key
+        Key for data embeddings in the batch. Defaults to 'data_embedding'.
+    context_key
+        Key for context embeddings in the batch. Defaults to 'context_embedding'.
+
+    Raises
+    ------
+    ValueError
+        If context_embedding is not the main input_embeddings for context_context contrastive loss.
+    ValueError
+        If data_embedding is not the main input_embeddings for data_data contrastive loss.
+    ValueError
+        If in_cross embeddings are not provided when using current_mode = data_context contrastive loss.
+    """
 
     def __init__(
         self,
@@ -19,41 +52,16 @@ class Trainer:
         device: torch.device | None = None,
         logger: logging.Logger | None = None,
         input_embeddings: dict | None = None,
-        data_emb_key: str = "data_embedding",
-        context_emb_key: str = "context_embedding",
+        data_key: str = "data_embedding",
+        context_key: str = "context_embedding",
         sample_id_key: str = "sample_id",
     ):
-        """
-        Initializes the Trainer.
-
-        Parameters
-        ----------
-        model
-            The neural network model to train.
-        loss_manager
-            Manages multiple loss functions. Not needed for inference.
-        optimizer
-            Optimizer for updating model parameters.
-        device
-            Device to run the model on 'cuda' or 'cpu'. Defaults to CUDA if available.
-        logger
-            Logger for tracking training progress. If None, a default logger is created.
-        input_embeddings
-            Dict of embeddings to pass to the model.
-            Should be have keys 'main' and 'cross'. Values should correspond to names of embeddings in the batch.
-            Defaults to `{'main': 'data_embedding', 'cross': 'context_embedding'}`. Only the embeddings from main are modified.
-            The embeddings corresponding cross are used for cross-attention if the model was configured with use_cross_attention = True.
-        data_emb_key
-            Key for data embeddings in the batch. Defaults to 'data_embedding'.
-        context_emb_key
-            Key for context embeddings in the batch. Defaults to 'context_embedding'.
-        """
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.loss_manager = loss_manager
         self.optimizer = optimizer
-        self.data_emb_key = data_emb_key
-        self.context_emb_key = context_emb_key
+        self.data_key = data_key
+        self.context_key = context_key
         self.sample_id_key = sample_id_key
         self.logger = logger or logging.getLogger(__name__)
 
@@ -62,7 +70,7 @@ class Trainer:
             self.logger.info(
                 "input_embeddings not provided. Using default values. Data embedding is main and context embedding is cross."
             )
-            self.input_embeddings = {"main": data_emb_key, "cross": context_emb_key}
+            self.input_embeddings = {"main": data_key, "cross": context_key}
         else:
             self.input_embeddings = {"main": None, "cross": None}
             # add the provided input embeddings to the existing dict to ensure the key for both emb is always present, but the values can be None
@@ -76,7 +84,7 @@ class Trainer:
             if isinstance(loss_fn, ContrastiveLoss):
                 if loss_fn.current_mode == "context_context":
                     # if 'context_embedding' are not main argument in input embeddings, raise an error
-                    if self.input_embeddings["main"] != self.context_emb_key:
+                    if self.input_embeddings["main"] != self.context_key:
                         self.logger.error(
                             "context_embedding should be the main input_embeddings for context_context (current_mode) contrastive loss."
                         )
@@ -85,12 +93,12 @@ class Trainer:
                         )
                 if loss_fn.current_mode == "data_data":
                     # if 'data_embedding' are not in first position of input embeddings, raise an error
-                    if self.input_embeddings["main"] != self.data_emb_key:
+                    if self.input_embeddings["main"] != self.data_key:
                         self.logger.error(
                             "data_embedding should be the main input_embeddings for data_data (current_mode) contrastive loss."
                         )
                         raise ValueError(
-                            "data_embedding should be the first element of input_embeddings for data_data (current_mode) contrastive loss."
+                            "data_embedding should be the main input_embeddings for data_data (current_mode) contrastive loss."
                         )
                 if loss_fn.current_mode == "data_context":
                     # make sure that both main and cross embeddings are provided and not None
@@ -114,6 +122,11 @@ class Trainer:
         Returns
         -------
             Average training loss for the epoch. (dtype `float`)
+
+        Raises
+        ------
+        ValueError
+            If Loss Manager does not contain any loss functions
         """
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
@@ -142,7 +155,7 @@ class Trainer:
             )
 
             # Prepare targets
-            targets = {self.data_emb_key: batch[self.data_emb_key], self.context_emb_key: batch[self.context_emb_key]}
+            targets = {self.data_key: batch[self.data_key], self.context_key: batch[self.context_key]}
 
             # Compute loss
             loss = self.loss_manager.compute_total_loss(outputs=outputs, targets=targets)
@@ -171,7 +184,7 @@ class Trainer:
 
         Returns
         -------
-            Average validation loss. (dtype `float`)
+        Average validation loss.
         """
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
@@ -202,8 +215,8 @@ class Trainer:
 
                 # Prepare targets
                 targets = {
-                    self.data_emb_key: batch[self.data_emb_key],
-                    self.context_emb_key: batch[self.context_emb_key],
+                    self.data_key: batch[self.data_key],
+                    self.context_key: batch[self.context_key],
                 }
 
                 # Compute loss
@@ -273,15 +286,17 @@ class Trainer:
         """
         Generates modified embeddings using the trained model.
 
-        Args:
-            data_loader: DataLoader for embeddings to be modified.
+        Parameters
+        ----------
+        data_loader
+            DataLoader for embeddings to be modified.
 
         Returns
         -------
-            modified_embeddings : Dict[str, torch.Tensor] Dictionary containing lists of embeddings. (dtype `dict`)
+        modified_embeddings : Dict[str, torch.Tensor] Dictionary containing lists of embeddings.
         """
         self.model.eval()
-        modified_embeddings = {self.data_emb_key: [], self.context_emb_key: [], self.sample_id_key: []}
+        modified_embeddings = {self.data_key: [], self.context_key: [], self.sample_id_key: []}
 
         with torch.no_grad():
             for batch in data_loader:
@@ -304,8 +319,8 @@ class Trainer:
                     in_cross  # Pass the original embeddings used for cross attention to allow for data_context contrastive loss
                 )
                 # Collect modified_embeddings
-                modified_embeddings[self.data_emb_key].append(outputs[self.data_emb_key].cpu())
-                modified_embeddings[self.context_emb_key].append(outputs[self.context_emb_key].cpu())
+                modified_embeddings[self.data_key].append(outputs[self.data_key].cpu())
+                modified_embeddings[self.context_key].append(outputs[self.context_key].cpu())
                 modified_embeddings[self.sample_id_key].append(sample_ids.cpu())
 
         # Concatenate all batches

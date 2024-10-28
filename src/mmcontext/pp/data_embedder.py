@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 
+import anndata
 import numpy as np
 from sklearn.decomposition import PCA
 
@@ -10,16 +11,18 @@ class DataEmbedder(ABC):
     """Abstract base class for generating data embeddings for AnnData objects."""
 
     @abstractmethod
-    def embed(self, adata):
+    def embed(self, adata: anndata.AnnData) -> np.ndarray:
         """
         Abstract method for generating embeddings for the given AnnData object.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object containing the data.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the data.
 
         Returns
         -------
-            np.ndarray: The embeddings generated from the data.
+        The embeddings generated from the data.
         """
         pass
 
@@ -28,30 +31,29 @@ class PCADataEmbedder(DataEmbedder):
     """
     Data embedder that uses Principal Component Analysis (PCA) to generate embeddings.
 
-    Args:
-        n_components (int): Number of principal components to retain in the embeddings.
+    Parameters
+    ----------
+    n_components
+        Number of principal components to retain in the embeddings.
     """
 
-    def __init__(self, n_components=128):
-        """
-        Initializes the PCADataEmbedder with the specified number of components.
-
-        Args:
-            n_components (int, optional): The number of PCA components to generate. Defaults to 128.
-        """
+    def __init__(self, n_components: int = 128):
+        """Initializes the PCADataEmbedder with the specified number of components."""
         self.n_components = n_components
         self.pca = None
 
-    def embed(self, adata):
+    def embed(self, adata: anndata.AnnData) -> np.ndarray:
         """
         Generates PCA embeddings for the given AnnData object.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object containing the data to be transformed.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the data to be transformed.
 
         Returns
         -------
-            np.ndarray: PCA-transformed embeddings.
+        PCA-transformed embeddings.
         """
         # Assuming adata.X contains the raw data matrix
         self.pca = PCA(n_components=self.n_components)
@@ -62,16 +64,18 @@ class PCADataEmbedder(DataEmbedder):
 class PlaceholderDataEmbedder(DataEmbedder):
     """Generates random embeddings as a placeholder for real data embeddings."""
 
-    def embed(self, adata):
+    def embed(self, adata: anndata.AnnData) -> np.ndarray:
         """
         Generates random embeddings for the given AnnData object.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object to generate embeddings for.
+        Parameters
+        ----------
+        adata
+            The AnnData object to generate embeddings for.
 
         Returns
         -------
-            np.ndarray: Randomly generated embeddings.
+        Randomly generated embeddings.
         """
         n_samples = adata.n_obs
         embedding_dim = 64  # Example embedding dimension

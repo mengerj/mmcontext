@@ -14,21 +14,40 @@ class DataSetConstructor:
 
     Allows combining multiple AnnData objects into a single dataset suitable for use with PyTorch DataLoaders.
     Ensures sample ID consistency and that data and context embeddings have the same dimensions.
+
+    If non default 'out_keys' are used, make sure to also pass them to the loss function and the trainer.
+
+    Parameters
+    ----------
+    in_data_key
+        Key for data embeddings in the AnnData object.
+    in_context_key
+        Key for context embeddings in the AnnData object.
+    in_sample_id_key
+        Key for sample IDs in the AnnData object.
+    out_data_key
+        Key to be used for data embeddings in the Dataset.
+    out_context_key
+        Key to be used for context embeddings in the Dataset.
+    out_sample_id_key
+        Key to be used for sample IDs in the Dataset.
     """
 
     def __init__(
-        self, data_key: str = "d_emb_aligned", context_key: str = "c_emb_aligned", sample_id_key: str = "sample_id"
+        self,
+        in_data_key: str = "d_emb_aligned",
+        in_context_key: str = "c_emb_aligned",
+        in_sample_id_key: str = "sample_id",
+        out_data_key: str = "data_embedding",
+        out_context_key: str = "context_embedding",
+        out_sample_id_key: str = "sample_id",
     ):
-        """
-        Initializes an empty dataset and sets the keys for data and context embeddings.
-
-        Args:
-            data_key (str): Key for data embeddings in `adata.obsm`. Default is `'d_emb_aligned'`.
-            context_key (str): Key for context embeddings in `adata.obsm`. Default is `'c_emb_aligned'`.
-        """
-        self.data_key = data_key
-        self.context_key = context_key
-        self.sample_id_key = sample_id_key
+        self.in_data_key = in_data_key
+        self.in_context_key = in_context_key
+        self.in_sample_id_key = in_sample_id_key
+        self.out_data_key = out_data_key
+        self.out_context_key = out_context_key
+        self.out_sample_id_key = out_sample_id_key
         self.data_embeddings: list[np.ndarray] = []
         self.context_embeddings: list[np.ndarray] = []
         self.sample_ids: list[str] = []
@@ -37,22 +56,25 @@ class DataSetConstructor:
         """
         Adds data from an AnnData object into the dataset.
 
-        Args:
-            adata (AnnData): The AnnData object containing data and context embeddings.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing data and context embeddings.
 
         Raises
         ------
-            ValueError: If embeddings are missing, dimensions do not match, or sample IDs are inconsistent.
+        ValueError
+            If embeddings are missing, dimensions do not match, or sample IDs are inconsistent.
         """
         # Check that the embeddings exist
-        if self.data_key not in adata.obsm:
-            raise ValueError(f"Data embeddings '{self.data_key}' not found in adata.obsm.")
-        if self.context_key not in adata.obsm:
-            raise ValueError(f"Context embeddings '{self.context_key}' not found in adata.obsm.")
+        if self.in_data_key not in adata.obsm:
+            raise ValueError(f"Data embeddings '{self.in_data_key}' not found in adata.obsm.")
+        if self.in_context_key not in adata.obsm:
+            raise ValueError(f"Context embeddings '{self.in_context_key}' not found in adata.obsm.")
 
         # Retrieve embeddings
-        d_emb = adata.obsm[self.data_key]
-        c_emb = adata.obsm[self.context_key]
+        d_emb = adata.obsm[self.in_data_key]
+        c_emb = adata.obsm[self.in_context_key]
 
         # Check that the embeddings have the same number of samples
         if d_emb.shape[0] != c_emb.shape[0]:
@@ -71,12 +93,12 @@ class DataSetConstructor:
                 )
 
         # Verify sample IDs are integers
-        sample_ids = adata.obs[self.sample_id_key].tolist()
+        sample_ids = adata.obs[self.in_sample_id_key].tolist()
         try:
-            pd.to_numeric(adata.obs[self.sample_id_key], downcast="integer")  # Convert to integer
+            pd.to_numeric(adata.obs[self.in_sample_id_key], downcast="integer")  # Convert to integer
         except ValueError as err:
             raise ValueError(
-                f"Sample IDs must be integers. Non-integer values found in '{self.sample_id_key}' column."
+                f"Sample IDs must be integers. Non-integer values found in '{self.in_sample_id_key}' column."
             ) from err
 
         # Verify sample IDs consistency
@@ -91,29 +113,23 @@ class DataSetConstructor:
         self.context_embeddings.append(c_emb)
         self.sample_ids.extend(sample_ids)
 
-    def construct_dataset(
-        self,
-        seq_length: int = None,
-        data_emb_key="data_embedding",
-        context_emb_key="context_embedding",
-        sample_id_key="sample_id",
-    ) -> Dataset:
+    def construct_dataset(self, seq_length: int = None) -> Dataset:
         """
         Constructs and returns a PyTorch Dataset combining all added embeddings.
 
-        Args:
-            seq_length (int, optional): Length of sequences. If provided, data will be divided into sequences of this length.
-            data_emb_key (str): Key for data embeddings in the Dataset. Default is `'data_embedding'`.
-            context_emb_key (str): Key for context embeddings in the Dataset. Default is `'context_embedding'`.
-            sample_id_key (str): Key for sample IDs in the Dataset. Default is `'sample_id'`.
+        Parameters
+        ----------
+        seq_length
+            Length of sequences. If provided, data will be divided into sequences of this length.
 
         Returns
         -------
-            Dataset: A PyTorch Dataset containing data embeddings, context embeddings, and sample IDs.
+        A PyTorch Dataset containing data embeddings, context embeddings, and sample IDs.
 
         Raises
         ------
-            ValueError: If no data has been added.
+        ValueError
+            If no data has been added.
         """
         if not self.data_embeddings or not self.context_embeddings:
             raise ValueError("No data has been added to the dataset.")
@@ -135,10 +151,10 @@ class DataSetConstructor:
                 data_embeddings_seq,
                 context_embeddings_seq,
                 sample_ids_seq,
+                out_data_key=self.out_data_key,
+                out_context_key=self.out_context_key,
+                out_sample_id_key=self.out_sample_id_key,
                 seq_length=seq_length,
-                data_emb_key=data_emb_key,
-                context_emb_key=context_emb_key,
-                sample_id_key=sample_id_key,
             )
         else:
             # Create and return a PyTorch Dataset with individual samples
@@ -146,36 +162,43 @@ class DataSetConstructor:
                 data_embeddings,
                 context_embeddings,
                 sample_ids,
+                out_data_key=self.out_data_key,
+                out_context_key=self.out_context_key,
+                out_sample_id_key=self.out_sample_id_key,
                 seq_length=None,
-                data_emb_key=data_emb_key,
-                context_emb_key=context_emb_key,
-                sample_id_key=sample_id_key,
             )
 
         return dataset
 
-    def initialize_dataset(self):
+    def reset_dataset(self):
         """Resets the dataset to be empty."""
         self.data_embeddings = []
         self.context_embeddings = []
         self.sample_ids = []
 
-    def create_sequences(self, data_embeddings, context_embeddings, sample_ids, seq_length=64):
+    def create_sequences(
+        self, data_embeddings: np.ndarray, context_embeddings: np.ndarray, sample_ids: np.ndarray, seq_length: int = 64
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Splits embeddings and sample IDs into sequences of a specified length.
 
-        Args:
-        data_embeddings (np.ndarray): Data embeddings of shape (num_samples, embedding_dim).
-        context_embeddings (np.ndarray): Context embeddings of shape (num_samples, embedding_dim).
-        sample_ids (np.ndarray): Sample IDs of shape (num_samples,).
-        seq_length (int): The desired sequence length.
+        Parameters
+        ----------
+        data_embeddings
+            Data embeddings of shape (num_samples, embedding_dim).
+        context_embeddings
+            Context embeddings of shape (num_samples, embedding_dim).
+        sample_ids
+            Sample IDs of shape (num_samples,).
+        seq_length
+            The desired sequence length. Each sequence can be used for attention mechanisms.
 
         Returns
         -------
-            Tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing:
-                - data_embeddings_seq: Data embeddings reshaped into sequences.
-                - context_embeddings_seq: Context embeddings reshaped into sequences.
-                - sample_ids_seq: Sample IDs reshaped into sequences.
+        Tuple containing:
+            data_embeddings_seq: Data embeddings reshaped into sequences.
+            context_embeddings_seq: Context embeddings reshaped into sequences.
+            sample_ids_seq: Sample IDs reshaped into sequences.
         """
         num_samples = data_embeddings.shape[0]
         num_sequences = num_samples // seq_length
@@ -197,32 +220,37 @@ class DataSetConstructor:
 
 
 class EmbeddingDataset(Dataset):
-    """A PyTorch Dataset class for embeddings, supporting both individual samples and sequences."""
+    """A PyTorch Dataset class for embeddings, supporting both individual samples and sequences.
+
+    The constructed DataSet object can be used with PyTorch DataLoaders for training and evaluation.
+    Data and context embeddings are returned as tensors, and sample IDs are returned as numpy arrays.
+
+    Parameters
+    ----------
+    data_embeddings
+        Data embeddings of shape (num_samples, embedding_dim) or (num_sequences, seq_length, embedding_dim).
+    context_embeddings
+        Context embeddings of shape matching data_embeddings.
+    sample_ids
+        Sample IDs corresponding to the embeddings.
+    seq_length
+        Length of sequences. If provided, data will be divided into sequences of this length.
+    """
 
     def __init__(
         self,
         data_embeddings: np.ndarray,
         context_embeddings: np.ndarray,
         sample_ids: np.ndarray,
+        out_data_key: str,
+        out_context_key: str,
+        out_sample_id_key: str,
         seq_length: int = None,
-        data_emb_key: str = "data_embedding",
-        context_emb_key: str = "context_embedding",
-        sample_id_key: str = "sample_id",
     ):
-        """
-        Initializes the Dataset with data and context embeddings.
-
-        Args:
-            data_embeddings (np.ndarray): Data embeddings of shape (num_samples, embedding_dim) or (num_sequences, seq_length, embedding_dim).
-            context_embeddings (np.ndarray): Context embeddings of shape matching data_embeddings.
-            sample_ids (np.ndarray): Sample IDs corresponding to the embeddings.
-            seq_length (int, optional): Length of sequences. If provided, data will be divided into sequences of this length.
-        """
         self.seq_length = seq_length
-
-        self.data_emb_key = data_emb_key
-        self.context_emb_key = context_emb_key
-        self.sample_id_key = sample_id_key
+        self.out_data_key = out_data_key
+        self.out_context_key = out_context_key
+        self.out_sample_id_key = out_sample_id_key
         # Convert numpy arrays to torch tensors
         self.data_embeddings = torch.tensor(data_embeddings, dtype=torch.float32)
         self.context_embeddings = torch.tensor(context_embeddings, dtype=torch.float32)
@@ -253,9 +281,9 @@ class EmbeddingDataset(Dataset):
             sample_ids_seq = self.sample_ids[idx]
 
             return {
-                self.data_emb_key: data_seq,  # Shape: (seq_length, embedding_dim)
-                self.context_emb_key: context_seq,  # Shape: (seq_length, embedding_dim)
-                self.sample_id_key: sample_ids_seq,  # Shape: (seq_length,)
+                self.out_data_key: data_seq,  # Shape: (seq_length, embedding_dim)
+                self.out_context_key: context_seq,  # Shape: (seq_length, embedding_dim)
+                self.out_sample_id_key: sample_ids_seq,  # Shape: (seq_length,)
             }
         else:
             # Return individual sample
@@ -264,7 +292,7 @@ class EmbeddingDataset(Dataset):
             sample_id = self.sample_ids[idx]
 
             return {
-                self.data_emb_key: data_sample,  # Shape: (embedding_dim,)
-                self.context_emb_key: context_sample,  # Shape: (embedding_dim,)
-                self.sample_id_key: sample_id,  # Scalar
+                self.out_data_key: data_sample,  # Shape: (embedding_dim,)
+                self.out_context_key: context_sample,  # Shape: (embedding_dim,)
+                self.out_sample_id_key: sample_id,  # Scalar
             }

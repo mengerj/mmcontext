@@ -11,6 +11,13 @@ class EmbeddingNormalizer(ABC):
     """Abstract base class for normalizing embeddings in an AnnData object."""
 
     def __init__(self, logger=None):
+        """Initializes the EmbeddingNormalizer.
+
+        Parameters
+        ----------
+        logger
+            An optional logger object to use for logging. Defaults to None.
+        """
         self.logger = logger or logging.getLogger(__name__)
 
     @abstractmethod
@@ -19,12 +26,22 @@ class EmbeddingNormalizer(ABC):
 
         Applies normalization to embeddings in adata.obsm['d_emb'] and adata.obsm['c_emb'],
         storing the normalized embeddings in adata.obsm['d_emb_norm'] and adata.obsm['c_emb_norm'].
+
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the embeddings to normalize.
         """
         pass
 
     def check_embeddings(self, adata: AnnData):
         """
         Checks that 'd_emb' and 'c_emb' are present in adata.obsm.
+
+        Parameters
+        ----------
+        adata
+            The AnnData object to check for embeddings.
 
         Raises
         ------
@@ -40,7 +57,15 @@ class EmbeddingNormalizer(ABC):
 
 
 class ZScoreNormalizer(EmbeddingNormalizer):
-    """Normalizes embeddings using z-score normalization."""
+    """Normalizes embeddings using z-score normalization.
+
+    Uses z-score normalization to normalize embeddings in an AnnData object
+
+    Parameters
+    ----------
+    logger
+        An optional logger object to use for logging. Defaults to None.
+    """
 
     def __init__(self, logger=None):
         super().__init__(logger)
@@ -54,6 +79,11 @@ class ZScoreNormalizer(EmbeddingNormalizer):
 
         Works on embeddings in adata.obsm['d_emb'] and adata.obsm['c_emb'],
         storing the normalized embeddings in adata.obsm['d_emb_norm'] and adata.obsm['c_emb_norm'].
+
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the embeddings to normalize.
         """
         self.logger.info("Normalizing embeddings using z-score normalization...")
 
@@ -79,7 +109,13 @@ class MinMaxNormalizer(EmbeddingNormalizer):
     """Normalizes embeddings using min-max normalization."""
 
     def __init__(self, logger=None):
-        """Initializes the MinMaxNormalizer."""
+        """Initializes the MinMaxNormalizer.
+
+        Parameters
+        ----------
+        logger
+            An optional logger object to use for logging. Defaults to None.
+        """
         super().__init__(logger)
         self.mins_d = None
         self.maxs_d = None
@@ -92,6 +128,11 @@ class MinMaxNormalizer(EmbeddingNormalizer):
 
         works on embeddings in adata.obsm['d_emb'] and adata.obsm['c_emb'],
         storing the normalized embeddings in adata.obsm['d_emb_norm'] and adata.obsm['c_emb_norm'].
+
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the embeddings to normalize
         """
         self.logger.info("Normalizing embeddings using min-max normalization...")
 

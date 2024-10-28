@@ -5,6 +5,7 @@ import os
 import pickle
 from abc import ABC, abstractmethod
 
+import anndata
 import numpy as np
 import openai
 import pandas as pd
@@ -12,23 +13,20 @@ from openai import OpenAI
 
 
 class ContextEmbedder(ABC):
-    """
-    Abstract base class for generating embeddings for AnnData objects.
-
-    Args:
-        logger (logging.Logger, optional): Logger instance for logging.
-    """
+    """Abstract base class for generating embeddings for AnnData objects."""
 
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
 
     @abstractmethod
-    def embed(self, adata):
+    def embed(self, adata: anndata.AnnData):
         """
         Abstract method for embedding generation.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object to generate embeddings for.
+        Parameters
+        ----------
+        adata
+            The AnnData object to generate embeddings for.
         """
         pass
 
@@ -36,16 +34,18 @@ class ContextEmbedder(ABC):
 class PlaceholderContextEmbedder(ContextEmbedder):
     """Generates random embeddings as a placeholder for real embeddings."""
 
-    def embed(self, adata):
+    def embed(self, adata: anndata.AnnData) -> np.ndarray:
         """
         Generates random embeddings for the given AnnData object.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object to generate embeddings for.
+        Parameters
+        ----------
+        adata
+            The AnnData object to generate embeddings for.
 
         Returns
         -------
-            np.ndarray: Randomly generated embeddings.
+            Randomly generated embeddings.
         """
         n_samples = adata.n_obs
         embedding_dim = 128  # Example embedding dimension
@@ -57,31 +57,43 @@ class CategoryEmbedder(ContextEmbedder):
     """Embed metadata categories using OpenAI's text embedding model.
 
     ContextEmbedder Subclass that looks at the individual metadata categories and generates embeddings for each unique value. If multiple classes are chosen,
-    the embeddings are combined using the specified method.
+    the embeddings are combined using the specified `combination_method`.
 
-    Args:
-        metadata_categories (list): List of metadata categories to process.
-        embeddings_file_path (str): Path to the dictionary to save/load embeddings.
-        model (str): Text embedding model to use.
-        combination_method (str): Method to combine embeddings ('average', 'concatenate').
-        one_hot (bool): Whether to use one-hot encoding for metadata categories.
-        unkown_threshold (int): Threshold for unknown elements when API key is not available but most classes were known from dictionary. If less than the threshold, unkonwn elements will be filled with zeros.
+    Parameters
+    ----------
+    metadata_categories
+        List of metadata categories to process.
+    embeddings_file_path
+        Path to the dictionary to save/load embeddings.
+    model
+        Text embedding model to use.
+    combination_method
+        Method to combine embeddings ('average', 'concatenate').
+    one_hot
+        Whether to use one-hot encoding for metadata categories.
+    unknown_threshold
+        Threshold for unknown elements when API key is not available but most classes were known from dictionary.
+        If less than the threshold, unkonwn elements will be filled with zeros.
+    logger
+        logger object to use for logging.
 
     Raises
     ------
-        ValueError: If a metadata category is missing from adata.obs.
-        ValueError: If no API key is set and unknown elements are greater than threshold.
+    ValueError
+        If a metadata category is missing from adata.obs.
+    ValueError
+        If no API key is set and unknown elements are greater than threshold.
     """
 
     def __init__(
         self,
-        metadata_categories,
-        embeddings_file_path,
-        model="text-embedding-3-small",
-        combination_method="concatenate",
-        one_hot=False,
-        unknown_threshold=20,
-        logger=None,
+        metadata_categories: list,
+        embeddings_file_path: str,
+        model: str = "text-embedding-3-small",
+        combination_method: str = "concatenate",
+        one_hot: bool = False,
+        unknown_threshold: int = 20,
+        logger: logging.Logger | None = None,
     ):
         super().__init__(logger)
         self.metadata_categories = metadata_categories
@@ -92,16 +104,18 @@ class CategoryEmbedder(ContextEmbedder):
         self.metadata_embeddings = self.load_metadata_embeddings()
         self.unknown_threshold = unknown_threshold
 
-    def embed(self, adata):
+    def embed(self, adata: anndata.AnnData) -> np.ndarray:
         """
         Generates or updates embeddings for the AnnData object and combines them.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object containing the data.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the data.
 
         Returns
         -------
-            np.ndarray: Combined context embeddings.
+        Combined context embeddings.
         """
         self.process_adata_metadata_embeddings(adata)
         combined_embeddings = self.combine_metadata_embeddings(adata)
@@ -111,8 +125,10 @@ class CategoryEmbedder(ContextEmbedder):
         """
         Processes and updates metadata embeddings for the AnnData object.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object containing the data.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the data.
         """
         # Check for required metadata categories
         for category in self.metadata_categories:
@@ -189,16 +205,18 @@ class CategoryEmbedder(ContextEmbedder):
             adata.obsm[f"{category}_emb"] = np.array(category_embeddings)
             self.logger.info(f"Embeddings for '{category}' stored in adata.obsm['{category}_emb']")
 
-    def combine_metadata_embeddings(self, adata):
+    def combine_metadata_embeddings(self, adata: anndata.AnnData) -> np.ndarray:
         """
         Combines embeddings from specified metadata categories.
 
-        Args:
-            adata (anndata.AnnData): The AnnData object containing the data.
+        Parameters
+        ----------
+        adata
+            The AnnData object containing the data.
 
         Returns
         -------
-            np.ndarray: Combined embeddings.
+        Combined embeddings.
         """
         # Retrieve embeddings from adata.obsm
         embeddings = [
@@ -224,12 +242,13 @@ class CategoryEmbedder(ContextEmbedder):
 
         return combined_embedding
 
-    def generate_update_metadata_embeddings(self, unique_categories):
-        """
-        Generates or updates embeddings for metadata categories.
+    def generate_update_metadata_embeddings(self, unique_categories: dict):
+        """Generates or updates embeddings for metadata categories.
 
-        Args:
-            unique_categories (dict): Dictionary with categories as keys and list of unique values.
+        Parameters
+        ----------
+        unique_categories
+            Dictionary with categories as keys and list of unique values.
         """
         updated = False
 
@@ -256,16 +275,18 @@ class CategoryEmbedder(ContextEmbedder):
         else:
             self.logger.info("No new embeddings generated; dictionary loaded from file and not updated.")
 
-    def generate_text_embedding(self, text):
+    def generate_text_embedding(self, text: str) -> list | None:
         """
         Generates an embedding for the given text using OpenAI's embedding model.
 
-        Args:
-            text (str): The text for which to generate an embedding.
+        Parameters
+        ----------
+        text
+            The text for which to generate an embedding.
 
         Returns
         -------
-            list: A list representing the embedding vector, or None in case of failure.
+        A list representing the embedding vector, or None in case of failure.
         """
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -290,13 +311,13 @@ class CategoryEmbedder(ContextEmbedder):
 
         return None
 
-    def load_metadata_embeddings(self):
+    def load_metadata_embeddings(self) -> dict:
         """
         Loads the metadata embeddings from a compressed file.
 
         Returns
         -------
-            dict: The embeddings dictionary.
+        The embeddings dictionary.
         """
         if os.path.exists(self.embeddings_file_path):
             with gzip.open(self.embeddings_file_path, "rb") as f:
