@@ -1,5 +1,1 @@
 # References
-
-```{bibliography}
-:cited:
-```
