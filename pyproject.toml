@@ -25,9 +25,12 @@ dependencies = [
   "anndata",
   "ipykernel",
   "matplotlib",
+  "numba==0.60",        # was needed due to issues with scanpy and scib automatic load
   "numpy",
   "openai",
   "python-json-logger",
+  "scanpy",
+  "scib",
   "scikit-learn",
   "seaborn",
   "session-info",
