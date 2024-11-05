@@ -157,6 +157,7 @@ class ContrastiveLoss(LossFunction):
                 f"{context_key} not found in outputs but current_mode contains context. Either change current mode or provide context embeddings in outputs."
             )
         if self.target_mode == "infoNCE":
+            self.temperature = outputs["temperature"]
             # Enforce current_mode to be 'data_context'
             if self.current_mode not in ["data_context"]:
                 self.current_mode = "data_context"

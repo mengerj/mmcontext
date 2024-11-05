@@ -48,7 +48,7 @@ def test_mlp_only_model(common_setup):
         use_cross_attention=False,
     )
 
-    output = model(in_main=common_setup["data_embeddings"])
+    output, _ = model(in_main=common_setup["data_embeddings"])
 
     # Check output shape
     expected_shape = (
@@ -72,7 +72,7 @@ def test_self_attention_model(common_setup):
         use_cross_attention=False,
     )
 
-    output = model(in_main=common_setup["data_embeddings"])
+    output, _ = model(in_main=common_setup["data_embeddings"])
 
     # Check output shape
     expected_shape = (
@@ -97,7 +97,7 @@ def test_cross_attention_model(common_setup):
     )
 
     # Forward pass with context embeddings
-    output = model(in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"])
+    output, _ = model(in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"])
 
     # Check output shape
     expected_shape = (
@@ -123,7 +123,7 @@ def test_combined_attention_model(common_setup):
     )
 
     # Forward pass with context embeddings
-    output = model(in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"])
+    output, _ = model(in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"])
 
     # Check output shape
     expected_shape = (
@@ -165,7 +165,7 @@ def test_save_and_load_model(tmp_path, common_setup):
     )
     model.eval()
     # Forward pass to initialize model parameters
-    output_before_save = model(in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"])
+    output_before_save, _ = model(in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"])
 
     # Save the model weights to a temporary file
     save_path = tmp_path / "model.pth"
@@ -191,7 +191,9 @@ def test_save_and_load_model(tmp_path, common_setup):
             ValueError(f"Mismatch in parameter {key}")
 
     # Verify that the new model produces the same output
-    output_after_load = new_model(in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"])
+    output_after_load, _ = new_model(
+        in_main=common_setup["data_embeddings"], in_cross=common_setup["context_embeddings"]
+    )
 
     # Check that the outputs are the same
     assert torch.allclose(output_before_save, output_after_load, atol=1e-6)

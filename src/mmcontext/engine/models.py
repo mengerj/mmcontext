@@ -78,6 +78,11 @@ class MMContextEncoder(BaseModel):
         )
 
         self.use_cross_attention = use_cross_attention
+        self.temperature_module = LearnableTemperature()
+        self.learn_temperature = (
+            False  # Dont learn temperature by default. Will be set true in trainer if "infoNCE" loss is used.
+        )
+        self.temperature = None  # Can be set by downstream methods to set a fixed temperature for the loss function.
         self.logger.info(
             f"MMContextEncoder initialized with embedding_dim = {embedding_dim}, num_layers = {num_layers}, use_self_attention = {use_self_attention}, use_cross_attention = {use_cross_attention}."
         )
@@ -150,7 +155,13 @@ class MMContextEncoder(BaseModel):
                 in_cross=in_cross,
                 in_cross_key_padding_mask=in_cross_key_padding_mask,
             )
-        return output
+        if self.learn_temperature:
+            temperature = self.temperature_module()
+        elif self.temperature:
+            temperature = self.temperature
+        else:
+            temperature = 1.0
+        return output, temperature
 
 
 class CustomTransformerEncoderLayer(nn.Module):
@@ -274,3 +285,17 @@ class CustomTransformerEncoderLayer(nn.Module):
             x = self.norm1(x)  # Use norm1 if no attention is applied
 
         return x
+
+
+class LearnableTemperature(nn.Module):
+    """LearnableTemperature is a module that learns a temperature parameter for the InfoNCE loss function."""
+
+    def __init__(self, initial_temperature=0.07):
+        super().__init__()
+        # Initialize temperature as a learnable parameter
+        self.temperature = nn.Parameter(torch.tensor(initial_temperature))
+
+    def forward(self):
+        """Forward pass returns the temperature as a positive value."""
+        # Ensure the temperature is always positive
+        return torch.exp(self.temperature)

@@ -353,13 +353,15 @@ def test_contrastive_loss_infoNCE():
     modified_context_embeddings = context_embeddings + torch.randn_like(context_embeddings) * 0.1
 
     # Prepare outputs and targets dictionaries
-    outputs = {"data_embeddings": modified_data_embeddings, "context_embeddings": modified_context_embeddings}
+    outputs = {
+        "data_embeddings": modified_data_embeddings,
+        "context_embeddings": modified_context_embeddings,
+        "temperature": 0.07,
+    }
     targets = {"data_embeddings": data_embeddings, "context_embeddings": context_embeddings}
 
     # Initialize ContrastiveLoss with 'infoNCE' target_mode
-    loss_fn = ContrastiveLoss(
-        target_mode="infoNCE", current_mode="data_context", similarity_metric="cosine", temperature=0.07
-    )
+    loss_fn = ContrastiveLoss(target_mode="infoNCE", current_mode="data_context", similarity_metric="cosine")
     loss = loss_fn.compute_loss(outputs, targets, data_key="data_embeddings", context_key="context_embeddings")
     assert loss.item() >= 0, f"InfoNCE loss should be non-negative, got {loss.item()}"
 
