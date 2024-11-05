@@ -13,6 +13,7 @@ tests/__pycache__/
 
 # anndata files
 data/*.h5ad
+data/test_data/*large*
 
 # Sphinx build files
 docs/_build/
@@ -21,3 +22,6 @@ docs/generated/
 
 #images
 *.png
+
+#model weights
+*.pth
