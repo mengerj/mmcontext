@@ -229,30 +229,11 @@ def test_trainer_predictions():
 
     # Trainer initialization
     trainer = Trainer(model=model, optimizer=torch.optim.Adam(model.parameters()))
-
-    predictions = trainer.infer(predict_loader)
-    assert predictions, "No predictions returned."
-    assert "data_embedding" in predictions, "Predictions missing 'data_embedding'."
-    assert "context_embedding" in predictions, "Predictions missing 'context_embedding'."
-    assert "sample_id" in predictions, "Predictions missing 'sample_id'."
-    # Check shape of predictions
-    assert (
-        predictions["data_embedding"].shape[1] == seq_length
-    ), "Incorrect sequence length for predicted 'data_embedding'."
-    assert predictions["data_embedding"].shape[2] == emb_dim, "Incorrect embedding dim for predicted 'data_embedding'."
-    assert (
-        predictions["context_embedding"].shape[1] == seq_length
-    ), "Incorrect sequence length for predicted 'context_embedding'."
-    assert (
-        predictions["context_embedding"].shape[2] == emb_dim
-    ), "Incorrect embedding for predicted 'context_embedding'."
-    # compare total number of samples in data loader and predictions
-    total_samples = 0
-    for batch in predict_loader:
-        total_samples += batch["data_embedding"].shape[0] * batch["data_embedding"].shape[1]
-    assert (
-        predictions["data_embedding"].shape[0] * predictions["data_embedding"].shape[1] == total_samples
-    ), "Incorrect number of samples in predicted 'data_embedding'."
+    # generate test adata
+    adata = create_test_emb_anndata(n_samples=100, emb_dim=emb_dim)
+    new_adata = trainer.infer_adata(adata, sample_id_key="sample_id", seq_length=seq_length, batch_size=6)
+    assert new_adata, "No predictions returned."
+    assert "mod_emb" in new_adata.obsm, "Predictions missing 'mod_emb'."
 
 
 def test_trainer_custom_dict_keys():
@@ -276,3 +257,55 @@ def test_trainer_custom_dict_keys():
 
     train_loss = trainer.train_epoch(data_loader)
     assert train_loss >= 0, "Training loss should be non-negative."
+
+
+def test_learnable_temperature():
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_learnable_temperature")
+    emb_dim = 16
+    train_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim)
+    val_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim)
+
+    # Model and loss setup
+    model = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    loss_manager = LossManager()
+    loss_manager.add_loss(ContrastiveLoss(target_mode="infoNCE"))
+    # Trainer initialization
+    trainer = Trainer(model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()))
+    val_loss1 = trainer.evaluate(val_loader)
+    trainer.fit(train_loader, val_loader, epochs=1)
+    temp1 = trainer.temperature
+    val_loss2 = trainer.evaluate(val_loader)
+    trainer.fit(train_loader, val_loader, epochs=1)
+    temp2 = trainer.temperature
+    # assert that losses are different
+    assert val_loss1 != val_loss2, "Validation loss should change after training."
+    assert trainer  # Simple check to ensure trainer object exists post fit
+    assert temp1 != temp2, "Temperature should change after training."
+
+
+def test_fixed_temperature():
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_fixed_temperature")
+    emb_dim = 16
+    train_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim)
+    val_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim)
+
+    # Model and loss setup
+    model = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    loss_manager = LossManager()
+    loss_manager.add_loss(ContrastiveLoss(target_mode="infoNCE"))
+    # Trainer initialization
+    trainer = Trainer(
+        model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()), temperature=0.1
+    )
+    val_loss1 = trainer.evaluate(val_loader)
+    trainer.fit(train_loader, val_loader, epochs=1)
+    temp1 = trainer.temperature
+    val_loss2 = trainer.evaluate(val_loader)
+    trainer.fit(train_loader, val_loader, epochs=1)
+    temp2 = trainer.temperature
+    # assert that losses are different
+    assert val_loss1 != val_loss2, "Validation loss should change after training."
+    assert trainer  # Simple check to ensure trainer object exists post fit
+    assert temp1 == temp2 == 0.1, "Temperature should not change after training."

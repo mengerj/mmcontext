@@ -5,7 +5,7 @@ import logging
 import torch
 from torch.utils.data import DataLoader
 
-from mmcontext.engine.losses import ContrastiveLoss, LossManager
+from mmcontext.engine import ContrastiveLoss, LossManager
 
 
 class Trainer:
@@ -47,7 +47,7 @@ class Trainer:
     def __init__(
         self,
         model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
+        optimizer: torch.optim.Optimizer | None = None,
         loss_manager: LossManager | None = None,
         device: torch.device | None = None,
         logger: logging.Logger | None = None,
@@ -55,6 +55,7 @@ class Trainer:
         data_key: str = "data_embedding",
         context_key: str = "context_embedding",
         sample_id_key: str = "sample_id",
+        temperature: float | None = None,
     ):
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
@@ -64,6 +65,10 @@ class Trainer:
         self.context_key = context_key
         self.sample_id_key = sample_id_key
         self.logger = logger or logging.getLogger(__name__)
+        self.seq_length = None  # Placeholder to store seq_length for inference
+        self.batch_size = None  # Placeholder to store batch_size for inference
+        self.temperature = temperature
+        self.model.temperature = temperature
 
         # Set default input_embeddings if not provided
         if input_embeddings is None:
@@ -109,6 +114,13 @@ class Trainer:
                         raise ValueError(
                             "in_cross embeddings are required when using data_context (current_mode) contrastive loss. Eventhough cross attention might not be used, the embeddings are required for loss computation."
                         )
+                self.logger.info(f"Temperature: {self.temperature}")
+                if self.temperature is not None and self.model.learn_temperature:
+                    raise ValueError(
+                        "Temperature is provided, but model wasn't reloaded. Reinitialize model to ensure temperature won't be learned."
+                    )
+                if loss_fn.target_mode == "infoNCE" and self.temperature is None:
+                    self.model.learn_temperature = True
 
     def train_epoch(self, data_loader: DataLoader) -> float:
         """
@@ -146,14 +158,19 @@ class Trainer:
                 )  # Shape: (batch_size, seq_length, embedding_dim)
             else:
                 in_cross = None
+            if self.seq_length is None and in_main.dim() == 3:
+                self.seq_length = in_main.size(1)
+            if self.batch_size is None:
+                self.batch_size = in_main.size(0)
             # Forward pass
-            out = self.model(in_main=in_main, in_cross=in_cross)
+            out, temp = self.model(in_main=in_main, in_cross=in_cross)
             outputs = {}
             outputs[self.input_embeddings["main"]] = out
             outputs[self.input_embeddings["cross"]] = (
                 in_cross  # Pass the original embeddings used for cross attention to allow for data_context contrastive loss
             )
-
+            outputs["temperature"] = temp
+            self.temperature = temp
             # Prepare targets
             targets = {self.data_key: batch[self.data_key], self.context_key: batch[self.context_key]}
 
@@ -206,13 +223,13 @@ class Trainer:
                 else:
                     in_cross = None
                 # Forward pass
-                out = self.model(in_main=in_main, in_cross=in_cross)
+                out, temp = self.model(in_main=in_main, in_cross=in_cross)
                 outputs = {}
                 outputs[self.input_embeddings["main"]] = out
                 outputs[self.input_embeddings["cross"]] = (
                     in_cross  # Pass the original embeddings used for cross attention to allow for data_context contrastive loss
                 )
-
+                outputs["temperature"] = temp
                 # Prepare targets
                 targets = {
                     self.data_key: batch[self.data_key],
@@ -281,6 +298,7 @@ class Trainer:
                     self.logger.info(f"Validation loss improved. Model saved to {save_path}")
             else:
                 self.logger.info(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}")
+            self.logger.info(f"Temperature: {self.temperature}")
 
     def infer(self, data_loader: DataLoader) -> dict[str, torch.Tensor]:
         """
@@ -311,18 +329,138 @@ class Trainer:
                     in_cross = None
                 sample_ids = batch[self.sample_id_key]  # Shape: (batch_size, seq_length)  # Not used in prediction
 
-                # Forward pass
-                out = self.model(in_main=in_main, in_cross=in_cross)
-                outputs = {}
-                outputs[self.input_embeddings["main"]] = out
-                outputs[self.input_embeddings["cross"]] = (
-                    in_cross  # Pass the original embeddings used for cross attention to allow for data_context contrastive loss
-                )
-                # Collect modified_embeddings
-                modified_embeddings[self.data_key].append(outputs[self.data_key].cpu())
-                modified_embeddings[self.context_key].append(outputs[self.context_key].cpu())
-                modified_embeddings[self.sample_id_key].append(sample_ids.cpu())
+            # Forward pass
+            out = self.model(in_main=in_main, in_cross=in_cross)
+            outputs = {}
+            outputs[self.input_embeddings["main"]] = out
+            outputs[self.input_embeddings["cross"]] = in_cross  # Pass the original embeddings used for cross attention
 
-        # Concatenate all batches
-        modified_embeddings = {k: torch.cat(v, dim=0) for k, v in modified_embeddings.items()}
+            # Initialize dictionary to collect outputs if not already initialized
+            if "modified_embeddings" not in locals():
+                modified_embeddings = {self.data_key: [], self.context_key: [], self.sample_id_key: []}
+
+            # Collect outputs, ensuring to remove any singleton dimensions
+            # Squeeze only if the dimension is 1 to avoid altering data shape unintentionally
+            modified_embeddings[self.data_key].append(
+                outputs[self.data_key].squeeze().cpu()
+                if outputs[self.data_key].dim() == 1
+                else outputs[self.data_key].cpu()
+            )
+            modified_embeddings[self.context_key].append(
+                outputs[self.context_key].squeeze().cpu()
+                if outputs[self.context_key].dim() == 1
+                else outputs[self.context_key].cpu()
+            )
+            modified_embeddings[self.sample_id_key].append(
+                sample_ids.cpu()
+            )  # Assuming sample_ids does not need squeezing
+
+            # Concatenate all batches
+            modified_embeddings = {k: torch.cat(v, dim=0) for k, v in modified_embeddings.items()}
         return modified_embeddings
+
+    def infer_adata(self, adata, sample_id_key: str, seq_length: int | None = None, batch_size: int | None = None):
+        """
+        Generates modified embeddings for the samples in the given AnnData object using the trained model.
+
+        Parameters
+        ----------
+        adata
+            AnnData object containing the data to infer on.
+        sample_id_key
+            Key in `adata.obs` containing the sample IDs.
+        """
+        # Import DataSetConstructor
+        from mmcontext.pp import DataSetConstructor
+
+        # Initialize DataSetConstructor
+        dataset_constructor = DataSetConstructor(in_sample_id_key=sample_id_key, out_sample_id_key=sample_id_key)
+
+        # Add the AnnData object to the dataset
+        dataset_constructor.add_anndata(adata)
+
+        # Use the same seq_length as used during training
+        if seq_length is None:
+            if self.seq_length is None:
+                self.logger.error("seq_length not provided. Please provide seq_length.")
+                raise ValueError("seq_length not provided. Please provide seq_length.")
+            seq_length = self.seq_length
+        if batch_size is None:
+            if self.batch_size is None:
+                self.logger.error("batch_size not provided. Please provide batch_size.")
+                raise ValueError("batch_size not provided. Please provide batch_size.")
+            batch_size = self.batch_size
+
+        # Construct the dataset
+        dataset = dataset_constructor.construct_dataset(seq_length=seq_length)
+
+        # Create a DataLoader with shuffle=False to maintain order
+        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        # Initialize lists to collect outputs and sample IDs
+        modified_embeddings = {self.data_key: [], sample_id_key: []}
+
+        self.model.eval()
+
+        with torch.no_grad():
+            for _batch_idx, batch in enumerate(data_loader):
+                # Get sample IDs
+                sample_ids = batch[sample_id_key]  # Shape: (batch_size, seq_length)
+
+                # Get inputs
+                in_main = batch[self.input_embeddings["main"]].to(self.device)
+                if self.input_embeddings["cross"] is not None:
+                    in_cross = batch[self.input_embeddings["cross"]].to(self.device)
+                else:
+                    in_cross = None
+
+                # Forward pass
+                out, _ = self.model(in_main=in_main, in_cross=in_cross)
+
+                # Flatten seq_length dimension
+                batch_size, seq_len, emb_dim = out.size()
+                out_flat = out.view(batch_size * seq_len, emb_dim)
+                sample_ids_flat = sample_ids.view(batch_size * seq_len)
+
+                # Collect outputs and sample IDs
+                modified_embeddings[self.data_key].append(out_flat.cpu())
+                modified_embeddings[sample_id_key].append(sample_ids_flat.cpu())
+
+        # Concatenate all outputs
+        modified_embeddings = {k: torch.cat(v, dim=0) for k, v in modified_embeddings.items()}
+
+        # Map sample IDs to embeddings
+        id_to_embedding = {}
+        for sample_id, embedding in zip(
+            modified_embeddings[sample_id_key], modified_embeddings[self.data_key], strict=False
+        ):
+            sample_id = sample_id.item()
+            id_to_embedding[sample_id] = embedding
+
+        # Now, create an array of embeddings aligned with adata
+
+        sample_ids_in_adata = adata.obs[sample_id_key].values
+        embeddings_list = []
+        sample_ids_to_cut = []
+        for sample_id in sample_ids_in_adata:
+            embedding = id_to_embedding.get(sample_id)
+            if embedding is None:
+                self.logger.warning(f"Sample ID {sample_id} not found in inference outputs.")
+                sample_ids_to_cut.append(sample_id)
+                # jump to the next iteration
+                continue
+            embeddings_list.append(embedding)
+
+        # remove the samples not found in the inference outputs
+        if len(sample_ids_to_cut) > 0:
+            self.logger.warning(
+                f"Removing {len(sample_ids_to_cut)} samples not found in inference outputs. Most likely because could not be processed due to seq_length."
+            )
+            idx_to_keep = ~adata.obs[sample_id_key].isin(sample_ids_to_cut)
+            adata_new = adata[idx_to_keep].copy()
+        else:
+            adata_new = adata.copy()
+        # Stack embeddings into a tensor
+        embeddings_tensor = torch.stack(embeddings_list)
+        adata_new.obsm["mod_emb"] = embeddings_tensor.detach().numpy()
+        return adata_new
