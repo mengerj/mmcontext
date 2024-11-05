@@ -7,6 +7,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 from sklearn.decomposition import PCA
@@ -321,29 +322,53 @@ class PCAReducer(DimAligner):
         loadings = loadings[:, :n_components]
 
         # Create DataFrame for easier handling
-        import pandas as pd
-
         loadings_df = pd.DataFrame(loadings, columns=[f"PC{i+1}" for i in range(n_components)])
+
+        # Check if one_hot_order is provided and valid
+        one_hot_order = self.config.get("one_hot_order", None)
+        if one_hot_order is not None:
+            if len(one_hot_order) == loadings_df.shape[0]:
+                loadings_df.index = one_hot_order
+                self.logger.info("Applied one_hot_order to loadings DataFrame index.")
+            else:
+                self.logger.warning(
+                    f"Length of one_hot_order ({len(one_hot_order)}) does not match "
+                    f"number of PCA features ({loadings_df.shape[0]}). Using default feature indices."
+                )
+        else:
+            self.logger.info("one_hot_order not provided. Using default feature indices.")
 
         # Apply threshold if provided
         if threshold is not None:
             loadings_df = loadings_df[(loadings_df.abs() > threshold).any(axis=1)]
+            self.logger.info(f"Applied threshold: {threshold}")
 
         # Select top N variables if specified
         if top_n_variables is not None:
             # Compute the sum of squared loadings across selected components
             importance = (loadings_df**2).sum(axis=1)
             loadings_df = loadings_df.loc[importance.nlargest(top_n_variables).index]
+            self.logger.info(f"Selected top {top_n_variables} variables based on importance.")
 
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(loadings_df, cmap="coolwarm", center=0, annot=False)
-        plt.title("Principal Component Loadings Heatmap")
-        plt.xlabel("Principal Components")
-        plt.ylabel("Variables")
+        # Plotting
+        plt.figure(figsize=(12, 10))
+        sns.heatmap(loadings_df, cmap="coolwarm", center=0, annot=False, cbar=True)
+
+        plt.title("Principal Component Loadings Heatmap", fontsize=16)
+        plt.xlabel("Principal Components", fontsize=14)
+        plt.ylabel("Variables", fontsize=14)
+
         plt.tight_layout()
+
+        # Save the plot if a save_path is provided
         if save_path:
-            plt.savefig(os.path.join(save_path, "loadings_heatmap.png"))
+            os.makedirs(save_path, exist_ok=True)  # Ensure the directory exists
+            file_path = os.path.join(save_path, "loadings_heatmap.png")
+            plt.savefig(file_path, dpi=300)
+            self.logger.info(f"Loadings heatmap saved to {file_path}")
+
         plt.close()
+        self.logger.info("Loadings heatmap generation complete.")
 
 
 '''

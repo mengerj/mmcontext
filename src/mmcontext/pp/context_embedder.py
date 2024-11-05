@@ -145,6 +145,7 @@ class CategoryEmbedder(ContextEmbedder):
             self.logger.info("One-hot encoding metadata categories...")
             for category in self.metadata_categories:
                 adata.obsm[f"{category}_emb"] = pd.get_dummies(adata.obs[category]).values.astype(int)
+                adata.uns["one_hot_order"] = pd.get_dummies(adata.obs[category]).columns.tolist()
                 self.logger.info(f"Embeddings for '{category}' stored in adata.obsm['{category}_emb']")
             return  # No need to generate embeddings using a model
 
