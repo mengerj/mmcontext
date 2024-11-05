@@ -6,7 +6,7 @@ from importlib.metadata import version
 
 from . import engine, pp
 
-__all__ = ["pp", "engine"]
+__all__ = ["pp", "engine", "eval"]
 
 __version__ = version("mmcontext")
 
