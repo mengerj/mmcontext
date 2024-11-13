@@ -4,7 +4,7 @@ import logging.config
 import os
 from importlib.metadata import version
 
-from . import engine, pp
+from . import engine, eval, pp
 
 __all__ = ["pp", "engine", "eval"]
 
@@ -19,7 +19,7 @@ def setup_logging():
     # Configure logging
     logging.config.dictConfig(config_dict)
     logger = logging.getLogger(__name__)
-    logger.info("Logging configured using the specified configuration file.")
+    logger.info("mmcontext logging configured using the specified configuration file.")
 
 
 # Call the function to set up logging when the package is imported

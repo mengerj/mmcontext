@@ -53,16 +53,18 @@ def create_test_anndata(n_samples=20, n_features=100, cell_types=None, tissues=N
     np.random.shuffle(batch_labels)
 
     # Generate observation (cell) metadata
+
     obs = pd.DataFrame(
         {
             "cell_type": np.random.choice(cell_types, n_samples),
             "tissue": np.random.choice(tissues, n_samples),
             "batch": batch_labels,
-            "sample_id": np.arange(n_samples),
         }
     )
     obs.index = [f"Cell_{i}" for i in range(n_samples)]
-
+    # transform obs to categorical
+    obs = obs.astype("category")
+    obs["sample_id"] = np.arange(n_samples)
     # Generate a random data matrix (e.g., gene expression values)
     X = np.zeros((n_samples, n_features))
     for i, batch in enumerate(batch_categories):
