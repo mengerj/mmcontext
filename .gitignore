@@ -28,3 +28,6 @@ docs/generated/
 
 # random notebooks
 hm.ipynb
+
+#venv
+venv/
