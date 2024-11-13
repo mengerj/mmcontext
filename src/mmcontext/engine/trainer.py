@@ -3,9 +3,89 @@
 import logging
 
 import torch
+from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from mmcontext.engine import ContrastiveLoss, LossManager
+
+
+def configure_optimizer(cfg: DictConfig, model_parameters) -> torch.optim.Optimizer:
+    """
+    Configures the optimizer based on the configuration.
+
+    Parameters
+    ----------
+    cfg
+        The configuration object.
+    model_parameters
+        The model parameters to optimize.
+
+    Returns
+    -------
+    torch.optim.Optimizer
+        The configured optimizer.
+    """
+    logger = logging.getLogger(__name__)
+    config = cfg.get("optimizer", [])
+    # shortly check if there are multiple optimizers set to True and issue a warning that the first one will be selected
+    if sum([opt_cfg.get("use") for opt_cfg in config]) > 1:
+        logger.warning("Multiple optimizers set to True. The first optimizer will be selected.")
+    for opt_cfg in config:
+        if not opt_cfg.get("use"):
+            continue
+        opt_type = opt_cfg.get("type")
+        if opt_type in ["adam"]:
+            return torch.optim.Adam(
+                model_parameters,
+                lr=cfg.get("lr", 0.001),
+                betas=cfg.get("betas", (0.9, 0.999)),
+                weight_decay=cfg.get("weight_decay", 0.0),
+            )
+        elif opt_type in ["sgd"]:
+            return torch.optim.SGD(
+                model_parameters,
+                lr=cfg.get("lr", 0.01),
+                momentum=cfg.get("momentum", 0.9),
+                weight_decay=cfg.get("weight_decay", 0.0),
+            )
+        else:
+            raise ValueError(f"Unknown optimizer type: {opt_type}")
+
+
+def configure_scheduler(cfg: DictConfig, optimizer: torch.optim.Optimizer) -> torch.optim.lr_scheduler._LRScheduler:
+    """Configures the scheduler based on the configuration.
+
+    Parameters
+    ----------
+    cfg
+        The configuration object.
+    optimizer
+        The optimizer object.
+    """
+    logger = logging.getLogger(__name__)
+    config = cfg.get("scheduler", [])
+    # shortly check if there are multiple schedulers set to True and issue a warning that the first one will be selected
+    if sum([sch_cfg.get("use") for sch_cfg in config]) > 1:
+        logger.warning("Multiple schedulers set to True. The first scheduler will be selected.")
+    for sch_cfg in config:
+        if not sch_cfg.get("use", True):
+            continue
+        sch_type = sch_cfg.get("type")
+        if sch_type in ["step"]:
+            return torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=cfg.get("step_size", 30), gamma=cfg.get("gamma", 0.1)
+            )
+        elif sch_type in ["cosine"]:
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=cfg.get("T_max", 10), eta_min=cfg.get("eta_min", 0)
+            )
+        elif sch_type in ["None", "none"]:
+            # Return a lambda scheduler that does nothing
+            return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
+        else:
+            raise ValueError(f"Unknown scheduler type: {sch_type}")
+    # If no scheduler is configured, return LambdaLR with constant function
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
 
 
 class Trainer:
@@ -20,6 +100,8 @@ class Trainer:
         Manages multiple loss functions. Not needed for inference.
     optimizer
         Optimizer for updating model parameters.
+    scheduler
+        Scheduler for adjusting learning rate during training.
     device
         Device to run the model on 'cuda' or 'cpu'. Defaults to CUDA if available.
     logger
@@ -48,6 +130,7 @@ class Trainer:
         self,
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer | None = None,
+        scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
         loss_manager: LossManager | None = None,
         device: torch.device | None = None,
         logger: logging.Logger | None = None,
@@ -61,6 +144,7 @@ class Trainer:
         self.model = model.to(self.device)
         self.loss_manager = loss_manager
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.data_key = data_key
         self.context_key = context_key
         self.sample_id_key = sample_id_key
@@ -143,6 +227,10 @@ class Trainer:
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
             raise ValueError("Loss Manager must contain at least one loss function.")
+        if self.optimizer is None:
+            raise ValueError("Optimizer is not provided.")
+        if self.scheduler is None:
+            self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda epoch: 1.0)
         self.model.train()
         total_loss = 0.0
         num_batches = len(data_loader)
@@ -186,6 +274,7 @@ class Trainer:
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
                 self.logger.info(f"Batch {batch_idx+1}/{num_batches}, Loss: {loss.item():.4f}")
 
+        self.scheduler.step()
         average_loss = total_loss / num_batches
         self.logger.info(f"Training Epoch Complete. Average Loss: {average_loss:.4f}")
         return average_loss

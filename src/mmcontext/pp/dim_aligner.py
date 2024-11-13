@@ -10,7 +10,34 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from anndata import AnnData
+from omegaconf import DictConfig
 from sklearn.decomposition import PCA
+
+
+def configure_aligner(cfg: DictConfig):
+    """
+    Configures a dimension aligner based on the provided configuration.
+
+    Parameters
+    ----------
+    cfg
+        Configuration dictionary.
+
+    Returns
+    -------
+    DimAligner
+        The configured dimension aligner.
+    """
+    aligner_type = cfg.type
+    if aligner_type in ["PCA", "pca"]:
+        return PCAReducer(
+            latent_dim=cfg.get("latent_dim", 64),
+            max_samples=cfg.get("max_samples", 10000),
+            random_state=cfg.get("random_state", None),
+            config=cfg.get("pca_eval", None),
+        )
+    else:
+        raise ValueError(f"Invalid dimension aligner type: {aligner_type}")
 
 
 class DimAligner(ABC):
@@ -160,7 +187,7 @@ class PCAReducer(DimAligner):
         *args,
         max_samples: int = 10000,
         random_state: int = None,
-        config: dict[str, Any] | None = None,
+        config: DictConfig[str, Any] | None = None,
         **kwargs,
     ):
         """
@@ -176,6 +203,8 @@ class PCAReducer(DimAligner):
             An optional logger object to use for logging.
         *args
             Positional arguments for the base class.
+        config
+            Configuration dictionary for PCA evaluation and plotting options.
         **kwargs
             Keyword arguments for the base class (e.g., latent_dim, context_key, data_key).
         """
@@ -184,7 +213,7 @@ class PCAReducer(DimAligner):
         self.random_state = random_state
         self.config = config or {}
 
-    def reduce(self, embeddings: np.ndarray, config: dict[str, Any] | None = None) -> np.ndarray:
+    def reduce(self, embeddings: np.ndarray, config: DictConfig[str, Any] | None = None) -> np.ndarray:
         """
         Reduces the dimensions of the embeddings to the target dimension using PCA.
 
@@ -194,7 +223,7 @@ class PCAReducer(DimAligner):
         ----------
         embeddings : np.ndarray
             The embeddings to reduce.
-        config : dict, optional
+        config
             Configuration dictionary for PCA evaluation and plotting options.
 
         Returns

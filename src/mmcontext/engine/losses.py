@@ -5,6 +5,7 @@ import logging
 
 import torch
 import torch.nn.functional as F
+from omegaconf import DictConfig
 
 
 class LossFunction(metaclass=abc.ABCMeta):
@@ -91,6 +92,36 @@ class LossManager:
             loss = loss_function.compute_loss(outputs, targets, self.data_key, self.context_key)
             total_loss += weight * loss
         return total_loss
+
+    def configure_losses(self, cfg: DictConfig):
+        """Configures and adds loss functions based on the provided configuration."""
+        losses_config = cfg.get("losses", {})
+        for loss_cfg_key in losses_config.keys():
+            loss_cfg = losses_config.get(loss_cfg_key)
+            if not loss_cfg.get("use"):
+                continue  # Skip if 'use' is False
+
+            loss_type = loss_cfg.get("type")
+            weight = loss_cfg.get("weight", 1.0)
+
+            if loss_type == "contrastive_loss":
+                # Create a ContrastiveLoss instance with specified settings
+                loss_fn = ContrastiveLoss(
+                    target_mode=loss_cfg.get("target_mode"),
+                    current_mode=loss_cfg.get("current_mode"),
+                    similarity_metric=loss_cfg.get("similarity_metric"),
+                )
+            elif loss_type == "reconstruction_loss":
+                # Create a ReconstructionLoss instance with specified settings
+                loss_fn = ReconstructionLoss(
+                    reduction=loss_cfg.get("reduction"),
+                )
+            else:
+                self.logger.error(f"Unknown loss type '{loss_type}'")
+                continue  # Skip unknown loss types
+
+            # Add the loss function to the manager
+            self.add_loss(loss_fn, weight=weight)
 
 
 class ContrastiveLoss(LossFunction):
@@ -302,9 +333,6 @@ class ReconstructionLoss(LossFunction):
         -------
             Tensor: The reconstruction loss.
         """
-        logging.info(
-            f"Computing reconstruction loss for data key: {data_key} ; context key {context_key} is not used",
-        )
         output_embeddings = outputs[data_key]
         target_embeddings = targets[data_key]
 

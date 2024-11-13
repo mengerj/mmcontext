@@ -7,6 +7,29 @@ import numpy as np
 from anndata import AnnData
 
 
+def configure_normalizer(cfg):
+    """Configures the normalizer based on the configuration.
+
+    Parameters
+    ----------
+    cfg
+        The configuration object.
+
+    Returns
+    -------
+    EmbeddingNormalizer
+        The configured normalizer.
+    """
+    if cfg.type == "z-score":
+        return ZScoreNormalizer()
+    elif cfg.type == "min-max":
+        return MinMaxNormalizer()
+    elif cfg.type in ["none", "None"]:
+        return PlaceHolderNormalizer()
+    else:
+        raise ValueError(f"Unknown normalizer type: {cfg.type}")
+
+
 class EmbeddingNormalizer(ABC):
     """Abstract base class for normalizing embeddings in an AnnData object."""
 
@@ -54,6 +77,18 @@ class EmbeddingNormalizer(ABC):
         if "c_emb" not in adata.obsm:
             self.logger.error("Missing 'c_emb' in adata.obsm")
             raise KeyError("Context embeddings 'c_emb' are missing in adata.obsm")
+
+
+class PlaceHolderNormalizer(EmbeddingNormalizer):
+    """A placeholder normalizer that does nothing."""
+
+    def normalize(self, adata: AnnData):
+        """Does nothing."""
+        self.logger.info(
+            "No normalization applied, but still stored in adata.obsm['d_emb_norm'] and adata.obsm['c_emb_norm']"
+        )
+        adata.obsm["d_emb_norm"] = adata.obsm["d_emb"]
+        adata.obsm["c_emb_norm"] = adata.obsm["c_emb"]
 
 
 class ZScoreNormalizer(EmbeddingNormalizer):
