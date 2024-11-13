@@ -80,6 +80,8 @@ def consolidate_low_frequency_categories(adata: anndata.AnnData, columns: list, 
             if remove:
                 # Remove entries with low frequency categories entirely
                 adata = adata[~adata.obs[col].isin(low_freq_categories)].copy()
+                # Convert column back to categorial
+                adata.obs[col] = pd.Categorical(adata.obs[col])
             else:
                 # Update entries with low frequency categories to 'remaining {col}'
                 adata.obs.loc[adata.obs[col].isin(low_freq_categories), col] = f"remaining {col}"
