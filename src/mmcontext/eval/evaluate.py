@@ -87,6 +87,8 @@ class Evaluator:
         if self.embedding_key is not None:
             if isinstance(self.embedding_key, list):
                 for key in self.embedding_key:
+                    if key is None:
+                        continue
                     self.logger.info(f"Computing metrics on embedding '{key}'...")
                     embedding_metrics = self.compute_embedding_metrics(embedding_key=key)
                     embedding_metrics["type"] = f"embedding_{key}"
