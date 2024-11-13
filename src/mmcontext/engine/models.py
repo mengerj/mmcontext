@@ -6,6 +6,25 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from omegaconf import DictConfig
+
+
+def configure_model(cfg: DictConfig):
+    """Configures the model based on the configuration."""
+    if cfg.type == "mmcontext_encoder":
+        model = MMContextEncoder(
+            embedding_dim=cfg.latent_dim,  # this has to be the same dimension as the latent dimension of the aligner
+            hidden_dim=cfg.hidden_dim,
+            num_layers=cfg.num_layers,
+            num_heads=cfg.num_heads,
+            use_self_attention=cfg.use_self_attention,
+            use_cross_attention=cfg.use_cross_attention,
+            activation=cfg.activation,
+            dropout=cfg.dropout,
+        )
+    else:
+        raise ValueError(f"Unknown model type: {cfg.type}")
+    return model
 
 
 class BaseModel(nn.Module, metaclass=abc.ABCMeta):
