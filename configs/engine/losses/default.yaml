@@ -1,0 +1,33 @@
+infoNCE_data_context:
+  type: contrastive_loss
+  use: False
+  weight: 1.0
+  target_mode: infoNCE #Predict exact pairs (Classic Contrastive Loss)
+  current_mode: data_context # Has to be between data and context here
+  similarity_metric: cosine
+context_context_data_data:
+  type: contrastive_loss
+  use: False
+  weight: 1.0
+  target_mode: context_context # Use only context embeddings to get a target similarity matrix
+  current_mode: data_data # Use only data embeddings to get a current similarity matrix
+  similarity_metric: cosine
+context_context_data_context:
+  type: contrastive_loss
+  use: False
+  weight: 1.0
+  target_mode: context_context
+  current_mode: data_context # Use the similarity between data and context embeddings as the current similarity matrix
+  similarity_metric: cosine
+data_data_data_context:
+  type: contrastive_loss
+  use: False
+  weight: 1.0
+  target_mode: data_data # Use only data embeddings to get a target similarity matrix. This should help keep the original similarities
+  current_mode: data_context # Use the similarity between data and context embeddings as the current similarity matrix
+  similarity_metric: cosine
+reconstruction_loss:
+  type: reconstruction_loss
+  use: False
+  weight: 1.0
+  reduction: mean

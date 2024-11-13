@@ -1,0 +1,44 @@
+model:
+  type: mmcontext_encoder #mmcontext_encoder
+  latent_dim: ${pp.aligner.latent_dim}
+  hidden_dim: 64
+  num_layers: 2
+  num_heads: 1
+  use_self_attention: False
+  use_cross_attention: False
+  activation: relu
+  dropout: 0.1
+
+optimizer:
+  - type: adam
+    use: True
+    lr: 0.001
+    weight_decay: 0.0
+    betas: [0.9, 0.999]
+    max_lr: None
+
+  - type: adam
+    use: False
+    lr: 0.01
+    weight_decay: 0.1
+    betas: [0.9, 0.999]
+    max_lr: None
+
+scheduler: # Currently schedulers will be applied after each epoch
+  - type: step
+    use: True
+    step_size: 10
+    gamma: 0.1
+
+  - type: cosine
+    use: False
+    T_max: 10
+    eta_min: 0.0001
+
+trainer:
+  input_embeddings: #This determines which embeddings are used as input to the model. If you changed the default names of the embeddings, you need to change them here
+    main: data_embedding
+    cross: context_embedding
+  temperature: null # This relates to cosine similarity loss and will be learned if None, or can be set to fixed value
+  epochs: 100
+  save_path: best_model.pth
