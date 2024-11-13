@@ -238,7 +238,7 @@ def test_trainer_predictions():
 
 def test_trainer_custom_dict_keys():
     logger = logging.getLogger(__name__)
-    logger.info("TEST: test_trainer_default_values")
+    logger.info("TEST: test_trainer_custom_dict_values")
     emb_dim = 64
     data_loader = create_test_dataloader(emb_dim=emb_dim, data_key="data_emb", context_key="context_emb")
 
