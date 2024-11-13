@@ -12,9 +12,9 @@ tests/__pycache__/
 *.log.*
 
 # anndata files
-data/*.h5ad
-data/*/*h5ad
-
+# only track data files in data/demo
+data/*
+!data/demo/
 # Sphinx build files
 docs/_build/
 docs/_autosummary/
