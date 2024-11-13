@@ -92,7 +92,7 @@ def plot_umap(
         # Save or show the plot
         if save_plot:
             if not save_dir:
-                logging.error("Save directory is not specified.")
+                logger.error("Save directory is not specified.")
                 raise ValueError("Save directory is not specified.")
             os.makedirs(save_dir, exist_ok=True)
             basename = "UMAP"
@@ -101,11 +101,11 @@ def plot_umap(
             file_path = os.path.join(save_dir, f"{basename}_{embedding_key}_{color_group}.{save_format}")
             plt.savefig(file_path, bbox_inches="tight", dpi=dpi)
             plt.close()
-            logging.info(f"UMAP plot saved successfully at {file_path}.")
+            logger.info(f"UMAP plot saved successfully at {file_path}.")
         else:
             plt.show()
-            logging.info("Displayed UMAP plot interactively.")
+            logger.info("Displayed UMAP plot interactively.")
 
     except Exception as e:
-        logging.error(f"An error occurred while generating UMAP plot: {e}", exc_info=True)
+        logger.error(f"An error occurred while generating UMAP plot: {e}", exc_info=True)
         raise
