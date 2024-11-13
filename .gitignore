@@ -13,7 +13,7 @@ tests/__pycache__/
 
 # anndata files
 data/*.h5ad
-data/test_data/*large*
+data/*/*h5ad
 
 # Sphinx build files
 docs/_build/
@@ -28,3 +28,6 @@ docs/generated/
 
 # random notebooks
 hm.ipynb
+
+# output files
+outputs/*
