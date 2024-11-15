@@ -18,7 +18,7 @@ data:
     out_dir: ${data.dir}/train_data_processed_${ID.name}
   test:
     subdir: ${data.dir}/test_data
-    filenames: [small_cellxgene.h5ad]
+    filenames: [subset2_large_cellxgene.h5ad]
     out_dir: ${data.dir}/test_data_processed_${ID.name}
 pp:
   embedder:
@@ -44,20 +44,23 @@ pp:
     batch_size: 64
 
 engine:
-  model:
-    hidden_dim: 64
-    num_layers: 2
-    num_heads: 1
-    use_self_attention: False
-    use_cross_attention: False
-
+  models:
+    encoder:
+      hidden_dim: 64
+      num_layers: 2
+      num_heads: 1
+      use_self_attention: False
+      use_cross_attention: False
+    decoder:
+      train: True
+      hidden_dims: [64]
   trainer:
-    epochs: 200
+    epochs: 1
 
   losses:
     infoNCE_data_context:
-      use: True
+      use: False
 
-    context_context_data_context:
+    zinb_loss:
       use: True
-      weight: 0.5
+      weight: 0.01

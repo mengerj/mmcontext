@@ -7,13 +7,21 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from mmcontext.engine import ContrastiveLoss, LossManager, MMContextEncoder, ReconstructionLoss, Trainer
+from mmcontext.engine import (
+    ContrastiveLoss,
+    LossManager,
+    MMContextEncoder,
+    ReconstructionLoss,
+    Trainer,
+    ZINBDecoder,
+    ZINBLoss,
+)
 from mmcontext.pp import DataSetConstructor
 from mmcontext.utils import create_test_emb_anndata
 
 
 def create_test_dataloader(
-    batch_size=4, seq_length=10, emb_dim=64, data_key="data_embedding", context_key="context_embedding"
+    batch_size=4, seq_length=10, emb_dim=64, n_samples=100, data_key="data_embedding", context_key="context_embedding"
 ):
     """
     Creates a dummy DataLoader using random embeddings for testing.
@@ -26,8 +34,8 @@ def create_test_dataloader(
     Returns:
         DataLoader: A DataLoader with random embeddings.
     """
-    adata1 = create_test_emb_anndata(n_samples=100, emb_dim=emb_dim)
-    adata2 = create_test_emb_anndata(n_samples=20, emb_dim=emb_dim, sample_ids=np.arange(100, 120))
+    adata1 = create_test_emb_anndata(n_samples=n_samples, emb_dim=emb_dim)
+    adata2 = create_test_emb_anndata(n_samples=20, emb_dim=emb_dim, sample_ids=np.arange(n_samples, 120))
 
     dataset_constructor = DataSetConstructor(out_data_key=data_key, out_context_key=context_key)
     dataset_constructor.add_anndata(adata1)
@@ -52,8 +60,8 @@ def test_trainer_successful_training():
     # Create DataLoader
     data_loader = create_test_dataloader(batch_size, seq_length, emb_dim=embedding_dim)
 
-    # Initialize model
-    model = MMContextEncoder(
+    # Initialize encoder
+    encoder = MMContextEncoder(
         embedding_dim=embedding_dim,
         hidden_dim=16,
         num_layers=1,
@@ -79,13 +87,13 @@ def test_trainer_successful_training():
     loss_manager.add_loss(reconstruction_loss_fn, weight=0.5)
 
     # Initialize optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3)
     # display one batch of the data loader
     data_key = "data_embedding"
     context_key = "context_embedding"
     # Initialize Trainer with all required embeddings
     trainer = Trainer(
-        model=model,
+        encoder=encoder,
         loss_manager=loss_manager,
         optimizer=optimizer,
         device=torch.device("cpu"),
@@ -105,17 +113,17 @@ def test_trainer_data_context_missing_cross():
     logger.info("TEST: test_trainer_data_context_missing_cross")
     data_loader = create_test_dataloader()
 
-    # Create a simplified model and loss for the test
-    model = MMContextEncoder(embedding_dim=16, hidden_dim=16)
+    # Create a simplified encoder and loss for the test
+    encoder = MMContextEncoder(embedding_dim=16, hidden_dim=16)
     loss_manager = LossManager()
     loss_manager.add_loss(ContrastiveLoss(current_mode="data_context", target_mode="context_context"), weight=1.0)
 
     # Initialize Trainer without 'cross' embedding
     with pytest.raises(ValueError):
         trainer = Trainer(
-            model=model,
+            encoder=encoder,
             loss_manager=loss_manager,
-            optimizer=torch.optim.Adam(model.parameters()),
+            optimizer=torch.optim.Adam(encoder.parameters()),
             input_embeddings={"main": "data_embedding"},  # Only 'main' provided
         )
         trainer.train_epoch(data_loader)
@@ -128,11 +136,11 @@ def test_trainer_default_values():
     data_loader = create_test_dataloader(emb_dim=emb_dim)
 
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim)
+    encoder = MMContextEncoder(embedding_dim=emb_dim)
     loss_manager = LossManager()
     loss_manager.add_loss(ContrastiveLoss())
     # Initialize Trainer with default settings
-    trainer = Trainer(model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()))
+    trainer = Trainer(encoder=encoder, loss_manager=loss_manager, optimizer=torch.optim.Adam(encoder.parameters()))
 
     train_loss = trainer.train_epoch(data_loader)
     assert train_loss >= 0, "Training loss should be non-negative."
@@ -145,11 +153,11 @@ def test_trainer_evaluation():
     eval_loader = create_test_dataloader(emb_dim=emb_dim)
 
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim)
+    encoder = MMContextEncoder(embedding_dim=emb_dim)
     loss_manager = LossManager()
     loss_manager.add_loss(ContrastiveLoss())
     # Trainer initialization
-    trainer = Trainer(model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()))
+    trainer = Trainer(encoder=encoder, loss_manager=loss_manager, optimizer=torch.optim.Adam(encoder.parameters()))
 
     val_loss = trainer.evaluate(eval_loader)
     assert val_loss >= 0, "Validation loss should be non-negative."
@@ -165,11 +173,11 @@ def test_trainer_fit_method():
     val_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim)
 
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    encoder = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
     loss_manager = LossManager()
     loss_manager.add_loss(ContrastiveLoss())
     # Trainer initialization
-    trainer = Trainer(model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()))
+    trainer = Trainer(encoder=encoder, loss_manager=loss_manager, optimizer=torch.optim.Adam(encoder.parameters()))
     val_loss1 = trainer.evaluate(val_loader)
     trainer.fit(train_loader, val_loader, epochs=2)
     val_loss2 = trainer.evaluate(val_loader)
@@ -186,14 +194,14 @@ def test_trainer_save_load_weights(tmp_path):
     val_loader = create_test_dataloader(emb_dim=emb_dim)
 
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    encoder = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
     loss_manager = LossManager()
     loss_manager.add_loss(ContrastiveLoss())
     # Trainer initialization
-    trainer = Trainer(model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()))
+    trainer = Trainer(encoder=encoder, loss_manager=loss_manager, optimizer=torch.optim.Adam(encoder.parameters()))
 
     # Define save path
-    save_path = tmp_path / "model.pth"
+    save_path = tmp_path / "encoder.pth"
     # Run training to have something to save
     trainer.fit(train_loader, val_loader, epochs=1, save_path=str(save_path))
 
@@ -201,17 +209,17 @@ def test_trainer_save_load_weights(tmp_path):
     assert save_path.exists(), "Model file was not saved."
 
     # Load and verify
-    new_model = MMContextEncoder(embedding_dim=16, hidden_dim=16)
-    new_model.load(save_path)
-    assert new_model, "Failed to load the saved model."
+    new_encoder = MMContextEncoder(embedding_dim=16, hidden_dim=16)
+    new_encoder.load(save_path)
+    assert new_encoder, "Failed to load the saved encoder."
 
-    # use the new model and compare the loss with the old model
+    # use the new encoder and compare the loss with the old encoder
     new_trainer = Trainer(
-        model=new_model, loss_manager=loss_manager, optimizer=torch.optim.Adam(new_model.parameters())
+        encoder=new_encoder, loss_manager=loss_manager, optimizer=torch.optim.Adam(new_encoder.parameters())
     )
     val_loss1 = trainer.evaluate(val_loader)
     val_loss2 = new_trainer.evaluate(val_loader)
-    assert val_loss1 == val_loss2, "Validation loss should be the same when reloading model and using same data."
+    assert val_loss1 == val_loss2, "Validation loss should be the same when reloading encoder and using same data."
 
 
 def test_trainer_predictions():
@@ -225,10 +233,10 @@ def test_trainer_predictions():
         logger.info(f"predict loader: {batch.keys()}")
         break
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    encoder = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
 
     # Trainer initialization
-    trainer = Trainer(model=model, optimizer=torch.optim.Adam(model.parameters()))
+    trainer = Trainer(encoder=encoder, optimizer=torch.optim.Adam(encoder.parameters()))
     # generate test adata
     adata = create_test_emb_anndata(n_samples=100, emb_dim=emb_dim)
     new_adata = trainer.infer_adata(adata, sample_id_key="sample_id", seq_length=seq_length, batch_size=6)
@@ -243,14 +251,14 @@ def test_trainer_custom_dict_keys():
     data_loader = create_test_dataloader(emb_dim=emb_dim, data_key="data_emb", context_key="context_emb")
 
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim)
+    encoder = MMContextEncoder(embedding_dim=emb_dim)
     loss_manager = LossManager(data_key="data_emb", context_key="context_emb")
     loss_manager.add_loss(ContrastiveLoss())
     # Initialize Trainer with default settings
     trainer = Trainer(
-        model=model,
+        encoder=encoder,
         loss_manager=loss_manager,
-        optimizer=torch.optim.Adam(model.parameters()),
+        optimizer=torch.optim.Adam(encoder.parameters()),
         data_key="data_emb",
         context_key="context_emb",
     )
@@ -267,11 +275,11 @@ def test_learnable_temperature():
     val_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim)
 
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    encoder = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
     loss_manager = LossManager()
     loss_manager.add_loss(ContrastiveLoss(target_mode="infoNCE"))
     # Trainer initialization
-    trainer = Trainer(model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()))
+    trainer = Trainer(encoder=encoder, loss_manager=loss_manager, optimizer=torch.optim.Adam(encoder.parameters()))
     val_loss1 = trainer.evaluate(val_loader)
     trainer.fit(train_loader, val_loader, epochs=1)
     temp1 = trainer.temperature
@@ -292,12 +300,46 @@ def test_fixed_temperature():
     val_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim)
 
     # Model and loss setup
-    model = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    encoder = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
     loss_manager = LossManager()
     loss_manager.add_loss(ContrastiveLoss(target_mode="infoNCE"))
     # Trainer initialization
     trainer = Trainer(
-        model=model, loss_manager=loss_manager, optimizer=torch.optim.Adam(model.parameters()), temperature=0.1
+        encoder=encoder, loss_manager=loss_manager, optimizer=torch.optim.Adam(encoder.parameters()), temperature=0.1
+    )
+    val_loss1 = trainer.evaluate(val_loader)
+    trainer.fit(train_loader, val_loader, epochs=1)
+    temp1 = trainer.temperature
+    val_loss2 = trainer.evaluate(val_loader)
+    trainer.fit(train_loader, val_loader, epochs=1)
+    temp2 = trainer.temperature
+    # assert that losses are different
+    assert val_loss1 != val_loss2, "Validation loss should change after training."
+    assert trainer  # Simple check to ensure trainer object exists post fit
+    assert temp1 == temp2 == 0.1, "Temperature should not change after training."
+
+
+def test_fit_with_decoder():
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_fit_with_decoder")
+    emb_dim = 16
+    n_samples = 100
+    train_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim, n_samples=n_samples)
+    val_loader = create_test_dataloader(batch_size=5, seq_length=2, emb_dim=emb_dim, n_samples=n_samples)
+
+    # Model and loss setup
+    encoder = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    decoder = ZINBDecoder(input_dim=emb_dim, hidden_dims=[16], output_dim=n_samples)
+    loss_manager = LossManager()
+    loss_manager.add_loss(ContrastiveLoss(target_mode="infoNCE"))
+    loss_manager.add_loss(ZINBLoss())
+    # Trainer initialization
+    trainer = Trainer(
+        encoder=encoder,
+        decoder=decoder,
+        loss_manager=loss_manager,
+        optimizer=torch.optim.Adam(encoder.parameters()),
+        temperature=0.1,
     )
     val_loss1 = trainer.evaluate(val_loader)
     trainer.fit(train_loader, val_loader, epochs=1)

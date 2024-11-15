@@ -1,13 +1,18 @@
-model:
-  type: mmcontext_encoder #mmcontext_encoder
-  latent_dim: ${pp.aligner.latent_dim}
-  hidden_dim: 64
-  num_layers: 2
-  num_heads: 1
-  use_self_attention: False
-  use_cross_attention: False
-  activation: relu
-  dropout: 0.1
+models:
+  encoder:
+    type: mmcontext_encoder #mmcontext_encoder
+    latent_dim: ${pp.aligner.latent_dim}
+    hidden_dim: 64
+    num_layers: 2
+    num_heads: 1
+    use_self_attention: False
+    use_cross_attention: False
+    activation: relu
+    dropout: 0.1
+  decoder:
+    type: zinb_decoder
+    train: True
+    hidden_dims: [64]
 
 optimizer:
   - type: adam
@@ -41,4 +46,3 @@ trainer:
     cross: context_embedding
   temperature: null # This relates to cosine similarity loss and will be learned if None, or can be set to fixed value
   epochs: 100
-  save_path: best_model.pth
