@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from mmcontext.engine import ContrastiveLoss, LossManager
 
 
-def configure_optimizer(cfg: DictConfig, model_parameters) -> torch.optim.Optimizer:
+def configure_optimizer(cfg: DictConfig, model_parameters) -> torch.optim.Optimizer | None:
     """
     Configures the optimizer based on the configuration.
 
@@ -52,7 +52,7 @@ def configure_optimizer(cfg: DictConfig, model_parameters) -> torch.optim.Optimi
             raise ValueError(f"Unknown optimizer type: {opt_type}")
 
 
-def configure_scheduler(cfg: DictConfig, optimizer: torch.optim.Optimizer) -> torch.optim.lr_scheduler._LRScheduler:
+def configure_scheduler(cfg: DictConfig, optimizer: torch.optim.Optimizer):
     """Configures the scheduler based on the configuration.
 
     Parameters
@@ -269,9 +269,9 @@ class Trainer:
             self.temperature = temp
             # Prepare targets
             targets = {
-                self.data_key: batch[self.data_key],
-                self.context_key: batch[self.context_key],
-                "raw_data": batch["raw_data"],
+                self.data_key: batch[self.data_key].to(self.device),
+                self.context_key: batch[self.context_key].to(self.device),
+                "raw_data": batch["raw_data"].to(self.device),
             }
 
             # Compute loss
@@ -333,8 +333,8 @@ class Trainer:
                 outputs["temperature"] = temp
                 # Prepare targets
                 targets = {
-                    self.data_key: batch[self.data_key],
-                    self.context_key: batch[self.context_key],
+                    self.data_key: batch[self.data_key].to(self.device),
+                    self.context_key: batch[self.context_key].to(self.device),
                 }
 
                 # Compute loss
