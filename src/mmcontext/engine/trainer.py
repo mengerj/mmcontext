@@ -6,7 +6,7 @@ import torch
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
-from mmcontext.engine import ContrastiveLoss, LossManager
+from mmcontext.engine import ContrastiveLoss, LossManager, PlaceholderModel, ZINBLoss
 
 
 def configure_optimizer(cfg: DictConfig, model_parameters) -> torch.optim.Optimizer | None:
@@ -98,6 +98,7 @@ class Trainer:
         The encoder model to train. It should not modify the data dimension but is trained to learn the context.
     decoder
         The decoder model to train. It outputs paramters of a distribution like ZINB which can be used to calculate the loss.
+        By default, it is set to a PlaceholderModel which does nothing.
     loss_manager
         Manages multiple loss functions. Not needed for inference.
     optimizer
@@ -131,7 +132,7 @@ class Trainer:
     def __init__(
         self,
         encoder: torch.nn.Module,
-        decoder: torch.nn.Module,
+        decoder: torch.nn.Module = PlaceholderModel(),
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
         loss_manager: LossManager | None = None,
@@ -141,6 +142,7 @@ class Trainer:
         data_key: str = "data_embedding",
         context_key: str = "context_embedding",
         sample_id_key: str = "sample_id",
+        raw_data_key: str = "raw_data",
         temperature: float | None = None,
     ):
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -152,6 +154,7 @@ class Trainer:
         self.data_key = data_key
         self.context_key = context_key
         self.sample_id_key = sample_id_key
+        self.raw_data_key = raw_data_key
         self.logger = logger or logging.getLogger(__name__)
         self.seq_length = None  # Placeholder to store seq_length for inference
         self.batch_size = None  # Placeholder to store batch_size for inference
@@ -209,6 +212,14 @@ class Trainer:
                     )
                 if loss_fn.target_mode == "infoNCE" and self.temperature is None:
                     self.encoder.learn_temperature = True
+            if isinstance(loss_fn, ZINBLoss):
+                if isinstance(self.decoder, PlaceholderModel):
+                    self.logger.error(
+                        "Decoder is a PlaceholderModel. Please provide a decoder model to calculate ZINB loss."
+                    )
+                    raise ValueError(
+                        "Decoder is a PlaceholderModel. Please provide a decoder model to calculate ZINB loss."
+                    )
 
     def train_epoch(self, data_loader: DataLoader) -> float:
         """
@@ -256,8 +267,11 @@ class Trainer:
                 self.batch_size = in_main.size(0)
             # Forward pass
             out, temp = self.encoder(in_main=in_main, in_cross=in_cross)
+            flat_out = out.view(
+                -1, out.size(-1)
+            )  # Flatten the output for the decoder as we are not using the seq_length dimension
             out_distribution = self.decoder(
-                out
+                flat_out
             )  # outputs of the decoder are expected to be parameters of a distribution in a dict
             outputs = {}
             outputs[self.input_embeddings["main"]] = out
@@ -267,11 +281,12 @@ class Trainer:
             outputs["temperature"] = temp
             outputs["out_distribution"] = out_distribution
             self.temperature = temp
+
             # Prepare targets
             targets = {
                 self.data_key: batch[self.data_key].to(self.device),
                 self.context_key: batch[self.context_key].to(self.device),
-                "raw_data": batch["raw_data"].to(self.device),
+                self.raw_data_key: batch[self.raw_data_key].to(self.device),
             }
 
             # Compute loss
@@ -307,7 +322,8 @@ class Trainer:
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
             raise ValueError("Loss Manager must contain at least one loss function.")
-        self.model.eval()
+        self.encoder.eval()
+        self.decoder.eval()
         total_loss = 0.0
         num_batches = len(data_loader)
 
@@ -324,17 +340,23 @@ class Trainer:
                 else:
                     in_cross = None
                 # Forward pass
-                out, temp = self.model(in_main=in_main, in_cross=in_cross)
+                out, temp = self.encoder(in_main=in_main, in_cross=in_cross)
+                flat_out = out.view(
+                    -1, out.size(-1)
+                )  # Flatten the output for the decoder as we are not using the seq_length dimension
+                out_distribution = self.decoder(flat_out)
                 outputs = {}
                 outputs[self.input_embeddings["main"]] = out
                 outputs[self.input_embeddings["cross"]] = (
                     in_cross  # Pass the original embeddings used for cross attention to allow for data_context contrastive loss
                 )
                 outputs["temperature"] = temp
+                outputs["out_distribution"] = out_distribution
                 # Prepare targets
                 targets = {
                     self.data_key: batch[self.data_key].to(self.device),
                     self.context_key: batch[self.context_key].to(self.device),
+                    self.raw_data_key: batch[self.raw_data_key].to(self.device),
                 }
 
                 # Compute loss
@@ -351,7 +373,7 @@ class Trainer:
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
         epochs: int = 10,
-        save_path: str | None = None,
+        save: bool = False,
     ):
         """
         Trains the model for a specified number of epochs and optionally evaluates on a validation set.
@@ -364,21 +386,21 @@ class Trainer:
             DataLoader for validation data. Defaults to None.
         epochs
             Number of epochs to train. Defaults to 10.
-        save_path
-            Path to save the model checkpoints. Defaults to None.
+        save
+            Wether to save the model. Validation loader is required and determines the best model. Defaults to False.
 
         Raises
         ------
         ValueError
             If Loss Manager does not contain any loss functions
         ValueError
-            If Validation DataLoader is not provided when save_path is specified.
+            If Validation DataLoader is not provided when save is True.
         """
         # check if loss manager contains any loss functions
         if len(self.loss_manager.loss_functions) == 0:
             raise ValueError("Loss Manager must contain at least one loss function.")
 
-        if save_path is not None and val_loader is None:
+        if save and val_loader is None:
             self.logger.error("Validation DataLoader is required to save the model checkpoints.")
             raise ValueError("Validation DataLoader is required to save the model checkpoints.")
         best_val_loss = float("inf")
@@ -392,11 +414,16 @@ class Trainer:
                 self.logger.info(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
                 # Save the model if validation loss has improved
-                if val_loss < best_val_loss and save_path:
-                    self.logger.info("Attempting to save model...")
+                if val_loss < best_val_loss and save:
                     best_val_loss = val_loss
-                    torch.save(self.model.state_dict(), save_path)
-                    self.logger.info(f"Validation loss improved. Model saved to {save_path}")
+                    self.encoder.save(file_path="encoder_weights.pth")
+                    self.logger.info("Validation loss improved. Encoder weights saved in current working dir.")
+                    self.decoder.save(file_path="decoder_weights.pth")
+                    self.logger.info("Validation loss improved. Decoder weights saved in current working dir.")
+                # If the validation loss has not improved for 10 epochs, stop training
+                if epoch % 10 == 0 and val_loss > best_val_loss:
+                    self.logger.info("Validation loss has not improved for 10 epochs. Stopping training.")
+                    break
             else:
                 self.logger.info(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}")
             self.logger.info(f"Temperature: {self.temperature}")
@@ -414,7 +441,8 @@ class Trainer:
         -------
         modified_embeddings : Dict[str, torch.Tensor] Dictionary containing lists of embeddings.
         """
-        self.model.eval()
+        self.encoder.eval()
+        self.decoder.eval()
         modified_embeddings = {self.data_key: [], self.context_key: [], self.sample_id_key: []}
 
         with torch.no_grad():
@@ -431,10 +459,12 @@ class Trainer:
                 sample_ids = batch[self.sample_id_key]  # Shape: (batch_size, seq_length)  # Not used in prediction
 
             # Forward pass
-            out = self.model(in_main=in_main, in_cross=in_cross)
+            out = self.encoder(in_main=in_main, in_cross=in_cross)
+            out_distribution = self.decoder(out)
             outputs = {}
             outputs[self.input_embeddings["main"]] = out
             outputs[self.input_embeddings["cross"]] = in_cross  # Pass the original embeddings used for cross attention
+            outputs["out_distribution"] = out_distribution
 
             # Initialize dictionary to collect outputs if not already initialized
             if "modified_embeddings" not in locals():
@@ -451,6 +481,11 @@ class Trainer:
                 outputs[self.context_key].squeeze().cpu()
                 if outputs[self.context_key].dim() == 1
                 else outputs[self.context_key].cpu()
+            )
+            modified_embeddings[self.raw_data_key].append(
+                outputs[self.raw_data_key].squeeze().cpu()
+                if outputs[self.raw_data_key].dim() == 1
+                else outputs[self.raw_data_key].cpu()
             )
             modified_embeddings[self.sample_id_key].append(
                 sample_ids.cpu()
@@ -472,6 +507,7 @@ class Trainer:
             Key in `adata.obs` containing the sample IDs.
         """
         # Import DataSetConstructor
+        from mmcontext.engine import sample_zinb
         from mmcontext.pp import DataSetConstructor
 
         # Initialize DataSetConstructor
@@ -500,8 +536,9 @@ class Trainer:
 
         # Initialize lists to collect outputs and sample IDs
         modified_embeddings = {self.data_key: [], sample_id_key: []}
-
-        self.model.eval()
+        out_distribution = []
+        self.encoder.eval()
+        self.decoder.eval()
 
         with torch.no_grad():
             for _batch_idx, batch in enumerate(data_loader):
@@ -516,8 +553,7 @@ class Trainer:
                     in_cross = None
 
                 # Forward pass
-                out, _ = self.model(in_main=in_main, in_cross=in_cross)
-
+                out, _ = self.encoder(in_main=in_main, in_cross=in_cross)
                 # Flatten seq_length dimension
                 batch_size, seq_len, emb_dim = out.size()
                 out_flat = out.view(batch_size * seq_len, emb_dim)
@@ -527,9 +563,14 @@ class Trainer:
                 modified_embeddings[self.data_key].append(out_flat.cpu())
                 modified_embeddings[sample_id_key].append(sample_ids_flat.cpu())
 
+                if not isinstance(self.decoder, PlaceholderModel):
+                    out_distribution.append(self.decoder(out_flat))
+
         # Concatenate all outputs
         modified_embeddings = {k: torch.cat(v, dim=0) for k, v in modified_embeddings.items()}
 
+        # Concatenate out_distribution (it is a list of dictionaries containing tensors)
+        out_distribution = {k: torch.cat([d[k] for d in out_distribution], dim=0) for k in out_distribution[0].keys()}
         # Map sample IDs to embeddings
         id_to_embedding = {}
         for sample_id, embedding in zip(
@@ -564,4 +605,8 @@ class Trainer:
         # Stack embeddings into a tensor
         embeddings_tensor = torch.stack(embeddings_list)
         adata_new.obsm["mod_emb"] = embeddings_tensor.detach().numpy()
+        # If a different decoder than PlaceholderModel is used, reconstruct the data
+        if not isinstance(self.decoder, PlaceholderModel):
+            reconstructed = sample_zinb(out_distribution["mu"], out_distribution["theta"], out_distribution["pi"])
+            adata_new.layers["reconstructed"] = reconstructed.detach().numpy()
         return adata_new

@@ -3,6 +3,7 @@ import logging
 import anndata
 import numpy as np
 import pandas as pd
+import scanpy as sc
 import scipy.sparse as sp
 
 
@@ -232,10 +233,11 @@ def remove_duplicate_cells(adata: anndata.AnnData, inplace: bool = True):
 def remove_entries(adata):
     """Remove zero variance genes and cells, and zero rows and columns from an AnnData object."""
     # Remove zero variance genes
-    remove_zero_variance_genes(adata)
+    # remove_zero_variance_genes(adata)
     # Remove zero variance cells
     check_zero_variance_cells(adata)
     # Remove zero rows and columns
-    remove_zero_rows_and_columns(adata)
+    # sc.pp.filter_genes(adata, min_cells=1)
+    sc.pp.filter_cells(adata, min_genes=1)
     # remove duplicate cells
-    remove_duplicate_cells(adata)
+    # remove_duplicate_cells(adata)

@@ -90,6 +90,7 @@ class LossManager:
         total_loss = 0.0
         for loss_function, weight in self.loss_functions:
             loss = loss_function.compute_loss(outputs, targets, self.data_key, self.context_key)
+            # self.logger.debug("Loss: %s: %.4f", loss_function.description, loss*weight)
             total_loss += weight * loss
         return total_loss
 
@@ -115,6 +116,11 @@ class LossManager:
                 # Create a ReconstructionLoss instance with specified settings
                 loss_fn = ReconstructionLoss(
                     reduction=loss_cfg.get("reduction"),
+                )
+            elif loss_type == "zinb_loss":
+                # Create a ZINBLoss instance with specified settings
+                loss_fn = ZINBLoss(
+                    eps=loss_cfg.get("eps"),
                 )
             else:
                 self.logger.error(f"Unknown loss type '{loss_type}'")
@@ -338,3 +344,109 @@ class ReconstructionLoss(LossFunction):
 
         loss = F.mse_loss(output_embeddings, target_embeddings, reduction=self.reduction)
         return loss
+
+
+class ZINBLoss(LossFunction):
+    """Class to compute the Zero-Inflated Negative Binomial (ZINB) negative log-likelihood loss.
+
+    The compute_loss function is used by the LossManger to compute the loss given the model outputs and target values.
+    outputs are expected to contain the keys 'mu', 'theta', 'pi' which are the parameters of the ZINB distribution.
+    targets are expected to contain the key 'raw_data' which are the target counts.
+
+    Parameters
+    ----------
+    eps
+        Small value to ensure numerical stability.
+    """
+
+    def __init__(self, eps=1e-7):
+        super().__init__()
+        self.eps = eps
+        self.description = "ZINBLoss"
+
+    def compute_loss(self, outputs: dict, targets: dict, data_key: str = None, context_key: str = None):
+        """
+        Computes the ZINB negative log-likelihood loss.
+
+        Parameters
+        ----------
+        outputs
+            A dictionary containing the model outputs with keys 'mu', 'theta', 'pi'.
+        targets
+            A dictionary containing the target counts with key 'counts'.
+        data_key
+            Not used in this loss function.
+        context_key
+            Not used in this loss function.
+
+        Returns
+        -------
+        The computed ZINB negative log-likelihood loss.
+        """
+        outputs = outputs["out_distribution"]
+        if outputs is None:
+            self.logger.error(
+                "ZINB loss was chosen but no distribution outputs were found. Maybe forgot to specify the decoder?"
+            )
+            raise ValueError(
+                "ZINB loss was chosen but no distribution outputs were found. Maybe forgot to specify the decoder?"
+            )
+        # Extract the necessary tensors from outputs and targets
+        mu = outputs["mu"]
+        theta = outputs["theta"]
+        pi = outputs["pi"]
+        x = targets["raw_data"]
+        x = x.view(-1, x.size(-1))  # Flatten the raw data for the loss computation
+
+        # Ensure tensors are float tensors
+        x = x.float()
+        mu = mu.float()
+        theta = theta.float()
+        pi = pi.float()
+
+        # Compute the loss using the provided function
+        loss = self.zinb_negative_log_likelihood(x, mu, theta, pi, eps=self.eps)
+
+        return loss
+
+    def nb_positive_log_prob(self, x, mu, theta, eps=1e-7):
+        """Computes log probability of x under Negative Binomial distribution."""
+        # Ensure numerical stability
+        x = torch.clamp(x, min=0)
+        mu = torch.clamp(mu, min=eps)
+        theta = torch.clamp(theta, min=eps)
+
+        # Compute log probabilities
+        log_theta_mu_eps = torch.log(theta + mu + eps)
+        res = (
+            theta * (torch.log(theta + eps) - log_theta_mu_eps)
+            + x * (torch.log(mu + eps) - log_theta_mu_eps)
+            + torch.lgamma(x + theta)
+            - torch.lgamma(theta)
+            - torch.lgamma(x + 1)
+        )
+        return res
+
+    def zinb_negative_log_likelihood(self, x, mu, theta, pi, eps=1e-7):
+        """Computes the negative log-likelihood of the Zero-Inflated Negative Binomial distribution."""
+        # Ensure numerical stability
+        theta = torch.clamp(theta, min=eps)
+        mu = torch.clamp(mu, min=eps)
+        pi = torch.clamp(pi, min=eps, max=1 - eps)
+        x = torch.clamp(x, min=0)
+
+        # Compute log probabilities
+        nb_case = self.nb_positive_log_prob(x, mu, theta, eps)
+        nb_zero = self.nb_positive_log_prob(torch.zeros_like(x), mu, theta, eps)
+
+        # Log probability when x == 0
+        log_prob_zero = torch.log(pi + (1 - pi) * torch.exp(nb_zero) + eps)
+
+        # Log probability when x > 0
+        log_prob_nb = torch.log(1 - pi + eps) + nb_case
+
+        # Combine log probabilities
+        log_prob = torch.where(x < eps, log_prob_zero, log_prob_nb)
+
+        nll = -torch.sum(log_prob) / log_prob.size(0)
+        return nll

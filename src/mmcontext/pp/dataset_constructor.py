@@ -3,6 +3,7 @@
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 import torch
 from anndata import AnnData
 from torch.utils.data import Dataset
@@ -31,6 +32,8 @@ class DataSetConstructor:
         Key to be used for context embeddings in the Dataset.
     out_sample_id_key
         Key to be used for sample IDs in the Dataset.
+    out_raw_data_key
+        Key to be used for raw data in the Dataset.
     """
 
     def __init__(
@@ -41,6 +44,7 @@ class DataSetConstructor:
         out_data_key: str = "data_embedding",
         out_context_key: str = "context_embedding",
         out_sample_id_key: str = "sample_id",
+        out_raw_data_key: str = "raw_data",
     ):
         self.in_data_key = in_data_key
         self.in_context_key = in_context_key
@@ -48,9 +52,11 @@ class DataSetConstructor:
         self.out_data_key = out_data_key
         self.out_context_key = out_context_key
         self.out_sample_id_key = out_sample_id_key
+        self.out_raw_data_key = out_raw_data_key
         self.data_embeddings: list[np.ndarray] = []
         self.context_embeddings: list[np.ndarray] = []
         self.sample_ids: list[str] = []
+        self.raw_data: list[np.ndarray] = []
 
     def add_anndata(self, adata: AnnData):
         """
@@ -75,6 +81,8 @@ class DataSetConstructor:
         # Retrieve embeddings
         d_emb = adata.obsm[self.in_data_key]
         c_emb = adata.obsm[self.in_context_key]
+        # Retrieve raw data
+        raw_data = adata.X.toarray() if isinstance(adata.X, sp.spmatrix) else adata.X
 
         # Check that the embeddings have the same number of samples
         if d_emb.shape[0] != c_emb.shape[0]:
@@ -108,10 +116,11 @@ class DataSetConstructor:
             if duplicate_ids:
                 raise ValueError(f"Duplicate sample IDs found: {duplicate_ids}")
 
-        # Append embeddings and sample IDs
+        # Append embeddings and sample IDs and raw data
         self.data_embeddings.append(d_emb)
         self.context_embeddings.append(c_emb)
         self.sample_ids.extend(sample_ids)
+        self.raw_data.extend(raw_data)
 
     def construct_dataset(self, seq_length: int = None) -> Dataset:
         """
@@ -138,6 +147,7 @@ class DataSetConstructor:
         data_embeddings = np.vstack(self.data_embeddings)
         context_embeddings = np.vstack(self.context_embeddings)
         sample_ids = np.array(self.sample_ids)
+        raw_data = np.vstack(self.raw_data)
 
         if seq_length is not None:
             # Use the create_sequences method to split data into sequences
@@ -145,15 +155,18 @@ class DataSetConstructor:
                 data_embeddings_seq,
                 context_embeddings_seq,
                 sample_ids_seq,
-            ) = self.create_sequences(data_embeddings, context_embeddings, sample_ids, seq_length)
+                raw_data_seq,
+            ) = self.create_sequences(data_embeddings, context_embeddings, sample_ids, raw_data, seq_length)
             # Create and return a PyTorch Dataset with sequences
             dataset = EmbeddingDataset(
                 data_embeddings_seq,
                 context_embeddings_seq,
                 sample_ids_seq,
+                raw_data_seq,
                 out_data_key=self.out_data_key,
                 out_context_key=self.out_context_key,
                 out_sample_id_key=self.out_sample_id_key,
+                out_raw_data_key=self.out_raw_data_key,
                 seq_length=seq_length,
             )
         else:
@@ -162,9 +175,11 @@ class DataSetConstructor:
                 data_embeddings,
                 context_embeddings,
                 sample_ids,
+                raw_data,
                 out_data_key=self.out_data_key,
                 out_context_key=self.out_context_key,
                 out_sample_id_key=self.out_sample_id_key,
+                out_raw_data_key=self.out_raw_data_key,
                 seq_length=None,
             )
 
@@ -177,7 +192,12 @@ class DataSetConstructor:
         self.sample_ids = []
 
     def create_sequences(
-        self, data_embeddings: np.ndarray, context_embeddings: np.ndarray, sample_ids: np.ndarray, seq_length: int = 64
+        self,
+        data_embeddings: np.ndarray,
+        context_embeddings: np.ndarray,
+        sample_ids: np.ndarray,
+        raw_data: np.ndarray,
+        seq_length: int = 64,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Splits embeddings and sample IDs into sequences of a specified length.
@@ -210,13 +230,15 @@ class DataSetConstructor:
         data_embeddings = data_embeddings[:total_samples]
         context_embeddings = context_embeddings[:total_samples]
         sample_ids = sample_ids[:total_samples]
+        raw_data = raw_data[:total_samples]
 
         # Reshape into sequences
         data_embeddings_seq = data_embeddings.reshape(num_sequences, seq_length, -1)
         context_embeddings_seq = context_embeddings.reshape(num_sequences, seq_length, -1)
         sample_ids_seq = sample_ids.reshape(num_sequences, seq_length)
+        raw_data_seq = raw_data.reshape(num_sequences, seq_length, -1)
 
-        return data_embeddings_seq, context_embeddings_seq, sample_ids_seq
+        return data_embeddings_seq, context_embeddings_seq, sample_ids_seq, raw_data_seq
 
 
 class EmbeddingDataset(Dataset):
@@ -233,6 +255,8 @@ class EmbeddingDataset(Dataset):
         Context embeddings of shape matching data_embeddings.
     sample_ids
         Sample IDs corresponding to the embeddings.
+    raw_data
+        Raw data corresponding to the embeddings.
     seq_length
         Length of sequences. If provided, data will be divided into sequences of this length.
     """
@@ -242,19 +266,23 @@ class EmbeddingDataset(Dataset):
         data_embeddings: np.ndarray,
         context_embeddings: np.ndarray,
         sample_ids: np.ndarray,
+        raw_data: np.ndarray,
         out_data_key: str,
         out_context_key: str,
         out_sample_id_key: str,
+        out_raw_data_key: str,
         seq_length: int = None,
     ):
         self.seq_length = seq_length
         self.out_data_key = out_data_key
         self.out_context_key = out_context_key
         self.out_sample_id_key = out_sample_id_key
+        self.out_raw_data_key = out_raw_data_key
         # Convert numpy arrays to torch tensors
         self.data_embeddings = torch.tensor(data_embeddings, dtype=torch.float32)
         self.context_embeddings = torch.tensor(context_embeddings, dtype=torch.float32)
         self.sample_ids = sample_ids  # Keep as numpy array for IDs
+        self.raw_data = raw_data
 
         # Determine data structure (individual samples or sequences)
         if seq_length is not None:
@@ -279,20 +307,24 @@ class EmbeddingDataset(Dataset):
             data_seq = self.data_embeddings[idx]
             context_seq = self.context_embeddings[idx]
             sample_ids_seq = self.sample_ids[idx]
+            raw_data_seq = self.raw_data[idx]
 
             return {
                 self.out_data_key: data_seq,  # Shape: (seq_length, embedding_dim)
                 self.out_context_key: context_seq,  # Shape: (seq_length, embedding_dim)
                 self.out_sample_id_key: sample_ids_seq,  # Shape: (seq_length,)
+                self.out_raw_data_key: raw_data_seq,  # Shape: (seq_length, num_features)
             }
         else:
             # Return individual sample
             data_sample = self.data_embeddings[idx]
             context_sample = self.context_embeddings[idx]
             sample_id = self.sample_ids[idx]
+            raw_data = self.raw_data[idx]
 
             return {
                 self.out_data_key: data_sample,  # Shape: (embedding_dim,)
                 self.out_context_key: context_sample,  # Shape: (embedding_dim,)
                 self.out_sample_id_key: sample_id,  # Scalar
+                self.out_raw_data_key: raw_data,  # Shape: (num_features,)
             }
