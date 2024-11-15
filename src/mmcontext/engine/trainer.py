@@ -94,8 +94,10 @@ class Trainer:
 
     Parameters
     ----------
-    model
-        The neural network model to train.
+    enocder
+        The encoder model to train. It should not modify the data dimension but is trained to learn the context.
+    decoder
+        The decoder model to train. It outputs paramters of a distribution like ZINB which can be used to calculate the loss.
     loss_manager
         Manages multiple loss functions. Not needed for inference.
     optimizer
@@ -128,7 +130,8 @@ class Trainer:
 
     def __init__(
         self,
-        model: torch.nn.Module,
+        encoder: torch.nn.Module,
+        decoder: torch.nn.Module,
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
         loss_manager: LossManager | None = None,
@@ -141,7 +144,8 @@ class Trainer:
         temperature: float | None = None,
     ):
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = model.to(self.device)
+        self.encoder = encoder.to(self.device)
+        self.decoder = decoder.to(self.device)
         self.loss_manager = loss_manager
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -152,7 +156,7 @@ class Trainer:
         self.seq_length = None  # Placeholder to store seq_length for inference
         self.batch_size = None  # Placeholder to store batch_size for inference
         self.temperature = temperature
-        self.model.temperature = temperature
+        self.encoder.temperature = temperature
 
         # Set default input_embeddings if not provided
         if input_embeddings is None:
@@ -199,12 +203,12 @@ class Trainer:
                             "in_cross embeddings are required when using data_context (current_mode) contrastive loss. Eventhough cross attention might not be used, the embeddings are required for loss computation."
                         )
                 self.logger.info(f"Temperature: {self.temperature}")
-                if self.temperature is not None and self.model.learn_temperature:
+                if self.temperature is not None and self.encoder.learn_temperature:
                     raise ValueError(
-                        "Temperature is provided, but model wasn't reloaded. Reinitialize model to ensure temperature won't be learned."
+                        "Temperature is provided, but encoder wasn't reloaded. Reinitialize the encoder to ensure temperature won't be learned."
                     )
                 if loss_fn.target_mode == "infoNCE" and self.temperature is None:
-                    self.model.learn_temperature = True
+                    self.encoder.learn_temperature = True
 
     def train_epoch(self, data_loader: DataLoader) -> float:
         """
@@ -231,7 +235,7 @@ class Trainer:
             raise ValueError("Optimizer is not provided.")
         if self.scheduler is None:
             self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda epoch: 1.0)
-        self.model.train()
+        self.encoder.train()
         total_loss = 0.0
         num_batches = len(data_loader)
 
@@ -251,16 +255,24 @@ class Trainer:
             if self.batch_size is None:
                 self.batch_size = in_main.size(0)
             # Forward pass
-            out, temp = self.model(in_main=in_main, in_cross=in_cross)
+            out, temp = self.encoder(in_main=in_main, in_cross=in_cross)
+            out_distribution = self.decoder(
+                out
+            )  # outputs of the decoder are expected to be parameters of a distribution in a dict
             outputs = {}
             outputs[self.input_embeddings["main"]] = out
             outputs[self.input_embeddings["cross"]] = (
                 in_cross  # Pass the original embeddings used for cross attention to allow for data_context contrastive loss
             )
             outputs["temperature"] = temp
+            outputs["out_distribution"] = out_distribution
             self.temperature = temp
             # Prepare targets
-            targets = {self.data_key: batch[self.data_key], self.context_key: batch[self.context_key]}
+            targets = {
+                self.data_key: batch[self.data_key],
+                self.context_key: batch[self.context_key],
+                "raw_data": batch["raw_data"],
+            }
 
             # Compute loss
             loss = self.loss_manager.compute_total_loss(outputs=outputs, targets=targets)
