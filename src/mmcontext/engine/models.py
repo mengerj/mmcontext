@@ -9,22 +9,45 @@ import torch.nn.functional as F
 from omegaconf import DictConfig
 
 
-def configure_model(cfg: DictConfig):
-    """Configures the model based on the configuration."""
-    if cfg.type == "mmcontext_encoder":
-        model = MMContextEncoder(
-            embedding_dim=cfg.latent_dim,  # this has to be the same dimension as the latent dimension of the aligner
-            hidden_dim=cfg.hidden_dim,
-            num_layers=cfg.num_layers,
-            num_heads=cfg.num_heads,
-            use_self_attention=cfg.use_self_attention,
-            use_cross_attention=cfg.use_cross_attention,
-            activation=cfg.activation,
-            dropout=cfg.dropout,
+def configure_models(cfg: DictConfig, decoder_out_dim: int):
+    """Configures the model based on the configuration.
+
+    Parameters
+    ----------
+    cfg
+        Configuration object.
+    output_dim
+        Number of samples in a batch.
+
+    Returns
+    -------
+    encoder
+        Encoder model.
+    decoder
+        Decoder model.
+    """
+    cfg_e = cfg.encoder
+    cfg_d = cfg.decoder
+    if cfg_e.type == "mmcontext_encoder":
+        encoder = MMContextEncoder(
+            embedding_dim=cfg_e.latent_dim,  # this has to be the same dimension as the latent dimension of the aligner
+            hidden_dim=cfg_e.hidden_dim,
+            num_layers=cfg_e.num_layers,
+            num_heads=cfg_e.num_heads,
+            use_self_attention=cfg_e.use_self_attention,
+            use_cross_attention=cfg_e.use_cross_attention,
+            activation=cfg_e.activation,
+            dropout=cfg_e.dropout,
         )
     else:
         raise ValueError(f"Unknown model type: {cfg.type}")
-    return model
+    if cfg_d.type == "zinb_decoder":
+        decoder = ZINBDecoder(
+            input_dim=cfg_e.latent_dim,
+            hidden_dims=cfg_d.hidden_dims,
+            output_dim=decoder_out_dim,
+        )
+    return encoder, decoder
 
 
 class BaseModel(nn.Module, metaclass=abc.ABCMeta):
@@ -318,3 +341,80 @@ class LearnableTemperature(nn.Module):
         """Forward pass returns the temperature as a positive value."""
         # Ensure the temperature is always positive
         return torch.exp(self.temperature)
+
+
+class ZINBDecoder(BaseModel):
+    """ZINBDecoder models the parameters of a Zero-Inflated Negative Binomial distribution, for each gene and cell.
+
+    Parameters
+    ----------
+    input_dim
+        Dimensionality of the input (latent space)
+    hidden_dims
+        List of hidden layer sizes
+    output_dim
+        Dimensionality of the output (number of genes)
+    """
+
+    def __init__(self, input_dim: int, hidden_dims: int, output_dim: int):
+        print("ZINBDecoder")
+        super().__init__()
+        self.logger.info(
+            f"ZINBDecoder initialized with input_dim = {input_dim}, hidden_dims = {hidden_dims}, output_dim = {output_dim}."
+        )
+        # Build the decoder network
+        layers = []
+        prev_dim = input_dim
+        for h_dim in hidden_dims:
+            layers.append(nn.Linear(prev_dim, h_dim))
+            layers.append(nn.ReLU())
+            prev_dim = h_dim
+        self.decoder = nn.Sequential(*layers)
+
+        # Output layers for ZINB parameters
+        self.fc_mu = nn.Linear(prev_dim, output_dim)  # Mean parameter μ
+        self.fc_theta = nn.Linear(prev_dim, output_dim)  # Dispersion parameter θ
+        self.fc_pi = nn.Linear(prev_dim, output_dim)  # Dropout parameter π
+
+    def forward(self, x):
+        """
+        Forward pass through the decoder.
+
+        Parameters
+        ----------
+        - x (torch.Tensor): Input tensor of shape (batch_size, input_dim)
+
+        Returns
+        -------
+        - mu (torch.Tensor): Mean of Negative Binomial distribution
+        - theta (torch.Tensor): Dispersion parameter
+        - pi (torch.Tensor): Probability of zero inflation
+        """
+        h = self.decoder(x)
+        # Ensure parameters are in valid ranges
+        mu = torch.nn.functional.softplus(self.fc_mu(h))  # μ > 0
+        theta = torch.nn.functional.softplus(self.fc_theta(h))  # θ > 0
+        pi = torch.sigmoid(self.fc_pi(h))  # 0 < π < 1
+
+        return {"mu": mu, "theta": theta, "pi": pi}
+
+
+class PlaceholderModel(BaseModel):
+    """A placeholder model that inherits from BaseModel."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.logger.info("Placeholder model initialized.")
+
+    def forward(self, *inputs):
+        """Forward pass implementation doing nothing but logging."""
+        # Assuming input is a tensor or batch of tensors; returns them unchanged
+        return inputs if len(inputs) > 1 else inputs[0]
+
+    def save(self, file_path: str):
+        """Overriding save to simulate saving without actual disk operation."""
+        self.logger.info(f"Placeholder model saving of model to {file_path}")
+
+    def load(self, file_path: str):
+        """Overriding load to simulate loading without actual disk operation."""
+        self.logger.info(f"Placeholder model loading of model from {file_path}")

@@ -9,7 +9,7 @@ from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
-from mmcontext.engine import LossManager, Trainer, configure_model, configure_optimizer, configure_scheduler
+from mmcontext.engine import LossManager, Trainer, configure_models, configure_optimizer, configure_scheduler
 from mmcontext.eval import Evaluator
 from mmcontext.pl.plotting import plot_umap
 from mmcontext.pp import (
@@ -40,6 +40,8 @@ def main_train(cfg: DictConfig) -> None:
     # For training data
     data_dirs = {"train": cfg.data.train.subdir, "test": cfg.data.test.subdir}
     out_data_dirs = {"train": cfg.data.train.out_dir, "test": cfg.data.test.out_dir}
+    # Store the number of genes to ensure consistency
+    n_genes = []
     # make an empty dict with the same keys as data_dir
     datasets = {key: [] for key in data_dirs}
     for data_type in data_dirs.keys():
@@ -49,6 +51,7 @@ def main_train(cfg: DictConfig) -> None:
         for filename in cfg.data.get(data_type).get("filenames"):
             data_path = Path(to_absolute_path(f"{data_dir}/{filename}"))
             adata = anndata.read_h5ad(data_path)
+            # Ensure the same genes are used for the test data
             # remove cells with less than 10 appearances
             adata = consolidate_low_frequency_categories(
                 adata,
@@ -57,6 +60,10 @@ def main_train(cfg: DictConfig) -> None:
                 remove=cfg.pp.general.remove,
             )
             remove_entries(adata)
+            # make sure the number of genes is consistent across all datasets
+            n_genes.append(adata.shape[1])
+            if len(set(n_genes)) > 1:
+                raise ValueError("The number of genes in the datasets is not consistent.")
             data_embeddings = adata.obsm[data_embedding_key] if data_embedding_key else None
             context_embeddings = adata.obsm[context_embedding_key] if context_embedding_key else None
             # Create the embeddings or use precalculated embeddings
@@ -72,6 +79,15 @@ def main_train(cfg: DictConfig) -> None:
             adata.write_h5ad(save_path)
             # Add the AnnData object to the dataset
             dataset_constructor.add_anndata(adata)
+            # if data_type == "train":
+            #    train_gene_names.append(adata.var_names)
+            # if data_type == "test":
+            #    test_gene_names.append(adata.var_names)
+        # collapse the train_gene_names list of lists into a single list
+        # train_gene_names = [gene for sublist in train_gene_names for gene in sublist]
+        # test_gene_names = [gene for sublist in test_gene_names for gene in sublist]
+        # intersect of gene names, because we want to use the same genes for training and testing
+        # intersect_gene_names = list(set(train_gene_names).intersection(set(test_gene_names)))
         # Construct the dataset
         datasets[data_type] = dataset_constructor.construct_dataset(seq_length=seq_length)
 
@@ -82,18 +98,22 @@ def main_train(cfg: DictConfig) -> None:
         # For now use the test data as validation data
         val_loader = DataLoader(datasets["test"], batch_size=batch_size, shuffle=False)
 
-    # Load the model
-    model = configure_model(cfg.engine.model)
+    # Load the models
+    encoder, decoder = configure_models(
+        cfg.engine.models, decoder_out_dim=n_genes[0]
+    )  # output_dim is number of samples in a batch. Sequence dimension is not used for secoder
     # Configure the loss manager
     loss_manager = LossManager()
     loss_manager.configure_losses(cfg.engine)
     # Get the optimizer
-    optimizer = configure_optimizer(cfg.engine, model.parameters())
+    params = list(encoder.parameters()) + list(decoder.parameters())
+    optimizer = configure_optimizer(cfg.engine, params)
     # Get the scheduler
     scheduler = configure_scheduler(cfg.engine, optimizer)
     # Inituilize the trainer
     trainer = Trainer(
-        model=model,
+        encoder=encoder,
+        decoder=decoder,
         loss_manager=loss_manager,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -101,18 +121,23 @@ def main_train(cfg: DictConfig) -> None:
         temperature=cfg.engine.trainer.temperature,
     )
     # Train the model
-    trainer.fit(train_loader, val_loader, cfg.engine.trainer.epochs, save_path=cfg.engine.trainer.save_path)
+    trainer.fit(train_loader, val_loader, cfg.engine.trainer.epochs, save=True)
 
     # Use the best model to predict the test data
-    model.load(file_path=cfg.engine.trainer.save_path)
+    encoder.load(file_path="encoder_weights.pth")
+    decoder.load(file_path="decoder_weights.pth")
     trainer = Trainer(
-        model=model, input_embeddings=cfg.engine.trainer.input_embeddings, temperature=cfg.engine.trainer.temperature
+        encoder=encoder,
+        decoder=decoder,
+        input_embeddings=cfg.engine.trainer.input_embeddings,
+        temperature=cfg.engine.trainer.temperature,
     )
     # get all files stored in the .out_test.dir and infer the model on them for evaluation
     # This is processed test data
     test_data_dir = Path(to_absolute_path(cfg.data.test.out_dir))
     for filename in os.listdir(test_data_dir):
         test_adata = anndata.read_h5ad(test_data_dir / filename)
+        # Ensure the same genes are used for the test data
         inferred_adata = trainer.infer_adata(
             test_adata, sample_id_key="soma_joinid", seq_length=seq_length, batch_size=batch_size
         )
