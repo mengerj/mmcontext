@@ -1,6 +1,8 @@
 ## Main script for training a model
 
+import gzip
 import os
+import pickle
 from pathlib import Path
 
 import anndata
@@ -10,7 +12,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from mmcontext.engine import LossManager, Trainer, configure_models, configure_optimizer, configure_scheduler
-from mmcontext.eval import Evaluator
+from mmcontext.eval import Evaluator, compare_data_properties
 from mmcontext.pl.plotting import plot_umap
 from mmcontext.pp import (
     DataSetConstructor,
@@ -154,6 +156,13 @@ def main_train(cfg: DictConfig) -> None:
         res = evaluator.evaluate()
         # save results as csv
         res.to_csv(f"evaluation_{filename}.csv")
+
+        properties = compare_data_properties(
+            inferred_adata.X.toarray(), inferred_adata.layers["reconstructed"], predefined_subset="all"
+        )
+        # save properties as pickle
+        with gzip.open(f"properties_{filename}.pkl.gz", "wb") as f:
+            pickle.dump(properties, f)
         # plot umap
         # Remove low frequency categories for better visualization
         inferred_adata = consolidate_low_frequency_categories(
