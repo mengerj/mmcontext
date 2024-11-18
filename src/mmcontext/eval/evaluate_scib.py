@@ -9,7 +9,7 @@ import scib.preprocessing as pp
 from anndata import AnnData
 
 
-class Evaluator:
+class scibEvaluator:
     """
     Evaluates embeddings and reconstructed features using specified metrics.
 

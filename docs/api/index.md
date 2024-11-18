@@ -1,6 +1,6 @@
 # API
 
-Import mmcontext as
+Import mmcontext as mmc
 
 ```
 import mmcontext
@@ -11,4 +11,5 @@ import mmcontext
 
 preprocessing
 engine
+eval
 ```
