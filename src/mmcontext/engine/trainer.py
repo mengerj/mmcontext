@@ -374,6 +374,7 @@ class Trainer:
         val_loader: DataLoader | None = None,
         epochs: int = 10,
         save: bool = False,
+        n_epochs_stop: int = 10,
     ):
         """
         Trains the model for a specified number of epochs and optionally evaluates on a validation set.
@@ -388,6 +389,8 @@ class Trainer:
             Number of epochs to train. Defaults to 10.
         save
             Wether to save the model. Validation loader is required and determines the best model. Defaults to False.
+        n_epochs_stop
+            Number of epochs to wait for improvement in validation loss before stopping training. Defaults to 10.
 
         Raises
         ------
@@ -404,7 +407,7 @@ class Trainer:
             self.logger.error("Validation DataLoader is required to save the model checkpoints.")
             raise ValueError("Validation DataLoader is required to save the model checkpoints.")
         best_val_loss = float("inf")
-
+        epochs_no_improve = 0
         for epoch in range(1, epochs + 1):
             self.logger.info(f"Starting Epoch {epoch}/{epochs}")
             train_loss = self.train_epoch(train_loader)
@@ -414,16 +417,22 @@ class Trainer:
                 self.logger.info(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
                 # Save the model if validation loss has improved
-                if val_loss < best_val_loss and save:
-                    best_val_loss = val_loss
-                    self.encoder.save(file_path="encoder_weights.pth")
-                    self.logger.info("Validation loss improved. Encoder weights saved in current working dir.")
-                    self.decoder.save(file_path="decoder_weights.pth")
-                    self.logger.info("Validation loss improved. Decoder weights saved in current working dir.")
-                # If the validation loss has not improved for 10 epochs, stop training
-                if epoch % 10 == 0 and val_loss > best_val_loss:
-                    self.logger.info("Validation loss has not improved for 10 epochs. Stopping training.")
-                    break
+                if val_loss < best_val_loss:
+                    epochs_no_improve = 0
+                    if save:
+                        best_val_loss = val_loss
+                        self.encoder.save(file_path="encoder_weights.pth")
+                        self.logger.info("Validation loss improved. Encoder weights saved in current working dir.")
+                        self.decoder.save(file_path="decoder_weights.pth")
+                        self.logger.info("Validation loss improved. Decoder weights saved in current working dir.")
+                else:
+                    epochs_no_improve += 1
+                    # If the validation loss has not improved for 10 epochs, stop training
+                    if epochs_no_improve >= n_epochs_stop:
+                        self.logger.info(
+                            f"Validation loss has not improved for {n_epochs_stop} epochs. Stopping training."
+                        )
+                        break
             else:
                 self.logger.info(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}")
             self.logger.info(f"Temperature: {self.temperature}")
@@ -587,7 +596,7 @@ class Trainer:
         for sample_id in sample_ids_in_adata:
             embedding = id_to_embedding.get(sample_id)
             if embedding is None:
-                self.logger.warning(f"Sample ID {sample_id} not found in inference outputs.")
+                # self.logger.warning(f"Sample ID {sample_id} not found in inference outputs.")
                 sample_ids_to_cut.append(sample_id)
                 # jump to the next iteration
                 continue
