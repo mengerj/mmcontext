@@ -12,7 +12,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from mmcontext.engine import LossManager, Trainer, configure_models, configure_optimizer, configure_scheduler
-from mmcontext.eval import Evaluator, compare_data_properties
+from mmcontext.eval import compare_data_properties, scibEvaluator
 from mmcontext.pl.plotting import plot_umap
 from mmcontext.pp import (
     DataSetConstructor,
@@ -145,8 +145,8 @@ def main_train(cfg: DictConfig) -> None:
         )
         inferred_adata.write_h5ad(f"inferred_{filename}")
 
-        # Initialize Evaluator
-        evaluator = Evaluator(
+        # Initialize scibEvaluator
+        evaluator = scibEvaluator(
             adata=inferred_adata,
             batch_key=cfg.data.batch_key,
             label_key=cfg.data.cell_type_key,
