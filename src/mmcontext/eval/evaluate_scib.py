@@ -1,40 +1,18 @@
+import concurrent.futures
 import logging
 import warnings
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import scanpy as sc
-import scib.metrics as me
-import scib.preprocessing as pp
 from anndata import AnnData
+from scib import metrics as me
+from scib import preprocessing as pp
 
 
 class scibEvaluator:
-    """
-    Evaluates embeddings and reconstructed features using specified metrics.
-
-    This class computes metrics on raw data, embeddings, and reconstructed features
-    using metrics from the scib package. It outputs a DataFrame with results for each
-    evaluation type.
-
-    Parameters
-    ----------
-    adata : AnnData
-        The AnnData object containing the data. May include embeddings in `.obsm` and
-        reconstructed data in `.layers['reconstructed']`.
-    batch_key : str
-        Key in `adata.obs` indicating batch labels.
-    label_key : str
-        Key in `adata.obs` indicating cell type labels.
-    embedding_key : Union[str, List[str]], optional
-        Key(s) in `adata.obsm` where the embeddings are stored. Can be a string or a list of strings.
-    data_id : str, optional
-        Identifier for the dataset, including preprocessing steps.
-    n_top_genes : int, optional
-        Number of top genes used for HVG selection. If None, HVG is not performed.
-    logger : logging.Logger, optional
-        Logger for logging messages. If None, a default logger will be used.
-    """
+    """Evaluates embeddings and reconstructed features using specified metrics."""
 
     def __init__(
         self,
@@ -44,6 +22,7 @@ class scibEvaluator:
         embedding_key: str | list[str] = None,
         data_id: str = "",
         n_top_genes: int | None = None,
+        max_cells: int | None = None,
         logger: logging.Logger | None = None,
     ):
         self.adata = adata
@@ -52,17 +31,11 @@ class scibEvaluator:
         self.embedding_key = embedding_key
         self.data_id = data_id
         self.n_top_genes = n_top_genes
+        self.max_cells = max_cells
         self.logger = logger or logging.getLogger(__name__)
 
     def evaluate(self) -> pd.DataFrame:
-        """
-        Computes metrics for raw data, embeddings, and reconstructed data, and returns the results as a DataFrame.
-
-        Returns
-        -------
-        results_df : pd.DataFrame
-            DataFrame containing the computed metrics and dataset information.
-        """
+        """Computes metrics for raw data, embeddings, and reconstructed data."""
         # Suppress specific warnings
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         warnings.filterwarnings("ignore", category=FutureWarning)
@@ -72,31 +45,46 @@ class scibEvaluator:
 
         # Compute metrics on raw data
         self.logger.info("Computing metrics on raw data...")
-        raw_metrics = self.compute_feature_space_metrics()
-        raw_metrics["type"] = "raw"
+        raw_metrics = self.compute_metrics(
+            adata=self.adata.copy(),
+            adata_pre=None,
+            adata_post=None,
+            use_rep=None,
+            type_="full",
+            data_type="raw",
+        )
         results_list.append(raw_metrics)
 
-        # Check for reconstructed data
+        # Compute metrics on reconstructed data
         if "reconstructed" in self.adata.layers:
             self.logger.info("Computing metrics on reconstructed data...")
-            reconstructed_metrics = self.compute_reconstructed_metrics()
-            reconstructed_metrics["type"] = "reconstructed"
+            adata_post = self.adata.copy()
+            adata_post.X = adata_post.layers["reconstructed"]
+            reconstructed_metrics = self.compute_metrics(
+                adata=adata_post,
+                adata_pre=self.adata,
+                adata_post=adata_post,
+                use_rep=None,
+                type_="full",
+                data_type="reconstructed",
+            )
             results_list.append(reconstructed_metrics)
 
         # Compute metrics on embeddings
         if self.embedding_key is not None:
-            if isinstance(self.embedding_key, list):
-                for key in self.embedding_key:
-                    if key is None:
-                        continue
-                    self.logger.info(f"Computing metrics on embedding '{key}'...")
-                    embedding_metrics = self.compute_embedding_metrics(embedding_key=key)
-                    embedding_metrics["type"] = f"embedding_{key}"
-                    results_list.append(embedding_metrics)
-            else:
-                self.logger.info(f"Computing metrics on embedding '{self.embedding_key}'...")
-                embedding_metrics = self.compute_embedding_metrics(embedding_key=self.embedding_key)
-                embedding_metrics["type"] = f"embedding_{self.embedding_key}"
+            embedding_keys = self.embedding_key if isinstance(self.embedding_key, list) else [self.embedding_key]
+            for embedding_key in embedding_keys:
+                if embedding_key is None:
+                    continue
+                self.logger.info(f"Computing metrics on embedding '{embedding_key}'...")
+                embedding_metrics = self.compute_metrics(
+                    adata=self.adata.copy(),
+                    adata_pre=self.adata,
+                    adata_post=self.adata,
+                    use_rep=embedding_key,
+                    type_="embed",
+                    data_type=f"embedding_{embedding_key}",
+                )
                 results_list.append(embedding_metrics)
 
         # Convert results to DataFrame
@@ -112,323 +100,116 @@ class scibEvaluator:
 
         return results_df
 
-    def compute_feature_space_metrics(self) -> dict[str, Any]:
-        """
-        Computes metrics on the raw feature space of the data.
+    def compute_metrics(
+        self,
+        adata: AnnData,
+        adata_pre: AnnData | None = None,
+        adata_post: AnnData | None = None,
+        use_rep: str | None = None,
+        cluster_key: str = "cluster",
+        type_: str = "full",
+        data_type: str = "",
+    ) -> dict[str, Any]:
+        """Computes metrics on the specified data representation."""
+        # Subsample adata if max_cells is specified
+        if self.max_cells is not None and adata.n_obs > self.max_cells:
+            self.logger.info(f"Subsampling to {self.max_cells} cells for {data_type}...")
+            adata = adata[np.random.choice(adata.obs_names, self.max_cells, replace=False)].copy()
 
-        Returns
-        -------
-        results : dict
-            Dictionary containing the computed metrics.
-        """
-        bio_results = {}
-        batch_results = {}
-        adata = self.adata.copy()
-
-        # Preprocess data: reduce dimensions using PCA and compute neighbors
-        if self.n_top_genes is not None:
-            self.logger.info(f"Reducing data to {self.n_top_genes} top genes using HVG selection...")
-            try:
-                pp.reduce_data(adata, n_top_genes=self.n_top_genes, batch_key=self.batch_key, pca=True, neighbors=True)
-            except Exception as e:
-                self.logger.error(f"Error in data reduction: {e}")
-                self.logger.error("Using full data for metrics computation.")
+        # Preprocess data
+        if use_rep is None:
+            # Preprocess data: reduce dimensions using PCA and compute neighbors
+            if self.n_top_genes is not None:
+                self.logger.info(f"Reducing data to {self.n_top_genes} top genes using HVG selection...")
+                try:
+                    pp.reduce_data(
+                        adata, n_top_genes=self.n_top_genes, batch_key=self.batch_key, pca=True, neighbors=True
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error in data reduction: {e}")
+                    self.logger.error("Using full data for metrics computation.")
+            else:
+                # If HVG not performed, compute PCA on all genes
+                self.logger.info("Computing PCA on all genes...")
+                sc.pp.pca(adata, n_comps=50)
+                sc.pp.neighbors(adata, use_rep="X_pca")
+            embed_key = "X_pca"
         else:
-            # If HVG not performed, compute PCA on all genes
-            self.logger.info("Computing PCA on all genes...")
-            sc.pp.pca(adata, n_comps=50)
-            sc.pp.neighbors(adata, use_rep="X_pca")
+            # Compute neighbors using the specified representation
+            embed_key = use_rep
+            try:
+                sc.pp.neighbors(adata, use_rep=use_rep)
+            except Exception as e:
+                self.logger.error(f"Error computing neighbors using embedding '{use_rep}': {e}")
 
-        # Bio-conservation metrics
-        try:
-            me.cluster_optimal_resolution(adata, cluster_key="cluster", label_key=self.label_key)
-            ari_score = me.ari(adata, cluster_key="cluster", label_key=self.label_key)
-            bio_results["ARI"] = ari_score
-        except Exception as e:
-            self.logger.error(f"Error computing ARI on raw data: {e}")
+        # Perform clustering
+        me.cluster_optimal_resolution(adata, cluster_key=cluster_key, label_key=self.label_key)
 
-        try:
-            nmi_score = me.nmi(adata, cluster_key="cluster", label_key=self.label_key)
-            bio_results["NMI"] = nmi_score
-        except Exception as e:
-            self.logger.error(f"Error computing NMI on raw data: {e}")
+        # Define metric functions
+        bio_metrics = [
+            ("ARI", me.ari, {"cluster_key": cluster_key, "label_key": self.label_key}),
+            ("NMI", me.nmi, {"cluster_key": cluster_key, "label_key": self.label_key}),
+            ("ASW", me.silhouette, {"label_key": self.label_key, "embed": embed_key}),
+            (
+                "Isolated_Labels_ASW",
+                me.isolated_labels_asw,
+                {"label_key": self.label_key, "embed": embed_key, "batch_key": self.batch_key},
+            ),
+            (
+                "Isolated_Labels_F1",
+                me.isolated_labels_f1,
+                {"label_key": self.label_key, "embed": embed_key, "batch_key": self.batch_key},
+            ),
+            ("cLISI", me.clisi_graph, {"label_key": self.label_key, "type_": type_, "n_cores": 8, "use_rep": use_rep}),
+        ]
 
-        try:
-            asw_score = me.silhouette(adata, label_key=self.label_key, embed="X_pca")
-            bio_results["ASW"] = asw_score
-        except Exception as e:
-            self.logger.error(f"Error computing ASW on raw data: {e}")
+        batch_metrics = [
+            ("Graph_Connectivity", me.graph_connectivity, {"label_key": self.label_key}),
+            (
+                "Silhouette_Batch",
+                me.silhouette_batch,
+                {"batch_key": self.batch_key, "label_key": self.label_key, "embed": embed_key},
+            ),
+            ("iLISI", me.ilisi_graph, {"batch_key": self.batch_key, "type_": type_, "n_cores": 8, "use_rep": use_rep}),
+            (
+                "PCR",
+                me.pcr_comparison,
+                {"adata_pre": adata_pre, "adata_post": adata_post, "covariate": self.batch_key, "embed": embed_key},
+            ),
+        ]
 
-        try:
-            isolated_labels_asw = me.isolated_labels_asw(
-                adata, label_key=self.label_key, embed="X_pca", batch_key=self.batch_key
-            )
-            bio_results["Isolated_Labels_ASW"] = isolated_labels_asw
-        except Exception as e:
-            self.logger.error(f"Error computing Isolated Labels ASW on raw data: {e}")
+        # Remove PCR if adata_pre or adata_post is None
+        if adata_pre is None or adata_post is None:
+            batch_metrics = [m for m in batch_metrics if m[0] != "PCR"]
 
-        try:
-            isolated_labels_f1 = me.isolated_labels_f1(
-                adata, label_key=self.label_key, batch_key=self.batch_key, embed="X_pca"
-            )
-            bio_results["Isolated_Labels_F1"] = isolated_labels_f1
-        except Exception as e:
-            self.logger.error(f"Error computing Isolated Labels F1 on raw data: {e}")
-
-        try:
-            clisi_score = me.clisi_graph(adata, label_key=self.label_key, type_="full")
-            bio_results["cLISI"] = clisi_score
-        except Exception as e:
-            self.logger.error(f"Error computing cLISI on raw data: {e}")
-
-        # Batch-integration metrics
-        try:
-            graph_conn = me.graph_connectivity(adata, label_key=self.label_key)
-            batch_results["Graph_Connectivity"] = graph_conn
-        except Exception as e:
-            self.logger.error(f"Error computing Graph Connectivity on raw data: {e}")
-
-        try:
-            silhouette_batch = me.silhouette_batch(
-                adata, batch_key=self.batch_key, label_key=self.label_key, embed="X_pca"
-            )
-            batch_results["Silhouette_Batch"] = silhouette_batch
-        except Exception as e:
-            self.logger.error(f"Error computing Silhouette Batch on raw data: {e}")
-
-        try:
-            ilisi_score = me.ilisi_graph(adata, batch_key=self.batch_key, type_="full")
-            batch_results["iLISI"] = ilisi_score
-        except Exception as e:
-            self.logger.error(f"Error computing iLISI on raw data: {e}")
+        # Compute metrics in parallel
+        bio_results = self.compute_metrics_in_parallel(adata, bio_metrics)
+        batch_results = self.compute_metrics_in_parallel(adata, batch_metrics)
 
         # Compute average scores
         results = self.compute_average_scores(bio_results, batch_results)
+        results["type"] = data_type
+
         return results
 
-    def compute_embedding_metrics(self, embedding_key: str) -> dict[str, Any]:
-        """
-        Computes metrics on the specified embedding.
-
-        Parameters
-        ----------
-        embedding_key : str
-            Key in `adata.obsm` where the embedding is stored.
-
-        Returns
-        -------
-        results : dict
-            Dictionary containing the computed metrics.
-        """
-        bio_results = {}
-        batch_results = {}
-        adata = self.adata.copy()
-
-        # Compute neighbors using the embedding
-        try:
-            sc.pp.neighbors(adata, use_rep=embedding_key)
-        except Exception as e:
-            self.logger.error(f"Error computing neighbors using embedding '{embedding_key}': {e}")
-
-        # Bio-conservation metrics
-        try:
-            me.cluster_optimal_resolution(adata, cluster_key="cluster", label_key=self.label_key)
-            ari_score = me.ari(adata, cluster_key="cluster", label_key=self.label_key)
-            bio_results["ARI"] = ari_score
-        except Exception as e:
-            self.logger.error(f"Error computing ARI on embedding '{embedding_key}': {e}")
-
-        try:
-            nmi_score = me.nmi(adata, cluster_key="cluster", label_key=self.label_key)
-            bio_results["NMI"] = nmi_score
-        except Exception as e:
-            self.logger.error(f"Error computing NMI on embedding '{embedding_key}': {e}")
-
-        try:
-            asw_score = me.silhouette(adata, label_key=self.label_key, embed=embedding_key)
-            bio_results["ASW"] = asw_score
-        except Exception as e:
-            self.logger.error(f"Error computing ASW on embedding '{embedding_key}': {e}")
-
-        try:
-            isolated_labels_asw = me.isolated_labels_asw(
-                adata, label_key=self.label_key, embed=embedding_key, batch_key=self.batch_key
-            )
-            bio_results["Isolated_Labels_ASW"] = isolated_labels_asw
-        except Exception as e:
-            self.logger.error(f"Error computing Isolated Labels ASW on embedding '{embedding_key}': {e}")
-
-        try:
-            isolated_labels_f1 = me.isolated_labels_f1(
-                adata, label_key=self.label_key, batch_key=self.batch_key, embed=embedding_key
-            )
-            bio_results["Isolated_Labels_F1"] = isolated_labels_f1
-        except Exception as e:
-            self.logger.error(f"Error computing Isolated Labels F1 on embedding '{embedding_key}': {e}")
-
-        try:
-            clisi_score = me.clisi_graph(adata, label_key=self.label_key, type_="embed", use_rep=embedding_key)
-            bio_results["cLISI"] = clisi_score
-        except Exception as e:
-            self.logger.error(f"Error computing cLISI on embedding '{embedding_key}': {e}")
-
-        # Batch-integration metrics
-        try:
-            graph_conn = me.graph_connectivity(adata, label_key=self.label_key)
-            batch_results["Graph_Connectivity"] = graph_conn
-        except Exception as e:
-            self.logger.error(f"Error computing Graph Connectivity on embedding '{embedding_key}': {e}")
-
-        try:
-            silhouette_batch = me.silhouette_batch(
-                adata, batch_key=self.batch_key, label_key=self.label_key, embed=embedding_key
-            )
-            batch_results["Silhouette_Batch"] = silhouette_batch
-        except Exception as e:
-            self.logger.error(f"Error computing Silhouette Batch on embedding '{embedding_key}': {e}")
-
-        try:
-            ilisi_score = me.ilisi_graph(adata, batch_key=self.batch_key, type_="embed", use_rep=embedding_key)
-            batch_results["iLISI"] = ilisi_score
-        except Exception as e:
-            self.logger.error(f"Error computing iLISI on embedding '{embedding_key}': {e}")
-
-        # PCR Comparison
-        try:
-            pcr_embedding = me.pcr_comparison(self.adata, self.adata, covariate=self.batch_key, embed=embedding_key)
-            batch_results["PCR"] = pcr_embedding
-        except Exception as e:
-            self.logger.error(f"Error computing PCR Comparison on embedding '{embedding_key}': {e}")
-
-        # Compute average scores
-        results = self.compute_average_scores(bio_results, batch_results)
-        return results
-
-    def compute_reconstructed_metrics(self) -> dict[str, Any]:
-        """
-        Computes metrics on the reconstructed data.
-
-        Returns
-        -------
-        results : dict
-            Dictionary containing the computed metrics.
-        """
-        bio_results = {}
-        batch_results = {}
-        adata = self.adata.copy()
-
-        # Replace adata.X with reconstructed data
-        if "reconstructed" not in adata.layers:
-            self.logger.error("Reconstructed data not found in 'adata.layers['reconstructed']'.")
-            return {}
-
-        adata.X = adata.layers["reconstructed"]
-
-        # Preprocess data: reduce dimensions using PCA and compute neighbors
-        if self.n_top_genes is not None:
-            self.logger.info(f"Reducing reconstructed data to {self.n_top_genes} top genes using HVG selection...")
-            try:
-                pp.reduce_data(adata, n_top_genes=self.n_top_genes, batch_key=self.batch_key, pca=True, neighbors=True)
-            except Exception as e:
-                self.logger.error(f"Error in data reduction on reconstructed data: {e}")
-                self.logger.error("Using full reconstructed data for metrics computation.")
-        else:
-            # If HVG not performed, compute PCA on all genes
-            self.logger.info("Computing PCA on all reconstructed genes...")
-            # TODO: custom n_comps
-            sc.pp.pca(adata, n_comps=50)
-            sc.pp.neighbors(adata, use_rep="X_pca")
-
-        # Bio-conservation metrics
-        try:
-            me.cluster_optimal_resolution(adata, cluster_key="cluster", label_key=self.label_key)
-            ari_score = me.ari(adata, cluster_key="cluster", label_key=self.label_key)
-            bio_results["ARI"] = ari_score
-        except Exception as e:
-            self.logger.error(f"Error computing ARI on reconstructed data: {e}")
-
-        try:
-            nmi_score = me.nmi(adata, cluster_key="cluster", label_key=self.label_key)
-            bio_results["NMI"] = nmi_score
-        except Exception as e:
-            self.logger.error(f"Error computing NMI on reconstructed data: {e}")
-
-        try:
-            asw_score = me.silhouette(adata, label_key=self.label_key, embed="X_pca")
-            bio_results["ASW"] = asw_score
-        except Exception as e:
-            self.logger.error(f"Error computing ASW on reconstructed data: {e}")
-
-        try:
-            isolated_labels_asw = me.isolated_labels_asw(
-                adata, label_key=self.label_key, embed="X_pca", batch_key=self.batch_key
-            )
-            bio_results["Isolated_Labels_ASW"] = isolated_labels_asw
-        except Exception as e:
-            self.logger.error(f"Error computing Isolated Labels ASW on reconstructed data: {e}")
-
-        try:
-            isolated_labels_f1 = me.isolated_labels_f1(
-                adata, label_key=self.label_key, batch_key=self.batch_key, embed="X_pca"
-            )
-            bio_results["Isolated_Labels_F1"] = isolated_labels_f1
-        except Exception as e:
-            self.logger.error(f"Error computing Isolated Labels F1 on reconstructed data: {e}")
-
-        try:
-            clisi_score = me.clisi_graph(adata, label_key=self.label_key, type_="full")
-            bio_results["cLISI"] = clisi_score
-        except Exception as e:
-            self.logger.error(f"Error computing cLISI on reconstructed data: {e}")
-
-        # Batch-integration metrics
-        try:
-            graph_conn = me.graph_connectivity(adata, label_key=self.label_key)
-            batch_results["Graph_Connectivity"] = graph_conn
-        except Exception as e:
-            self.logger.error(f"Error computing Graph Connectivity on reconstructed data: {e}")
-
-        try:
-            silhouette_batch = me.silhouette_batch(
-                adata, batch_key=self.batch_key, label_key=self.label_key, embed="X_pca"
-            )
-            batch_results["Silhouette_Batch"] = silhouette_batch
-        except Exception as e:
-            self.logger.error(f"Error computing Silhouette Batch on reconstructed data: {e}")
-
-        try:
-            ilisi_score = me.ilisi_graph(adata, batch_key=self.batch_key, type_="full")
-            batch_results["iLISI"] = ilisi_score
-        except Exception as e:
-            self.logger.error(f"Error computing iLISI on reconstructed data: {e}")
-
-        # PCR Comparison
-        try:
-            pcr_reconstructed = me.pcr_comparison(self.adata, adata, covariate=self.batch_key)
-            batch_results["PCR"] = pcr_reconstructed
-        except Exception as e:
-            self.logger.error(f"Error computing PCR Comparison on reconstructed data: {e}")
-
-        # Compute average scores
-        results = self.compute_average_scores(bio_results, batch_results)
+    def compute_metrics_in_parallel(self, adata: AnnData, metrics: list[tuple[str, Any, dict[str, Any]]]):
+        """Compute metrics in parallel using a ThreadPoolExecutor."""
+        results = {}
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_to_metric = {
+                executor.submit(metric_func, adata, **params): name for name, metric_func, params in metrics
+            }
+            for future in concurrent.futures.as_completed(future_to_metric):
+                metric_name = future_to_metric[future]
+                try:
+                    result = future.result()
+                    results[metric_name] = result
+                except Exception as e:
+                    self.logger.error(f"Error computing {metric_name}: {e}")
         return results
 
     def compute_average_scores(self, bio_results: dict[str, Any], batch_results: dict[str, Any]) -> dict[str, Any]:
-        """
-        Computes average bio-conservation and batch-integration scores.
-
-        Parameters
-        ----------
-        bio_results : dict
-            Dictionary containing bio-conservation metrics.
-        batch_results : dict
-            Dictionary containing batch-integration metrics.
-
-        Returns
-        -------
-        results : dict
-            Combined dictionary with average scores added.
-        """
+        """Computes average bio-conservation and batch-integration scores."""
         # Calculate average bio-conservation score
         bio_metrics = ["ARI", "NMI", "ASW", "Isolated_Labels_ASW", "Isolated_Labels_F1", "cLISI"]
         bio_scores = [
