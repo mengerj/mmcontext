@@ -52,11 +52,9 @@ def main_train(cfg: DictConfig) -> None:
             n_genes.append(adata.shape[1])
             if len(set(n_genes)) > 1:
                 raise ValueError("The number of genes in the datasets is not consistent.")
-            if cfg.dataset.batch_size * cfg.dataset.seq_length > adata.n_obs:
-                raise ValueError("Batch size and sequence length are too large for the dataset.")
-            dataset_constructor.add_anndata(adata)
-            # Construct the dataset
-            datasets[data_type] = dataset_constructor.construct_dataset(seq_length=cfg.dataset.seq_length)
+        dataset_constructor.add_anndata(adata)
+        # Construct the dataset
+        datasets[data_type] = dataset_constructor.construct_dataset(seq_length=cfg.dataset.seq_length)
 
     train_loader = DataLoader(datasets["train"], batch_size=cfg.dataset.batch_size, shuffle=False)
     # For now use the test data as validation data
