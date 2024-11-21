@@ -14,7 +14,7 @@ from omegaconf import DictConfig
 from sklearn.decomposition import PCA
 
 
-def configure_aligner(cfg: DictConfig):
+def configure_aligner(cfg: DictConfig, cfg_additional: DictConfig):
     """
     Configures a dimension aligner based on the provided configuration.
 
@@ -22,6 +22,8 @@ def configure_aligner(cfg: DictConfig):
     ----------
     cfg
         Configuration dictionary.
+    cfg_additional
+        Additional part of the configuration dictionary, for pca evalutation and plotting options.
 
     Returns
     -------
@@ -34,7 +36,7 @@ def configure_aligner(cfg: DictConfig):
             latent_dim=cfg.get("latent_dim", 64),
             max_samples=cfg.get("max_samples", 10000),
             random_state=cfg.get("random_state", None),
-            config=cfg.get("pca_eval", None),
+            config=cfg_additional.get("pca_eval", None),
         )
     else:
         raise ValueError(f"Invalid dimension aligner type: {aligner_type}")

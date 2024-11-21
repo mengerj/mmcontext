@@ -19,11 +19,11 @@ def configure_embedder(cfg: DictConfig) -> tuple[DataEmbedder | None, ContextEmb
     elif cfg.context_embedder.type == "categorical":
         # Initialize the CategoryEmbedder
         context_embedder = CategoryEmbedder(
-            metadata_categories=cfg.category_embedder.metadata_categories,
-            model=cfg.category_embedder.model,
-            combination_method=cfg.category_embedder.combination_method,
-            embeddings_file_path=Path(to_absolute_path(cfg.category_embedder.embeddings_file_path)),
-            one_hot=cfg.category_embedder.one_hot,
+            metadata_categories=cfg.context_embedder.specs.metadata_categories,
+            model=cfg.context_embedder.specs.model,
+            combination_method=cfg.context_embedder.specs.combination_method,
+            embeddings_file_path=Path(to_absolute_path(cfg.context_embedder.specs.embeddings_file_path)),
+            one_hot=cfg.context_embedder.specs.one_hot,
         )
     else:
         raise ValueError("Invalid context embedder class")
@@ -128,7 +128,7 @@ class Embedder:
         """
         # Check if embeddings are a NumPy array
         if not isinstance(embeddings, np.ndarray):
-            logging.error(
+            self.logger.error(
                 f"The provided {key} embeddings must be a numpy.ndarray, but got {type(embeddings).__name__}."
             )
             raise TypeError(
@@ -136,7 +136,7 @@ class Embedder:
             )
 
         if embeddings.shape[0] != adata.n_obs:
-            logging.error(
+            self.logger.error(
                 f"The number of samples in the provided {key} embeddings does not match the number of observations in adata."
             )
             raise ValueError(

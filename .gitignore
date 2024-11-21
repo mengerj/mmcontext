@@ -31,6 +31,6 @@ hm.ipynb
 
 # output files
 outputs/*
-
+out/*
 #venv
 venv/
