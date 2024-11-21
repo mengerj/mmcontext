@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
   "anndata",
+  "dask",
   "hydra-core",
   "ipykernel",
   "matplotlib",
@@ -38,6 +39,7 @@ dependencies = [
   "seaborn",
   "session-info",
   "torch",
+  "zarr",
 ]
 optional-dependencies.dev = [
   "pre-commit",
