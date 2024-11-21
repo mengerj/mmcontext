@@ -2,7 +2,10 @@
 
 import logging
 
+import numpy as np
 import torch
+import zarr
+from numcodecs import Blosc
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
@@ -132,7 +135,7 @@ class Trainer:
     def __init__(
         self,
         encoder: torch.nn.Module,
-        decoder: torch.nn.Module = PlaceholderModel(),
+        decoder: torch.nn.Module | None = None,
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
         loss_manager: LossManager | None = None,
@@ -147,6 +150,8 @@ class Trainer:
     ):
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.encoder = encoder.to(self.device)
+        if decoder is None:
+            self.decoder = PlaceholderModel()
         self.decoder = decoder.to(self.device)
         self.loss_manager = loss_manager
         self.optimizer = optimizer
@@ -421,9 +426,9 @@ class Trainer:
                     epochs_no_improve = 0
                     if save:
                         best_val_loss = val_loss
-                        self.encoder.save(file_path="encoder_weights.pth")
+                        self.encoder.save(file_path="best_encoder_weights.pth")
                         self.logger.info("Validation loss improved. Encoder weights saved in current working dir.")
-                        self.decoder.save(file_path="decoder_weights.pth")
+                        self.decoder.save(file_path="best_decoder_weights.pth")
                         self.logger.info("Validation loss improved. Decoder weights saved in current working dir.")
                 else:
                     epochs_no_improve += 1
@@ -504,7 +509,15 @@ class Trainer:
             modified_embeddings = {k: torch.cat(v, dim=0) for k, v in modified_embeddings.items()}
         return modified_embeddings
 
-    def infer_adata(self, adata, sample_id_key: str, seq_length: int | None = None, batch_size: int | None = None):
+    def infer_adata(
+        self,
+        adata,
+        sample_id_key: str,
+        seq_length: int | None = None,
+        batch_size: int | None = None,
+        chunk_size: int | None = None,
+        output_zarr_path: str = "inferred_adata.zarr",
+    ):
         """
         Generates modified embeddings for the samples in the given AnnData object using the trained model.
 
@@ -519,8 +532,13 @@ class Trainer:
         from mmcontext.engine import sample_zinb
         from mmcontext.pp import DataSetConstructor
 
+        if chunk_size is None:
+            self.logger.error("chunk_size not provided. Please provide chunk_size to the infer_adata method.")
+            raise ValueError("chunk_size not provided. Please provide chunk_size to the infer_adata method.")
         # Initialize DataSetConstructor
-        dataset_constructor = DataSetConstructor(in_sample_id_key=sample_id_key, out_sample_id_key=sample_id_key)
+        dataset_constructor = DataSetConstructor(
+            in_sample_id_key=sample_id_key, out_sample_id_key=sample_id_key, chunk_size=chunk_size
+        )
 
         # Add the AnnData object to the dataset
         dataset_constructor.add_anndata(adata)
@@ -537,22 +555,46 @@ class Trainer:
                 raise ValueError("batch_size not provided. Please provide batch_size.")
             batch_size = self.batch_size
 
-        # Construct the dataset
-        dataset = dataset_constructor.construct_dataset(seq_length=seq_length)
+        # Ensure that the dataset provides original indices
+        dataset = dataset_constructor.construct_dataset(seq_length=seq_length, return_indices=True)
 
-        # Create a DataLoader with shuffle=False to maintain order
         data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-        # Initialize lists to collect outputs and sample IDs
-        modified_embeddings = {self.data_key: [], sample_id_key: []}
-        out_distribution = []
+        # Prepare the zarr group for outputs
+        compressor = Blosc(cname="zstd", clevel=3)
+        num_cells = adata.n_obs
+        emb_dim = self.encoder.embedding_dim  # Assuming you have this attribute
+        embeddings_zarr = zarr.open_array(
+            output_zarr_path + "/embeddings",
+            mode="w",
+            shape=(num_cells, emb_dim),
+            chunks=(chunk_size, emb_dim),
+            dtype="float32",
+            compressor=compressor,
+        )
+        embeddings_zarr[:] = np.nan  # Initialize with NaNs
+
+        if not isinstance(self.decoder, PlaceholderModel):
+            genes = adata.var_names
+            num_genes = len(genes)
+            reconstructed_zarr = zarr.open_array(
+                output_zarr_path + "/reconstructed",
+                mode="w",
+                shape=(num_cells, num_genes),
+                chunks=(chunk_size, num_genes),
+                dtype="float32",
+                compressor=compressor,
+            )
+            reconstructed_zarr[:] = np.nan  # Initialize with NaNs
+
         self.encoder.eval()
         self.decoder.eval()
 
         with torch.no_grad():
             for _batch_idx, batch in enumerate(data_loader):
-                # Get sample IDs
-                sample_ids = batch[sample_id_key]  # Shape: (batch_size, seq_length)
+                # Get original indices
+                indices = batch["indices"]  # Should be provided by the dataset
+                indices = indices.view(-1).cpu().numpy()  # Flatten and convert to numpy array
 
                 # Get inputs
                 in_main = batch[self.input_embeddings["main"]].to(self.device)
@@ -565,57 +607,26 @@ class Trainer:
                 out, _ = self.encoder(in_main=in_main, in_cross=in_cross)
                 # Flatten seq_length dimension
                 batch_size, seq_len, emb_dim = out.size()
-                out_flat = out.view(batch_size * seq_len, emb_dim)
-                sample_ids_flat = sample_ids.view(batch_size * seq_len)
+                out_flat = out.view(batch_size * seq_len, emb_dim).cpu().numpy()
 
-                # Collect outputs and sample IDs
-                modified_embeddings[self.data_key].append(out_flat.cpu())
-                modified_embeddings[sample_id_key].append(sample_ids_flat.cpu())
+                # Store embeddings in zarr array at the correct indices
+                embeddings_zarr[indices, :] = out_flat
 
                 if not isinstance(self.decoder, PlaceholderModel):
-                    out_distribution.append(self.decoder(out_flat))
-
-        # Concatenate all outputs
-        modified_embeddings = {k: torch.cat(v, dim=0) for k, v in modified_embeddings.items()}
-
-        # Concatenate out_distribution (it is a list of dictionaries containing tensors)
-        out_distribution = {k: torch.cat([d[k] for d in out_distribution], dim=0) for k in out_distribution[0].keys()}
-        # Map sample IDs to embeddings
-        id_to_embedding = {}
-        for sample_id, embedding in zip(
-            modified_embeddings[sample_id_key], modified_embeddings[self.data_key], strict=False
-        ):
-            sample_id = sample_id.item()
-            id_to_embedding[sample_id] = embedding
-
-        # Now, create an array of embeddings aligned with adata
-
-        sample_ids_in_adata = adata.obs[sample_id_key].values
-        embeddings_list = []
-        sample_ids_to_cut = []
-        for sample_id in sample_ids_in_adata:
-            embedding = id_to_embedding.get(sample_id)
-            if embedding is None:
-                # self.logger.warning(f"Sample ID {sample_id} not found in inference outputs.")
-                sample_ids_to_cut.append(sample_id)
-                # jump to the next iteration
-                continue
-            embeddings_list.append(embedding)
-
-        # remove the samples not found in the inference outputs
-        if len(sample_ids_to_cut) > 0:
-            self.logger.warning(
-                f"Removing {len(sample_ids_to_cut)} samples not found in inference outputs. Most likely because could not be processed due to seq_length."
-            )
-            idx_to_keep = ~adata.obs[sample_id_key].isin(sample_ids_to_cut)
-            adata_new = adata[idx_to_keep].copy()
-        else:
-            adata_new = adata.copy()
-        # Stack embeddings into a tensor
-        embeddings_tensor = torch.stack(embeddings_list)
-        adata_new.obsm["mod_emb"] = embeddings_tensor.detach().numpy()
-        # If a different decoder than PlaceholderModel is used, reconstruct the data
+                    out_distribution = self.decoder(torch.from_numpy(out_flat).to(self.device))
+                    # Store reconstructed data in zarr array
+                    reconstructed_zarr[indices, :] = sample_zinb(
+                        out_distribution["mu"], out_distribution["theta"], out_distribution["pi"]
+                    )
+        # remove rows with only NaNs
+        # get index as integers
+        na_mask = np.isnan(embeddings_zarr).all(axis=1)
+        na_idx = np.where(~na_mask)[0]
+        adata = adata[na_idx]
+        embeddings_zarr = embeddings_zarr[na_idx]
+        reconstructed_zarr = reconstructed_zarr[na_idx]
+        # Now, update adata.obsm and adata.layers with the zarr arrays
+        adata.obsm["mod_emb"] = embeddings_zarr
         if not isinstance(self.decoder, PlaceholderModel):
-            reconstructed = sample_zinb(out_distribution["mu"], out_distribution["theta"], out_distribution["pi"])
-            adata_new.layers["reconstructed"] = reconstructed.detach().numpy()
-        return adata_new
+            adata.layers["reconstructed"] = reconstructed_zarr  #
+        adata.write_zarr(output_zarr_path)
