@@ -1,23 +1,24 @@
-# config.yaml
 defaults:
   - pp/default
-  - engine/default
-  - engine/losses/default
   - override hydra/job_logging: default
   - override hydra/hydra_logging: default
-ID:
-  name: some_run
 data:
   dir: data
   sample_key: soma_joinid
   batch_key: dataset_id
   cell_type_key: cell_type
   train:
-    subdir: ${data.dir}/raw/train_data
-    filenames: [subset_large_cellxgene.h5ad]
+    subdir: ${data.dir}/raw/train
+    filenames: [subset_large_cellxgene.h5ad, subset3_large_cellxgene.h5ad]
   test:
-    subdir: ${data.dir}/raw/test_data
+    subdir: ${data.dir}/raw/test
     filenames: [subset2_large_cellxgene.h5ad]
+dataset:
+  seq_length: 64 # eventhough the dataset is not created during preprocessing, the sequence length is used to determine the chunk size of zarr storage for efficiency
+  batch_size: 32
+  multiplier: 1 # Multiplied by the seq-length * batch_size to give the chunk size
+  chunk_size: null # Overwrite in python scirpt
+
 pp:
   embedder:
     context_embedder:
@@ -28,37 +29,11 @@ pp:
       combination_method: concatenate
     data_embedder:
       precalculated_obsm_key: "scvi"
-
   normalizer:
     type: "z-score"
-
   aligner:
     latent_dim: 64
+
+  additional:
     pca_eval:
       evaluate_pca: True
-
-  dataset_constructor:
-    seq_length: 20
-    batch_size: 64
-
-engine:
-  models:
-    encoder:
-      hidden_dim: 64
-      num_layers: 2
-      num_heads: 1
-      use_self_attention: False
-      use_cross_attention: False
-    decoder:
-      train: True
-      hidden_dims: [64]
-  trainer:
-    epochs: 1
-
-  losses:
-    infoNCE_data_context:
-      use: False
-
-    zinb_loss:
-      use: True
-      weight: 0.01

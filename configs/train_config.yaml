@@ -1,0 +1,38 @@
+defaults:
+  - engine/default
+  - engine/losses/default
+  - override hydra/job_logging: default
+  - override hydra/hydra_logging: default
+
+data:
+  dir: out/processed/ca46371a702966c1f7028a1bab4a0433
+  sample_key: null # will be overwritten from the preprocessing config to ensure consistency
+  cell_type_key: null # will be overwritten from the preprocessing config to ensure consistency
+  batch_key: null # will be overwritten from the preprocessing config to ensure consistency
+dataset: # will be overwritten from the preprocessing config to ensure consistency
+  seq_length: null
+  batch_size: null
+  multiplier: null
+  chunk_size: null
+
+engine:
+  models:
+    encoder:
+      hidden_dim: 64
+      num_layers: 2
+      num_heads: 1
+      use_self_attention: False
+      use_cross_attention: False
+    decoder:
+      train: True
+      hidden_dims: [64]
+  trainer:
+    epochs: 1
+
+  losses:
+    infoNCE_data_context:
+      use: False
+
+    zinb_loss:
+      use: True
+      weight: 0.01
