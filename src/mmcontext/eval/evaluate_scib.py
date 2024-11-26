@@ -12,7 +12,29 @@ from scib import preprocessing as pp
 
 
 class scibEvaluator:
-    """Evaluates embeddings and reconstructed features using specified metrics."""
+    """Evaluates embeddings and reconstructed features using specified metrics.
+
+    Parameters
+    ----------
+    adata
+        AnnData Object containing raw data, embeddings, and reconstructed features.
+    batch_key
+        Key in adata.obs containing batch information.
+    label_key
+        Key in adata.obs containing bio label information (usually cell type)
+    embedding_key
+        Key(s) in adata.obsm containing embeddings to evaluate.
+    reconstructed_keys
+        List of keys in adata.layers containing reconstructed features.
+    data_id
+        Identifier for the dataset being evaluated.
+    n_top_genes
+        Number of top genes to use for HVG selection. If None, all genes are used.
+    max_cells
+        Maximum number of cells to use for evaluation. If None, all cells are used.
+    logger
+        Logger object for logging messages.
+    """
 
     def __init__(
         self,
@@ -20,6 +42,7 @@ class scibEvaluator:
         batch_key: str,
         label_key: str,
         embedding_key: str | list[str] = None,
+        reconstructed_keys: list[str] | None = None,
         data_id: str = "",
         n_top_genes: int | None = None,
         max_cells: int | None = None,
@@ -29,6 +52,7 @@ class scibEvaluator:
         self.batch_key = batch_key
         self.label_key = label_key
         self.embedding_key = embedding_key
+        self.reconstructed_keys = reconstructed_keys or ["reconstructed"]
         self.data_id = data_id
         self.n_top_genes = n_top_genes
         self.max_cells = max_cells
@@ -56,19 +80,20 @@ class scibEvaluator:
         results_list.append(raw_metrics)
 
         # Compute metrics on reconstructed data
-        if "reconstructed" in self.adata.layers:
-            self.logger.info("Computing metrics on reconstructed data...")
-            adata_post = self.adata.copy()
-            adata_post.X = adata_post.layers["reconstructed"]
-            reconstructed_metrics = self.compute_metrics(
-                adata=adata_post,
-                adata_pre=self.adata,
-                adata_post=adata_post,
-                use_rep=None,
-                type_="full",
-                data_type="reconstructed",
-            )
-            results_list.append(reconstructed_metrics)
+        if all(x in self.adata.layers for x in self.reconstructed_keys):
+            for reconstructed_key in self.reconstructed_keys:
+                self.logger.info(f"Computing metrics on reconstructed data {reconstructed_key} ...")
+                adata_post = self.adata.copy()
+                adata_post.X = adata_post.layers[reconstructed_key]
+                reconstructed_metrics = self.compute_metrics(
+                    adata=adata_post,
+                    adata_pre=self.adata,
+                    adata_post=adata_post,
+                    use_rep=None,
+                    type_="full",
+                    data_type=reconstructed_key,
+                )
+                results_list.append(reconstructed_metrics)
 
         # Compute metrics on embeddings
         if self.embedding_key is not None:
