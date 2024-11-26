@@ -4,7 +4,7 @@ import logging
 
 import numpy as np
 import torch
-import zarr
+import zarr as zarr_module
 from numcodecs import Blosc
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
@@ -442,73 +442,155 @@ class Trainer:
                 self.logger.info(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}")
             self.logger.info(f"Temperature: {self.temperature}")
 
-    def infer(self, data_loader: DataLoader) -> dict[str, torch.Tensor]:
+    def infer_adata(
+        self,
+        adata,
+        sample_id_key: str,
+        seq_length: int | None = None,
+        batch_size: int | None = None,
+        chunk_size: int | None = None,
+        output_zarr_path: str = "inferred_adata.zarr",
+        n_recon: int = 5,
+    ):
         """
-        Generates modified embeddings using the trained model.
+        Generates modified embeddings and multiple reconstructed matrices for the samples in the given AnnData object.
 
         Parameters
         ----------
-        data_loader
-            DataLoader for embeddings to be modified.
-
-        Returns
-        -------
-        modified_embeddings : Dict[str, torch.Tensor] Dictionary containing lists of embeddings.
+        adata : AnnData
+            AnnData object containing the data to infer on.
+        sample_id_key : str
+            Key in `adata.obs` containing the sample IDs.
+        seq_length : int, optional
+            Sequence length for the data loader.
+        batch_size : int, optional
+            Batch size for the data loader.
+        chunk_size : int, optional
+            Chunk size for processing data.
+        output_zarr_path : str, optional
+            Path to store the output Zarr file.
+        n_recon : int, optional
+            Number of reconstructed matrices to generate for each sample.
         """
+        from mmcontext.engine import sample_zinb
+        from mmcontext.pp import DataSetConstructor
+
+        if chunk_size is None:
+            self.logger.error("chunk_size not provided. Please provide chunk_size to the infer_adata method.")
+            raise ValueError("chunk_size not provided. Please provide chunk_size to the infer_adata method.")
+
+        dataset_constructor = DataSetConstructor(
+            in_sample_id_key=sample_id_key,
+            out_sample_id_key=sample_id_key,
+            chunk_size=chunk_size,
+            batch_size=batch_size,
+        )
+        dataset_constructor.add_anndata(adata)
+
+        if seq_length is None:
+            if self.seq_length is None:
+                self.logger.error("seq_length not provided. Please provide seq_length.")
+                raise ValueError("seq_length not provided. Please provide seq_length.")
+            seq_length = self.seq_length
+        if batch_size is None:
+            if self.batch_size is None:
+                self.logger.error("batch_size not provided. Please provide batch_size.")
+                raise ValueError("batch_size not provided. Please provide batch_size.")
+            batch_size = self.batch_size
+
+        dataset = dataset_constructor.construct_dataset(seq_length=seq_length, return_indices=True)
+        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        compressor = Blosc(cname="zstd", clevel=3)
+        num_cells = adata.n_obs
+        emb_dim = self.encoder.embedding_dim
+        embeddings_zarr = zarr_module.open_array(
+            output_zarr_path + "/embeddings",
+            mode="w",
+            shape=(num_cells, emb_dim),
+            chunks=(chunk_size, emb_dim),
+            dtype="float32",
+            compressor=compressor,
+        )
+        embeddings_zarr[:] = np.nan
+
+        all_out_params = (
+            {key: [] for key in ["mu", "theta", "pi"]} if not isinstance(self.decoder, PlaceholderModel) else None
+        )
+        all_indices = []
+
         self.encoder.eval()
         self.decoder.eval()
-        modified_embeddings = {self.data_key: [], self.context_key: [], self.sample_id_key: []}
 
         with torch.no_grad():
-            for batch in data_loader:
-                in_main = batch[self.input_embeddings["main"]].to(
-                    self.device
-                )  # Shape: (batch_size, seq_length, embedding_dim)
-                if len(self.input_embeddings) == 2:
-                    in_cross = batch[self.input_embeddings["cross"]].to(
-                        self.device
-                    )  # Shape: (batch_size, seq_length, embedding_dim)
-                else:
-                    in_cross = None
-                sample_ids = batch[self.sample_id_key]  # Shape: (batch_size, seq_length)  # Not used in prediction
+            for _batch_idx, batch in enumerate(data_loader):
+                indices = batch["indices"].view(-1).cpu().numpy()
+                all_indices.append(indices)
+                in_main = batch[self.input_embeddings["main"]].to(self.device)
+                in_cross = (
+                    batch[self.input_embeddings["cross"]].to(self.device) if self.input_embeddings["cross"] else None
+                )
 
-            # Forward pass
-            out = self.encoder(in_main=in_main, in_cross=in_cross)
-            out_distribution = self.decoder(out)
-            outputs = {}
-            outputs[self.input_embeddings["main"]] = out
-            outputs[self.input_embeddings["cross"]] = in_cross  # Pass the original embeddings used for cross attention
-            outputs["out_distribution"] = out_distribution
+                out, _ = self.encoder(in_main=in_main, in_cross=in_cross)
+                batch_size, seq_len, emb_dim = out.size()
+                out_flat = out.view(batch_size * seq_len, emb_dim)
+                embeddings_zarr[indices, :] = out_flat.cpu().numpy()
 
-            # Initialize dictionary to collect outputs if not already initialized
-            if "modified_embeddings" not in locals():
-                modified_embeddings = {self.data_key: [], self.context_key: [], self.sample_id_key: []}
+                if all_out_params is not None:
+                    out_distribution = self.decoder(out_flat)
+                    for key in all_out_params:
+                        all_out_params[key].append(out_distribution[key])
 
-            # Collect outputs, ensuring to remove any singleton dimensions
-            # Squeeze only if the dimension is 1 to avoid altering data shape unintentionally
-            modified_embeddings[self.data_key].append(
-                outputs[self.data_key].squeeze().cpu()
-                if outputs[self.data_key].dim() == 1
-                else outputs[self.data_key].cpu()
-            )
-            modified_embeddings[self.context_key].append(
-                outputs[self.context_key].squeeze().cpu()
-                if outputs[self.context_key].dim() == 1
-                else outputs[self.context_key].cpu()
-            )
-            modified_embeddings[self.raw_data_key].append(
-                outputs[self.raw_data_key].squeeze().cpu()
-                if outputs[self.raw_data_key].dim() == 1
-                else outputs[self.raw_data_key].cpu()
-            )
-            modified_embeddings[self.sample_id_key].append(
-                sample_ids.cpu()
-            )  # Assuming sample_ids does not need squeezing
+        # Concatenate collected indices and parameters
+        all_indices = np.concatenate(all_indices)
+        if all_out_params is not None:
+            for key in all_out_params:
+                all_out_params[key] = torch.cat(all_out_params[key], dim=0)
 
-            # Concatenate all batches
-            modified_embeddings = {k: torch.cat(v, dim=0) for k, v in modified_embeddings.items()}
-        return modified_embeddings
+        # Sampling and storing reconstructed matrices
+        recon_zarrs = []
+        if all_out_params is not None:
+            genes = adata.var_names
+            num_genes = len(genes)
+            for i in range(1, n_recon + 1):
+                recon_zarr = zarr_module.open_array(
+                    output_zarr_path + f"/reconstructed{i}",
+                    mode="w",
+                    shape=(num_cells, num_genes),
+                    chunks=(chunk_size, num_genes),
+                    dtype="float32",
+                    compressor=compressor,
+                )
+                recon_zarr[:] = np.nan
 
+                reconstructed = sample_zinb(all_out_params["mu"], all_out_params["theta"], all_out_params["pi"])
+
+                recon_zarr[all_indices, :] = reconstructed
+
+                recon_zarrs.append(recon_zarr)
+
+            # for i in range(n_recon):
+            #
+            #    zarr = recon_zarrs[i]
+            #    for zarr, data in zip(recon_zarrs, reconstructed):
+            #        zarr[all_indices, :] = data.cpu().numpy()
+
+        # Remove rows with NaNs
+        na_mask = np.isnan(embeddings_zarr).all(axis=1)
+        na_idx = np.where(~na_mask)[0]
+        adata = adata[na_idx]
+        embeddings_zarr = embeddings_zarr[na_idx]
+
+        if all_out_params is not None:
+            for i, recon_zarr in enumerate(recon_zarrs, start=1):
+                recon_zarr = recon_zarr[na_idx]
+                adata.layers[f"reconstructed{i}"] = recon_zarr
+
+        adata.obsm["mod_emb"] = embeddings_zarr
+        adata.write_zarr(output_zarr_path)
+
+
+'''
     def infer_adata(
         self,
         adata,
@@ -537,7 +619,7 @@ class Trainer:
             raise ValueError("chunk_size not provided. Please provide chunk_size to the infer_adata method.")
         # Initialize DataSetConstructor
         dataset_constructor = DataSetConstructor(
-            in_sample_id_key=sample_id_key, out_sample_id_key=sample_id_key, chunk_size=chunk_size
+            in_sample_id_key=sample_id_key, out_sample_id_key=sample_id_key, chunk_size=chunk_size, batch_size=batch_size
         )
 
         # Add the AnnData object to the dataset
@@ -630,3 +712,4 @@ class Trainer:
         if not isinstance(self.decoder, PlaceholderModel):
             adata.layers["reconstructed"] = reconstructed_zarr  #
         adata.write_zarr(output_zarr_path)
+'''
