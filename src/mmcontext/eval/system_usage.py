@@ -68,8 +68,8 @@ class SystemMonitor:
             cpu_percents = psutil.cpu_percent(interval=self.interval, percpu=True)
             total_cpu_usage_percent = sum(cpu_percents)
             total_cpu_usage_cores = total_cpu_usage_percent / self.num_cpus
-            self.cpu_usage.append((timestamp, total_cpu_usage_cores))
-            self.cpu_per_core.append((timestamp, cpu_percents))
+            self.cpu_usage.append((timestamp, total_cpu_usage_percent))
+            self.cpu_per_core.append((timestamp, total_cpu_usage_cores))
 
             # Measure memory usage
             mem = psutil.virtual_memory()
@@ -222,7 +222,7 @@ class SystemMonitor:
             print("No supported GPU detected.")
         print(f"Number of Threads (mean/max): {summary['num_threads_mean']:.2f}/{summary['num_threads_max']}")
 
-    def plot_metrics(self, save_path=None):
+    def plot_metrics(self, save_dir=None):
         """
         Plots the collected metrics over time.
 
@@ -258,8 +258,8 @@ class SystemMonitor:
         plt.title("Total CPU Usage Over Time")
         plt.xticks(tick_positions, tick_labels, rotation=45)
         plt.tight_layout()
-        if save_path:
-            plt.savefig(os.path.join(save_path, "cpu_usage.png"))
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, "cpu_usage.png"))
             plt.close()
         else:
             plt.show()
@@ -274,8 +274,8 @@ class SystemMonitor:
         plt.title("Memory Usage Over Time")
         plt.xticks(tick_positions, tick_labels, rotation=45)
         plt.tight_layout()
-        if save_path:
-            plt.savefig(os.path.join(save_path, "memory_usage.png"))
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, "memory_usage.png"))
             plt.close()
         else:
             plt.show()
@@ -292,8 +292,8 @@ class SystemMonitor:
         plt.legend()
         plt.xticks(tick_positions, tick_labels, rotation=45)
         plt.tight_layout()
-        if save_path:
-            plt.savefig(os.path.join(save_path, "disk_io.png"))
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, "disk_io.png"))
             plt.close()
         else:
             plt.show()
@@ -310,12 +310,12 @@ class SystemMonitor:
             plt.title("GPU Usage Over Time")
             plt.xticks(tick_positions, tick_labels, rotation=45)
             plt.tight_layout()
-            if save_path:
-                plt.savefig(os.path.join(save_path, "gpu_usage.png"))
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "gpu_usage.png"))
                 plt.close()
             else:
                 plt.show()
 
         # Save or Show Plots
-        if save_path:
-            self.logger.info(f"Plots saved to {save_path}")
+        if save_dir:
+            self.logger.info(f"Plots saved to {save_dir}")
