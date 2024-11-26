@@ -66,7 +66,7 @@ def plot_umap(
         from mmcontext.pp.utils import consolidate_low_frequency_categories
 
         adata = adata[np.random.choice(adata.obs.index, sample_size, replace=False)]
-        adata = consolidate_low_frequency_categories(adata, columns=[color_group], threshold=5, remove=True)
+        adata = consolidate_low_frequency_categories(adata, columns=[color_group], threshold=10, remove=True)
 
     try:
         # Compute UMAP
