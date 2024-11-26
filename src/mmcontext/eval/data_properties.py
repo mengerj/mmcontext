@@ -1,102 +1,20 @@
 import logging
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scipy.stats
+import seaborn as sns
 from scipy.cluster.hierarchy import cophenet, linkage
 from scipy.spatial.distance import pdist
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 
 
-def compare_data_properties(
-    data1,
-    data2,
-    name1="original",
-    name2="reconstructed",
-    predefined_subset="simulationBenchmark",
-    custom_subset=None,
-    cor_method="spearman",
-    logger=None,
-):
-    """
-    Compute data properties for each of two datasets and compute log2 fold changes between each property.
-
-    Parameters
-    ----------
-    data1 : numpy.ndarray
-        First dataset (rows are features and columns are samples).
-    data2 : numpy.ndarray
-        Second dataset (rows are features and columns are samples).
-    predefined_subset : str, optional
-        Name of subset available for DataProperties.
-    custom_subset : list of str, optional
-        Optionally, a list of property names to compute.
-    cor_method : str, optional
-        Correlation method used for calculation of correlations.
-    logger : logging.Logger, optional
-        Logger to use. If None, a new logger is created.
-
-    Returns
-    -------
-    dict
-        Dictionary containing:
-            - name1: properties of the first dataset.
-            - name2: properties of the second dataset.
-            - 'allLog2FC': log2 fold changes between the properties.
-    """
-    logger = logger or logging.getLogger(__name__)
-
-    # Initialize DataProperties instances with the same settings
-    dp = DataProperties(
-        predefined_subset=predefined_subset, custom_subset=custom_subset, cor_method=cor_method, logger=logger
-    )
-
-    # Compute properties for each dataset
-    properties1 = dp.compute_properties(data1)
-    properties2 = dp.compute_properties(data2)
-
-    # Get the intersection of property names
-    properties = set(properties1.keys()) & set(properties2.keys())
-
-    all_log2fc = {}
-    for prop in properties:
-        try:
-            prop_value1 = properties1[prop]
-            prop_value2 = properties2[prop]
-
-            # Handle p-values specially
-            if "pval" in prop:
-                # Set significant p-values to 0.05 to reduce extreme log2FC values
-                if prop_value1 < 0.05:
-                    prop_value1 = 0.05
-                if prop_value2 < 0.05:
-                    prop_value2 = 0.05
-
-            # If the property is a dict with 'res', extract 'res'
-            if isinstance(prop_value1, dict) and "res" in prop_value1:
-                prop_value1 = prop_value1["res"]
-            if isinstance(prop_value2, dict) and "res" in prop_value2:
-                prop_value2 = prop_value2["res"]
-
-            # Compute log2 fold change
-            current_log2fc = np.log2(np.divide(prop_value1, prop_value2))
-
-            # Handle infinite values resulting from division by zero
-            if np.isinf(current_log2fc).any():
-                current_log2fc = np.nan
-
-            all_log2fc[prop] = current_log2fc
-
-        except Exception as e:
-            logger.error(f"Error computing log2FC for property '{prop}': {e}")
-            all_log2fc[prop] = np.nan
-
-    return {name1: properties1, name2: properties2, "allLog2FC": all_log2fc}
-
-
 class DataProperties:
     """
-    Class to compute data properties for a given data matrix.
+    Class to compute data properties for given data matrices and compare them.
 
     Parameters
     ----------
@@ -117,6 +35,250 @@ class DataProperties:
         self.custom_subset = custom_subset
         self.cor_method = cor_method
         self.logger = logger or logging.getLogger(__name__)
+        self.properties = []  # Stores properties of both original and reconstructed data
+        self.original_counter = 0  # Counter for original dataset IDs
+
+    def add_original_data(self, data, id=None):
+        """
+        Compute properties of the original data and store them.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Original data matrix (rows are features, columns are samples).
+        id : str, optional
+            Identifier for the original data. Default is '0'.
+        """
+        if id is None:
+            id = str(self.original_counter)
+            self.original_counter += 1
+        self.og_id = id
+        # always reset reconstruction counter when adding new original data
+        self.reconstructed_counter = 0
+        properties = self.compute_properties(data)
+        self.properties.append({"og_id": id, "recon_id": "orginal_data", "type": "original", "properties": properties})
+
+    def add_reconstructed_data(self, data, id=None):
+        """
+        Compute properties of the reconstructed data and store them.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Reconstructed data matrix (rows are features, columns are samples).
+        id : str, optional
+            Identifier for the reconstructed data. If not provided, an incrementing number as a string is used.
+        """
+        if self.og_id is None:
+            self.logger.error("Please add an original dataset before adding reconstructed datasets. ")
+            raise ValueError("Please add an original dataset before adding reconstructed datasets.")
+        if id is None:
+            id = str(self.reconstructed_counter)
+            self.reconstructed_counter += 1
+        properties = self.compute_properties(data)
+        self.properties.append({"og_id": self.og_id, "recon_id": id, "type": "reconstructed", "properties": properties})
+
+    def compare_data_properties(self):
+        """
+        Compare data properties between original and reconstructed datasets.
+
+        Compute log2 fold changes between the properties of the original data
+        and each reconstructed dataset.
+
+        Returns
+        -------
+        pandas.DataFrame
+            DataFrame containing log2 fold changes, with one row per reconstructed dataset.
+        """
+        if not "original" and "reconstructed" in [prop["type"] for prop in self.properties]:
+            self.logger.error("Please add at least one original and one reconstructed dataset before comparing.")
+            return None
+        # List to store log2FC data for each reconstructed dataset
+        log2fc_list = []
+        for original in self.properties:
+            if original["type"] == "reconstructed":
+                continue
+            og_id = original["og_id"]
+            original_props = original["properties"]
+            prop_names = set(original_props.keys())
+            for recon in self.properties:
+                # skip if this is original data or it is reconstructed data belonging to a different og dataset
+                if recon["type"] == "original" or recon["og_id"] != og_id:
+                    continue
+                recon_id = recon["recon_id"]
+                recon_props = recon["properties"]
+                # Get intersection of property names
+                properties = prop_names & set(recon_props.keys())
+                log2fc_dict = {"og_id": og_id, "recon_id": recon_id}
+
+                for prop in properties:
+                    try:
+                        prop_value1 = original_props[prop]
+                        prop_value2 = recon_props[prop]
+
+                        # Handle p-values specially
+                        if "pval" in prop:
+                            # Clip p-values between 0.05 and 1
+                            prop_value1 = max(prop_value1, 0.05)
+                            prop_value2 = max(prop_value2, 0.05)
+
+                        # Compute log2 fold change
+                        if prop_value1 == 0 or prop_value2 == 0:
+                            # Avoid returning NaN for log2(0/0)
+                            if prop_value1 == 0 and prop_value2 == 0:
+                                current_log2fc = np.float32(0.0)
+                            else:
+                                # Add small value to avoid division by zero
+                                current_log2fc = np.sign(prop_value2 - prop_value1) * np.log2(
+                                    np.divide(np.abs(prop_value2 + 1e-7), np.abs(prop_value1 + 1e-7))
+                                )
+                        else:
+                            # Ensure direction is handled even if values are negative
+                            current_log2fc = np.sign(prop_value2 - prop_value1) * np.log2(
+                                np.divide(np.abs(prop_value2), np.abs(prop_value1))
+                            )
+
+                        log2fc_dict[prop] = current_log2fc
+
+                    except Exception as e:
+                        self.logger.error(f"Error computing log2FC for property '{prop}' in dataset '{recon_id}': {e}")
+                        log2fc_dict[prop] = np.nan
+
+                log2fc_list.append(log2fc_dict)
+
+        # Convert the list of dictionaries to a DataFrame
+        log2fc_df = pd.DataFrame(log2fc_list)
+        # Compute meanLog2FC for each reconstructed dataset
+        log2fc_df["meanLog2FC"] = log2fc_df.drop(columns=["og_id", "recon_id"]).mean(axis=1, skipna=True)
+        # Get the mean and sd of mean Log2FC
+        mean_log2fc = np.nanmean(log2fc_df["meanLog2FC"])
+        sd_log2fc = np.nanstd(log2fc_df["meanLog2FC"], ddof=1)
+        # Store the DataFrame for plotting
+        self.log2fc_df = log2fc_df
+
+        return {"mean": mean_log2fc, "sd": sd_log2fc, "res_df": log2fc_df}
+
+    def plot_metrics(self, title="Metrics Boxplot", save_dir=None):
+        """
+        Create boxplots of the metrics over the reconstructed datasets.
+
+        Parameters
+        ----------
+        title : str, optional
+            Title for the boxplot. Default is 'Metrics Boxplot'.
+        save_dir:
+            Directory to save the plot. If none, the plot will be displayed.
+        """
+        if not hasattr(self, "log2fc_df"):
+            self.logger.error("Please run compare_data_properties() before plotting metrics.")
+            return
+        og_ids = self.log2fc_df["og_id"].unique()
+        for og_id in og_ids:
+            df_subset = self.log2fc_df[self.log2fc_df["og_id"] == og_id]
+            df_subset = df_subset.drop(columns=["og_id"])
+            # Melt the DataFrame for plotting
+            df_melted = df_subset.melt(id_vars=["recon_id"], var_name="Metric", value_name="Log2FC")
+
+            # Create the boxplot with metric names on the y-axis
+            plt.figure(figsize=(8, max(6, len(df_melted["Metric"].unique()) * 0.4)))
+            sns.boxplot(y="Metric", x="Log2FC", data=df_melted, orient="h")
+            plt.title(f"{title}_orginal_dataID:{og_id}")
+            plt.tight_layout()
+        if save_dir:
+            save_dir = Path(save_dir)
+            plt.savefig(save_dir / f"{title}_{og_id}.png")
+        else:
+            plt.show()
+
+    def plot_pca(self):
+        """
+        Perform PCA on the computed properties and plot the first two principal components.
+
+        Datasets are colored by 'og_id', and different markers are used for original and reconstructed data.
+        """
+        if not hasattr(self, "properties") or not self.properties:
+            self.logger.error("No properties available. Please compute properties first.")
+            return
+
+        # Collect all datasets into a DataFrame
+        data_list = []
+        for item in self.properties:
+            data_entry = {
+                "og_id": item.get("og_id"),
+                "recon_id": item.get("recon_id"),
+                "type": item.get("type"),
+            }
+            # Flatten the properties dictionary into the data entry
+            for prop_name, prop_value in item["properties"].items():
+                data_entry[prop_name] = prop_value
+            data_list.append(data_entry)
+
+        # Create a DataFrame
+        df = pd.DataFrame(data_list)
+
+        # Extract the features (properties) for PCA
+        feature_cols = [col for col in df.columns if col not in ["og_id", "recon_id", "type"]]
+        X = df[feature_cols]
+
+        # Handle missing values (fill with mean of each column)
+        X_filled = X.fillna(X.mean())
+
+        # Perform PCA
+        pca = PCA(n_components=2)
+        principal_components = pca.fit_transform(X_filled)
+
+        # Add principal components to the DataFrame
+        df["PC1"] = principal_components[:, 0]
+        df["PC2"] = principal_components[:, 1]
+
+        # Plotting
+        plt.figure(figsize=(10, 7))
+        unique_og_ids = df["og_id"].unique()
+        num_colors = len(unique_og_ids)
+        cmap = plt.get_cmap("tab10")
+        colors = [cmap(i % 10) for i in range(num_colors)]  # Cycle through colors if more than 10 og_ids
+
+        # Create mappings for colors and markers
+        og_id_to_color = {og_id: colors[i] for i, og_id in enumerate(unique_og_ids)}
+        type_to_marker = {"original": "X", "reconstructed": "s"}  # 'X' for original, square for reconstructed
+
+        # Plot data points
+        for _idx, row in df.iterrows():
+            plt.scatter(
+                row["PC1"],
+                row["PC2"],
+                color=og_id_to_color[row["og_id"]],
+                marker=type_to_marker[row["type"]],
+                edgecolors="black",  # Black edge for visibility
+                s=100,
+            )  # Adjust size as needed
+
+        plt.xlabel("Principal Component 1")
+        plt.ylabel("Principal Component 2")
+        plt.title("PCA of Data Properties")
+
+        # Create custom legend for colors (og_id)
+        from matplotlib.patches import Patch
+
+        color_patches = [
+            Patch(facecolor=og_id_to_color[og_id], edgecolor="black", label=og_id) for og_id in unique_og_ids
+        ]
+
+        # Create custom legend for markers (type)
+        from matplotlib.lines import Line2D
+
+        marker_lines = [
+            Line2D([0], [0], marker=marker, color="black", linestyle="None", markersize=10, label=dataset_type)
+            for dataset_type, marker in type_to_marker.items()
+        ]
+
+        # Combine legends
+        first_legend = plt.legend(handles=color_patches, title="Dataset", bbox_to_anchor=(1.05, 1), loc="upper left")
+        plt.gca().add_artist(first_legend)
+        plt.legend(handles=marker_lines, title="Dataset Type", bbox_to_anchor=(1.05, 0.6), loc="upper left")
+
+        plt.tight_layout()
+        plt.show()
 
     def compute_properties(self, data):
         """
@@ -141,9 +303,19 @@ class DataProperties:
             if method:
                 try:
                     result = method()
-                    data_properties[prop] = result
+                    if isinstance(result, dict) and "res" in result:
+                        result = result.get("res")
+                    if isinstance(result, np.ndarray) and len(result) > 1:
+                        mean = np.nanmean(result)
+                        data_properties[f"mean_{prop}"] = mean
+                        sd = np.nanstd(result, ddof=1)
+                        data_properties[f"sd_{prop}"] = sd
+                    else:
+                        # Ensure result is a numpy float
+                        data_properties[prop] = np.float64(result)
                 except Exception as e:
                     self.logger.error(f"Error computing {prop}: {e}")
+                    data_properties[prop] = np.nan
                     continue
             else:
                 self.logger.warning(f"Method {method_name} not found.")
@@ -158,11 +330,11 @@ class DataProperties:
         list of str
             List of property names to compute.
         """
-        possible_properties = [
-            method_name[4:]
-            for method_name in dir(self)
-            if callable(getattr(self, method_name)) and method_name.startswith("get_")
-        ]
+        possible_properties = []
+        for method in dir(self):
+            if not method.startswith("__") and method.startswith("get_"):
+                method_name = method[4:]
+                possible_properties.append(method_name)
 
         if self.custom_subset:
             subset = self.custom_subset
@@ -228,9 +400,9 @@ class DataProperties:
                     "sdRowVarsLog2cpm",
                     "sdColCorr",
                     "sdRowCorr",
-                    "LinearCoefPoly2XRowMeansLog2cpmYRowVarsLog2cpm",
-                    "QuadraticCoefPoly2XRowMeansLog2cpmYRowVarsLog2cpm",
-                    "slopeCoefPoly1Xp0RowYRowMeanslog2cpm",
+                    "LinCoefPoly2",
+                    "QuadCoefPoly2",
+                    "poly1Xp0YRowMeans",
                     "coefHclustRows",
                     "coefHclustCols",
                 ]
@@ -324,9 +496,9 @@ class DataProperties:
         mtx = self.data
         return np.nanpercentile(mtx, 99)
 
-    def get_colSums(self):
+    def _get_colSums(self):
         """
-        Calculate the sum of each column.
+        Calculate the sum of each column. Only used internally.
 
         Returns
         -------
@@ -345,7 +517,7 @@ class DataProperties:
         float
             Median of the column sums.
         """
-        col_sums = self.get_colSums()
+        col_sums = self._get_colSums()
         return np.nanmedian(col_sums)
 
     def get_sdColSums(self):
@@ -357,7 +529,7 @@ class DataProperties:
         float
             Standard deviation of the column sums.
         """
-        col_sums = self.get_colSums()
+        col_sums = self._get_colSums()
         return np.nanstd(col_sums, ddof=1)
 
     def get_colMeans(self):
@@ -388,8 +560,16 @@ class DataProperties:
         if np.any(np.isnan(mtx)):
             mtx = np.nan_to_num(mtx)
             self.logger.info("NAs have been converted to 0 for the calculation of counts per million.")
+
         lib_sizes = np.sum(mtx, axis=0)
-        cpm = (mtx / lib_sizes) * 1e6
+        # Ensure no division by zero by masking or replacing zero library sizes
+        safe_lib_sizes = np.where(lib_sizes == 0, 1, lib_sizes)
+
+        # Compute CPM
+        cpm = (mtx / safe_lib_sizes) * 1e6
+
+        # Set CPM to 0 where library sizes were 0
+        cpm[:, lib_sizes == 0] = 0
         prior_count = 0.1
         cpm = cpm + prior_count
         log2cpm = np.log2(cpm)
@@ -404,7 +584,7 @@ class DataProperties:
         float
             Maximum of the column sums.
         """
-        col_sums = self.get_colSums()
+        col_sums = self._get_colSums()
         return np.nanmax(col_sums)
 
     def get_minColSums(self):
@@ -416,7 +596,7 @@ class DataProperties:
         float
             Minimum of the column sums.
         """
-        col_sums = self.get_colSums()
+        col_sums = self._get_colSums()
         return np.nanmin(col_sums)
 
     def get_nFeatures(self):
@@ -734,9 +914,9 @@ class DataProperties:
         col_vars = self.get_colSd() ** 2
         return np.nanmedian(col_vars)
 
-    def get_rowCorr(self, nmaxFeature=100):
+    def _get_rowCorr(self, nmaxFeature=100):
         """
-        Calculate pairwise correlations of rows.
+        Calculate pairwise correlations of rows. Only used internally.
 
         Parameters
         ----------
@@ -768,9 +948,9 @@ class DataProperties:
             raise ValueError("Unsupported correlation method")
         return {"res": corr_res, "seed": seed_used}
 
-    def get_colCorr(self, nmaxSamples=100):
+    def _get_colCorr(self, nmaxSamples=100):
         """
-        Calculate pairwise correlations of columns.
+        Calculate pairwise correlations of columns. Only used internally.
 
         Parameters
         ----------
@@ -812,7 +992,7 @@ class DataProperties:
             Spearman correlation coefficient.
         """
         p0_col = self.get_p0Col()
-        col_sums = self.get_colSums()
+        col_sums = self._get_colSums()
         corr, _ = scipy.stats.spearmanr(p0_col, col_sums)
         return corr
 
@@ -828,7 +1008,9 @@ class DataProperties:
             'seed': int
                 Seed used.
         """
-        corr_res = self.get_rowCorr()
+        corr_res = self._get_rowCorr()
+        if isinstance(corr_res["res"], float) and np.isnan(corr_res["res"]):
+            return {"res": np.nan, "seed": corr_res["seed"]}
         corr_values = corr_res["res"].flatten()
         corr_values = corr_values[~np.isnan(corr_values)]
         seed_used = corr_res["seed"]
@@ -859,7 +1041,9 @@ class DataProperties:
             'seed': int
                 Seed used.
         """
-        corr_res = self.get_colCorr()
+        corr_res = self._get_colCorr()
+        if isinstance(corr_res["res"], float) and np.isnan(corr_res["res"]):
+            return {"res": np.nan, "seed": corr_res["seed"]}
         corr_values = corr_res["res"].flatten()
         corr_values = corr_values[~np.isnan(corr_values)]
         seed_used = corr_res["seed"]
@@ -911,7 +1095,7 @@ class DataProperties:
         float
             Mean of the column sums.
         """
-        col_sums = self.get_colSums()
+        col_sums = self._get_colSums()
         return np.nanmean(col_sums)
 
     def get_meanRowVarsLog2cpm(self):
@@ -938,7 +1122,7 @@ class DataProperties:
             'seed': int
                 Seed used.
         """
-        corr_res = self.get_colCorr()
+        corr_res = self._get_colCorr()
         mean_corr = np.nanmean(corr_res["res"])
         return {"res": mean_corr, "seed": corr_res["seed"]}
 
@@ -954,7 +1138,7 @@ class DataProperties:
             'seed': int
                 Seed used.
         """
-        corr_res = self.get_rowCorr()
+        corr_res = self._get_rowCorr()
         mean_corr = np.nanmean(corr_res["res"])
         return {"res": mean_corr, "seed": corr_res["seed"]}
 
@@ -1006,7 +1190,7 @@ class DataProperties:
             'seed': int
                 Seed used.
         """
-        corr_res = self.get_colCorr()
+        corr_res = self._get_colCorr()
         sd_corr = np.nanstd(corr_res["res"], ddof=1)
         return {"res": sd_corr, "seed": corr_res["seed"]}
 
@@ -1022,13 +1206,15 @@ class DataProperties:
             'seed': int
                 Seed used.
         """
-        corr_res = self.get_rowCorr()
+        corr_res = self._get_rowCorr()
         sd_corr = np.nanstd(corr_res["res"], ddof=1)
         return {"res": sd_corr, "seed": corr_res["seed"]}
 
-    def get_LinearCoefPoly2XRowMeansLog2cpmYRowVarsLog2cpm(self):
+    def get_LinCoefPoly2(self):
         """
         Calculate the linear coefficient of a quadratic fit of row means vs row variances of log2 CPM.
+
+        Legacy name: LinearCoefPoly2XRowMeansLog2cpmYRowVarsLog2cpm
 
         Returns
         -------
@@ -1045,9 +1231,11 @@ class DataProperties:
         coeffs = np.polyfit(x, y, 2)
         return coeffs[1]
 
-    def get_QuadraticCoefPoly2XRowMeansLog2cpmYRowVarsLog2cpm(self):
+    def get_QuadCoefPoly2(self):
         """
         Calculate the quadratic coefficient of a quadratic fit of row means vs row variances of log2 CPM.
+
+        Legacy Name: QuadraticCoefPoly2XRowMeansLog2cpmYRowVarsLog2cpm
 
         Returns
         -------
@@ -1064,9 +1252,11 @@ class DataProperties:
         coeffs = np.polyfit(x, y, 2)
         return coeffs[0]
 
-    def get_slopeCoefPoly1Xp0RowYRowMeanslog2cpm(self):
+    def get_poly1Xp0YRowMeans(self):
         """
         Calculate the slope of the linear fit of percent zeros per row vs row means of log2 CPM.
+
+        Legacy Name: slopeCoefPoly1Xp0RowYRowMeanslog2cpm
 
         Returns
         -------
