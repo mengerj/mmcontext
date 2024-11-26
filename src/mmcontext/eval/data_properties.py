@@ -52,11 +52,11 @@ class DataProperties:
         if id is None:
             id = str(self.original_counter)
             self.original_counter += 1
-        self.og_id = id
+        self.id = id
         # always reset reconstruction counter when adding new original data
         self.reconstructed_counter = 0
         properties = self.compute_properties(data)
-        self.properties.append({"og_id": id, "recon_id": "orginal_data", "type": "original", "properties": properties})
+        self.properties.append({"id": id, "recon_id": "orginal_data", "type": "original", "properties": properties})
 
     def add_reconstructed_data(self, data, id=None):
         """
@@ -69,14 +69,14 @@ class DataProperties:
         id : str, optional
             Identifier for the reconstructed data. If not provided, an incrementing number as a string is used.
         """
-        if self.og_id is None:
+        if self.id is None:
             self.logger.error("Please add an original dataset before adding reconstructed datasets. ")
             raise ValueError("Please add an original dataset before adding reconstructed datasets.")
         if id is None:
             id = str(self.reconstructed_counter)
             self.reconstructed_counter += 1
         properties = self.compute_properties(data)
-        self.properties.append({"og_id": self.og_id, "recon_id": id, "type": "reconstructed", "properties": properties})
+        self.properties.append({"id": self.id, "recon_id": id, "type": "reconstructed", "properties": properties})
 
     def compare_data_properties(self):
         """
@@ -98,18 +98,18 @@ class DataProperties:
         for original in self.properties:
             if original["type"] == "reconstructed":
                 continue
-            og_id = original["og_id"]
+            id = original["id"]
             original_props = original["properties"]
             prop_names = set(original_props.keys())
             for recon in self.properties:
                 # skip if this is original data or it is reconstructed data belonging to a different og dataset
-                if recon["type"] == "original" or recon["og_id"] != og_id:
+                if recon["type"] == "original" or recon["id"] != id:
                     continue
                 recon_id = recon["recon_id"]
                 recon_props = recon["properties"]
                 # Get intersection of property names
                 properties = prop_names & set(recon_props.keys())
-                log2fc_dict = {"og_id": og_id, "recon_id": recon_id}
+                log2fc_dict = {"id": id, "recon_id": recon_id}
 
                 for prop in properties:
                     try:
@@ -149,14 +149,15 @@ class DataProperties:
         # Convert the list of dictionaries to a DataFrame
         log2fc_df = pd.DataFrame(log2fc_list)
         # Compute meanLog2FC for each reconstructed dataset
-        log2fc_df["meanLog2FC"] = log2fc_df.drop(columns=["og_id", "recon_id"]).mean(axis=1, skipna=True)
-        # Get the mean and sd of mean Log2FC
-        mean_log2fc = np.nanmean(log2fc_df["meanLog2FC"])
-        sd_log2fc = np.nanstd(log2fc_df["meanLog2FC"], ddof=1)
+        log2fc_df["meanLog2FC"] = log2fc_df.drop(columns=["id", "recon_id"]).abs().mean(axis=1, skipna=True)
+        # Get the mean and sd of mean Log2FC for each unique original dataset
+        mean_log2fc = log2fc_df.groupby("id")["meanLog2FC"].mean()
+        sd_log2fc = log2fc_df.groupby("id")["meanLog2FC"].std(ddof=1)
+        self.mean_std_df = pd.DataFrame({"meanLog2FC": mean_log2fc, "sdLog2FC": sd_log2fc})
         # Store the DataFrame for plotting
         self.log2fc_df = log2fc_df
 
-        return {"mean": mean_log2fc, "sd": sd_log2fc, "res_df": log2fc_df}
+        return log2fc_df
 
     def plot_metrics(self, title="Metrics Boxplot", save_dir=None):
         """
@@ -172,29 +173,34 @@ class DataProperties:
         if not hasattr(self, "log2fc_df"):
             self.logger.error("Please run compare_data_properties() before plotting metrics.")
             return
-        og_ids = self.log2fc_df["og_id"].unique()
-        for og_id in og_ids:
-            df_subset = self.log2fc_df[self.log2fc_df["og_id"] == og_id]
-            df_subset = df_subset.drop(columns=["og_id"])
+        ids = self.log2fc_df["id"].unique()
+        for id in ids:
+            df_subset = self.log2fc_df[self.log2fc_df["id"] == id]
+            df_subset = df_subset.drop(columns=["id"])
             # Melt the DataFrame for plotting
             df_melted = df_subset.melt(id_vars=["recon_id"], var_name="Metric", value_name="Log2FC")
 
             # Create the boxplot with metric names on the y-axis
             plt.figure(figsize=(8, max(6, len(df_melted["Metric"].unique()) * 0.4)))
             sns.boxplot(y="Metric", x="Log2FC", data=df_melted, orient="h")
-            plt.title(f"{title}_orginal_dataID:{og_id}")
+            plt.title(f"{title}_orginal_dataID:{id}")
             plt.tight_layout()
         if save_dir:
             save_dir = Path(save_dir)
-            plt.savefig(save_dir / f"{title}_{og_id}.png")
+            plt.savefig(save_dir / f"{title}_{id}.png")
         else:
             plt.show()
 
-    def plot_pca(self):
+    def plot_pca(self, save_path=None):
         """
         Perform PCA on the computed properties and plot the first two principal components.
 
-        Datasets are colored by 'og_id', and different markers are used for original and reconstructed data.
+        Datasets are colored by 'id', and different markers are used for original and reconstructed data.
+
+        Parameters
+        ----------
+        save_path : str, optional
+            Path to save the plot. If None, the plot will be displayed.
         """
         if not hasattr(self, "properties") or not self.properties:
             self.logger.error("No properties available. Please compute properties first.")
@@ -204,7 +210,7 @@ class DataProperties:
         data_list = []
         for item in self.properties:
             data_entry = {
-                "og_id": item.get("og_id"),
+                "id": item.get("id"),
                 "recon_id": item.get("recon_id"),
                 "type": item.get("type"),
             }
@@ -217,7 +223,7 @@ class DataProperties:
         df = pd.DataFrame(data_list)
 
         # Extract the features (properties) for PCA
-        feature_cols = [col for col in df.columns if col not in ["og_id", "recon_id", "type"]]
+        feature_cols = [col for col in df.columns if col not in ["id", "recon_id", "type"]]
         X = df[feature_cols]
 
         # Handle missing values (fill with mean of each column)
@@ -233,13 +239,13 @@ class DataProperties:
 
         # Plotting
         plt.figure(figsize=(10, 7))
-        unique_og_ids = df["og_id"].unique()
-        num_colors = len(unique_og_ids)
+        unique_ids = df["id"].unique()
+        num_colors = len(unique_ids)
         cmap = plt.get_cmap("tab10")
-        colors = [cmap(i % 10) for i in range(num_colors)]  # Cycle through colors if more than 10 og_ids
+        colors = [cmap(i % 10) for i in range(num_colors)]  # Cycle through colors if more than 10 ids
 
         # Create mappings for colors and markers
-        og_id_to_color = {og_id: colors[i] for i, og_id in enumerate(unique_og_ids)}
+        id_to_color = {id: colors[i] for i, id in enumerate(unique_ids)}
         type_to_marker = {"original": "X", "reconstructed": "s"}  # 'X' for original, square for reconstructed
 
         # Plot data points
@@ -247,7 +253,7 @@ class DataProperties:
             plt.scatter(
                 row["PC1"],
                 row["PC2"],
-                color=og_id_to_color[row["og_id"]],
+                color=id_to_color[row["id"]],
                 marker=type_to_marker[row["type"]],
                 edgecolors="black",  # Black edge for visibility
                 s=100,
@@ -257,12 +263,10 @@ class DataProperties:
         plt.ylabel("Principal Component 2")
         plt.title("PCA of Data Properties")
 
-        # Create custom legend for colors (og_id)
+        # Create custom legend for colors (id)
         from matplotlib.patches import Patch
 
-        color_patches = [
-            Patch(facecolor=og_id_to_color[og_id], edgecolor="black", label=og_id) for og_id in unique_og_ids
-        ]
+        color_patches = [Patch(facecolor=id_to_color[id], edgecolor="black", label=id) for id in unique_ids]
 
         # Create custom legend for markers (type)
         from matplotlib.lines import Line2D
@@ -278,7 +282,10 @@ class DataProperties:
         plt.legend(handles=marker_lines, title="Dataset Type", bbox_to_anchor=(1.05, 0.6), loc="upper left")
 
         plt.tight_layout()
-        plt.show()
+        if save_path:
+            plt.savefig(save_path)
+        else:
+            plt.show()
 
     def compute_properties(self, data):
         """
@@ -377,7 +384,6 @@ class DataProperties:
                     "rowMeansLog2cpm",
                     "rowMediansLog2cpm",
                     "rowVarsLog2cpm",
-                    "colSums",
                     "medianColSums",
                     "meanColSums",
                     "sdColSums",
@@ -385,8 +391,6 @@ class DataProperties:
                     "maxColSums",
                     "minColSums",
                     "colVarsLog2cpm",
-                    "rowCorr",
-                    "colCorr",
                     "corrColSumsP0Sample",
                     "bimodalityRowCorr",
                     "bimodalityColCorr",
