@@ -152,7 +152,7 @@ class SystemMonitor:
         # Core Utilization
         core_utilizations = []
         for _, cores in self.cpu_per_core:
-            core_utilizations.extend(cores)
+            core_utilizations.append(cores)
         summary["core_usage_mean"] = sum(core_utilizations) / len(core_utilizations)
         summary["core_usage_max"] = max(core_utilizations)
 
@@ -249,13 +249,13 @@ class SystemMonitor:
             return tick_positions, tick_labels
 
         # CPU Usage Plot
-        timestamps, cpu_usages = zip(*self.cpu_usage, strict=False)
+        timestamps, cpu_usages = zip(*self.cpu_per_core, strict=False)
         tick_positions, tick_labels = format_time_ticks(timestamps)
         plt.figure()
         plt.plot(cpu_usages)
         plt.xlabel("Time")
         plt.ylabel("CPU Usage (avg % / core)")
-        plt.title("Total CPU Usage Over Time")
+        plt.title(f"Avg. CPU Usage Over Time from {self.num_cpus} Cores")
         plt.xticks(tick_positions, tick_labels, rotation=45)
         plt.tight_layout()
         if save_dir:

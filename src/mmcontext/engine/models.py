@@ -202,7 +202,7 @@ class MMContextEncoder(BaseModel):
         elif self.temperature:
             temperature = self.temperature
         else:
-            temperature = 1.0
+            temperature = 1.0  # Default temperature
         return output, temperature
 
 
