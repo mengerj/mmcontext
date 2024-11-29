@@ -1,4 +1,5 @@
 import logging
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -37,6 +38,7 @@ class DataProperties:
         self.logger = logger or logging.getLogger(__name__)
         self.properties = []  # Stores properties of both original and reconstructed data
         self.original_counter = 0  # Counter for original dataset IDs
+        self.id = None
 
     def add_original_data(self, data, id=None):
         """
@@ -159,6 +161,139 @@ class DataProperties:
 
         return log2fc_df
 
+    def compute_properties(self, data):
+        """
+        Compute the selected data properties.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data matrix to compute properties on.
+
+        Returns
+        -------
+        dict
+            A dictionary with data properties.
+        """
+        if not isinstance(data, np.ndarray):
+            raise ValueError("Input data must be a numpy array.")
+        self.data = data
+        properties = self.select_properties()
+        data_properties = {}
+        for prop in properties:
+            method_name = f"get_{prop}"
+            method = getattr(self, method_name, None)
+            if method:
+                try:
+                    with warnings.catch_warnings(record=True) as w:
+                        warnings.simplefilter("always")
+                        result = method()
+                        if w:
+                            for warning in w:
+                                self.logger.warning(f"Warning computing {prop}: {warning.message}")
+                        if isinstance(result, dict) and "res" in result:
+                            result = result.get("res")
+                        if isinstance(result, np.ndarray):
+                            if result.size > 1:
+                                raise Exception(f"Property {prop} has more than one value. Skipping.")
+                            else:
+                                result = result.item()
+                        # Ensure result is a numpy float
+                        data_properties[prop] = np.float64(result)
+                except Exception as e:
+                    self.logger.error(f"Error computing {prop}: {e}")
+                    data_properties[prop] = np.nan
+                    continue
+            else:
+                self.logger.warning(f"Method {method_name} not found.")
+        return data_properties
+
+    def select_properties(self):
+        """
+        Select the properties to compute based on predefined or custom subset.
+
+        Returns
+        -------
+        list of str
+            List of property names to compute.
+        """
+        possible_properties = []
+        for method in dir(self):
+            if not method.startswith("__") and method.startswith("get_"):
+                method_name = method[4:]
+                possible_properties.append(method_name)
+
+        if self.custom_subset:
+            subset = self.custom_subset
+        else:
+            if self.predefined_subset == "all":
+                subset = possible_properties
+                self.logger.info("Using all available data properties.")
+            elif self.predefined_subset == "proteomics":
+                subset = [
+                    "nFeatures",
+                    "nSamples",
+                    "corrpNAColAndColMeans",
+                    "corrpNARowAndRowMeans",
+                    "pNA",
+                    "prctPC1",
+                    "prctPC2",
+                    "meanRowMeans",
+                    "meanColMeans",
+                    "meanRowSd",
+                    "meanColSd",
+                    "skewness",
+                    "bimodalityColCorr",
+                    "mean",
+                    "variance",
+                    "coefHclustCols",
+                    "coefHclustRows",
+                    "FCmax10pQuantileSdQuotient",
+                ]
+                self.logger.info("Using predefined proteomics subset.")
+            elif self.predefined_subset == "microbiome":
+                subset = [
+                    "nFeatures",
+                    "nSamples",
+                    "p0",
+                    "meanp0Row",
+                    "sdp0Row",
+                    "meanp0Col",
+                    "sdp0Col",
+                    "median",
+                    "q95",
+                    "q99",
+                    "medianColSums",
+                    "meanColSums",
+                    "sdColSums",
+                    "maxColSums",
+                    "minColSums",
+                    "corrColSumsP0Sample",
+                    "bimodalityRowCorr",
+                    "bimodalityColCorr",
+                    "meanRowMeansLog2cpm",
+                    "medianRowMediansLog2cpm",
+                    "meanRowVarsLog2cpm",
+                    "meanColCorr",
+                    "meanRowCorr",
+                    "sdRowMeansLog2cpm",
+                    "sdRowMediansLog2cpm",
+                    "sdRowVarsLog2cpm",
+                    "sdColCorr",
+                    "sdRowCorr",
+                    "LinCoefPoly2",
+                    "QuadCoefPoly2",
+                    "poly1Xp0YRowMeans",
+                    "coefHclustRows",
+                    "coefHclustCols",
+                ]
+                self.logger.info("Using predefined microbiome subset.")
+            else:
+                self.logger.error("Unknown predefined subset.")
+                subset = []
+            self.subset = subset
+        return subset
+
     def plot_metrics(self, title="Metrics Boxplot", save_dir=None):
         """
         Create boxplots of the metrics over the reconstructed datasets.
@@ -221,17 +356,21 @@ class DataProperties:
 
         # Create a DataFrame
         df = pd.DataFrame(data_list)
-
+        # Drop columns with NaN values and log them
+        df = df.dropna(axis=1, how="any")
+        self.logger.warning(
+            f"Property PCA Plot: Dropped columns with NaN values: {set(data_list[0].keys()) - set(df.columns)}"
+        )
         # Extract the features (properties) for PCA
         feature_cols = [col for col in df.columns if col not in ["id", "recon_id", "type"]]
         X = df[feature_cols]
 
         # Handle missing values (fill with mean of each column)
-        X_filled = X.fillna(X.mean())
+        # X_filled = X.fillna(X.mean())
 
         # Perform PCA
         pca = PCA(n_components=2)
-        principal_components = pca.fit_transform(X_filled)
+        principal_components = pca.fit_transform(X)
 
         # Add principal components to the DataFrame
         df["PC1"] = principal_components[:, 0]
@@ -287,135 +426,6 @@ class DataProperties:
         else:
             plt.show()
 
-    def compute_properties(self, data):
-        """
-        Compute the selected data properties.
-
-        Parameters
-        ----------
-        data : numpy.ndarray
-            Data matrix to compute properties on.
-
-        Returns
-        -------
-        dict
-            A dictionary with data properties.
-        """
-        self.data = data
-        properties = self.select_properties()
-        data_properties = {}
-        for prop in properties:
-            method_name = f"get_{prop}"
-            method = getattr(self, method_name, None)
-            if method:
-                try:
-                    result = method()
-                    if isinstance(result, dict) and "res" in result:
-                        result = result.get("res")
-                    if isinstance(result, np.ndarray) and len(result) > 1:
-                        mean = np.nanmean(result)
-                        data_properties[f"mean_{prop}"] = mean
-                        sd = np.nanstd(result, ddof=1)
-                        data_properties[f"sd_{prop}"] = sd
-                    else:
-                        # Ensure result is a numpy float
-                        data_properties[prop] = np.float64(result)
-                except Exception as e:
-                    self.logger.error(f"Error computing {prop}: {e}")
-                    data_properties[prop] = np.nan
-                    continue
-            else:
-                self.logger.warning(f"Method {method_name} not found.")
-        return data_properties
-
-    def select_properties(self):
-        """
-        Select the properties to compute based on predefined or custom subset.
-
-        Returns
-        -------
-        list of str
-            List of property names to compute.
-        """
-        possible_properties = []
-        for method in dir(self):
-            if not method.startswith("__") and method.startswith("get_"):
-                method_name = method[4:]
-                possible_properties.append(method_name)
-
-        if self.custom_subset:
-            subset = self.custom_subset
-        else:
-            if self.predefined_subset == "all":
-                subset = possible_properties
-                self.logger.info("Using all available data properties.")
-            elif self.predefined_subset == "proteomics":
-                subset = [
-                    "nFeatures",
-                    "nSamples",
-                    "corrpNAColAndColMeans",
-                    "corrpNARowAndRowMeans",
-                    "pNA",
-                    "prctPC1",
-                    "prctPC2",
-                    "meanRowMeans",
-                    "meanColMeans",
-                    "meanRowSd",
-                    "meanColSd",
-                    "skewness",
-                    "bimodalityColCorr",
-                    "mean",
-                    "variance",
-                    "coefHclustCols",
-                    "coefHclustRows",
-                    "FCmax10pQuantileSdQuotient",
-                ]
-                self.logger.info("Using predefined proteomics subset.")
-            elif self.predefined_subset == "microbiome":
-                subset = [
-                    "nFeatures",
-                    "nSamples",
-                    "p0",
-                    "p0Row",
-                    "p0Col",
-                    "median",
-                    "q95",
-                    "q99",
-                    "rowMeansLog2cpm",
-                    "rowMediansLog2cpm",
-                    "rowVarsLog2cpm",
-                    "medianColSums",
-                    "meanColSums",
-                    "sdColSums",
-                    "colMeans",
-                    "maxColSums",
-                    "minColSums",
-                    "colVarsLog2cpm",
-                    "corrColSumsP0Sample",
-                    "bimodalityRowCorr",
-                    "bimodalityColCorr",
-                    "meanRowMeansLog2cpm",
-                    "medianRowMediansLog2cpm",
-                    "meanRowVarsLog2cpm",
-                    "meanColCorr",
-                    "meanRowCorr",
-                    "sdRowMeansLog2cpm",
-                    "sdRowMediansLog2cpm",
-                    "sdRowVarsLog2cpm",
-                    "sdColCorr",
-                    "sdRowCorr",
-                    "LinCoefPoly2",
-                    "QuadCoefPoly2",
-                    "poly1Xp0YRowMeans",
-                    "coefHclustRows",
-                    "coefHclustCols",
-                ]
-                self.logger.info("Using predefined microbiome subset.")
-            else:
-                self.logger.error("Unknown predefined subset.")
-                subset = []
-        return subset
-
     def get_p0(self):
         """
         Calculate the percent of zeros in the data matrix.
@@ -428,9 +438,9 @@ class DataProperties:
         mtx = self.data
         return np.sum(mtx == 0) / mtx.size
 
-    def get_p0Row(self):
+    def _get_p0Row(self):
         """
-        Calculate the percent of zeros per feature (row).
+        Calculate the percent of zeros per feature (row). Only used internally.
 
         Returns
         -------
@@ -440,9 +450,9 @@ class DataProperties:
         mtx = self.data
         return np.sum(mtx == 0, axis=1) / mtx.shape[1]
 
-    def get_p0Col(self):
+    def _get_p0Col(self):
         """
-        Calculate the percent of zeros per sample (column).
+        Calculate the percent of zeros per sample (column). Only used internally.
 
         Returns
         -------
@@ -451,6 +461,54 @@ class DataProperties:
         """
         mtx = self.data
         return np.sum(mtx == 0, axis=0) / mtx.shape[0]
+
+    def get_meanp0Row(self):
+        """
+        Calculate the mean of percent of zeros per feature.
+
+        Returns
+        -------
+        float
+            Mean of percent of zeros per feature.
+        """
+        p0_row = self._get_p0Row()
+        return np.nanmean(p0_row)
+
+    def get_sdp0Row(self):
+        """
+        Calculate the standard deviation of percent of zeros per feature.
+
+        Returns
+        -------
+        float
+            Standard deviation of percent of zeros per feature.
+        """
+        p0_row = self._get_p0Row()
+        return np.nanstd(p0_row, ddof=1)
+
+    def get_meanp0Col(self):
+        """
+        Calculate the mean of percent of zeros per sample.
+
+        Returns
+        -------
+        float
+            Mean of percent of zeros per sample.
+        """
+        p0_col = self._get_p0Col()
+        return np.nanmean(p0_col)
+
+    def get_sdp0Col(self):
+        """
+        Calculate the standard deviation of percent of zeros per sample.
+
+        Returns
+        -------
+        float
+            Standard deviation of percent of zeros per sample.
+        """
+        p0_col = self._get_p0Col()
+        return np.nanstd(p0_col, ddof=1)
 
     def get_median(self):
         """
@@ -536,9 +594,9 @@ class DataProperties:
         col_sums = self._get_colSums()
         return np.nanstd(col_sums, ddof=1)
 
-    def get_colMeans(self):
+    def _get_colMeans(self):
         """
-        Calculate the mean of each column.
+        Calculate the mean of each column. Only used internally.
 
         Returns
         -------
@@ -550,8 +608,8 @@ class DataProperties:
 
     # ... Implement other get_* methods similarly ...
 
-    # Example of get_log2cpm
-    def get_log2cpm(self):
+    # Example of _get_log2cpm
+    def _get_log2cpm(self):
         """
         Calculate log2 counts per million.
 
@@ -625,7 +683,7 @@ class DataProperties:
         """
         return self.data.shape[1]
 
-    def get_cpm(self):
+    def _get_cpm(self):
         """
         Calculate counts per million (CPM).
 
@@ -642,19 +700,19 @@ class DataProperties:
         cpm = (mtx / lib_sizes) * 1e6
         return cpm
 
-    def get_rowMeansLog2cpm(self):
+    def _get_rowMeansLog2cpm(self):
         """
-        Calculate the mean of log2 CPM for each row.
+        Calculate the mean of log2 CPM for each row. Only used internally.
 
         Returns
         -------
         numpy.ndarray
             Mean log2 CPM per row.
         """
-        log2cpm = self.get_log2cpm()
+        log2cpm = self._get_log2cpm()
         return np.nanmean(log2cpm, axis=1)
 
-    def get_rowMediansLog2cpm(self):
+    def _get_rowMediansLog2cpm(self):
         """
         Calculate the median of log2 CPM for each row.
 
@@ -663,106 +721,22 @@ class DataProperties:
         numpy.ndarray
             Median log2 CPM per row.
         """
-        log2cpm = self.get_log2cpm()
+        log2cpm = self._get_log2cpm()
         return np.nanmedian(log2cpm, axis=1)
 
-    def get_rowMeansCpm(self):
+    def _get_rowVarsLog2cpm(self):
         """
-        Calculate the mean of CPM for each row.
-
-        Returns
-        -------
-        numpy.ndarray
-            Mean CPM per row.
-        """
-        cpm = self.get_cpm()
-        return np.nanmean(cpm, axis=1)
-
-    def get_rowMediansCpm(self):
-        """
-        Calculate the median of CPM for each row.
-
-        Returns
-        -------
-        numpy.ndarray
-            Median CPM per row.
-        """
-        cpm = self.get_cpm()
-        return np.nanmedian(cpm, axis=1)
-
-    def get_rowVarsLog2cpm(self):
-        """
-        Calculate the variance of log2 CPM for each row.
+        Calculate the variance of log2 CPM for each row. Only used internally.
 
         Returns
         -------
         numpy.ndarray
             Variance of log2 CPM per row.
         """
-        log2cpm = self.get_log2cpm()
+        log2cpm = self._get_log2cpm()
         return np.nanvar(log2cpm, axis=1, ddof=1)
 
-    def get_colMeansLog2cpm(self):
-        """
-        Calculate the mean of log2 CPM for each column.
-
-        Returns
-        -------
-        numpy.ndarray
-            Mean log2 CPM per column.
-        """
-        log2cpm = self.get_log2cpm()
-        return np.nanmean(log2cpm, axis=0)
-
-    def get_colMediansLog2cpm(self):
-        """
-        Calculate the median of log2 CPM for each column.
-
-        Returns
-        -------
-        numpy.ndarray
-            Median log2 CPM per column.
-        """
-        log2cpm = self.get_log2cpm()
-        return np.nanmedian(log2cpm, axis=0)
-
-    def get_colMeansCpm(self):
-        """
-        Calculate the mean of CPM for each column.
-
-        Returns
-        -------
-        numpy.ndarray
-            Mean CPM per column.
-        """
-        cpm = self.get_cpm()
-        return np.nanmean(cpm, axis=0)
-
-    def get_colMediansCpm(self):
-        """
-        Calculate the median of CPM for each column.
-
-        Returns
-        -------
-        numpy.ndarray
-            Median CPM per column.
-        """
-        cpm = self.get_cpm()
-        return np.nanmedian(cpm, axis=0)
-
-    def get_colVarsLog2cpm(self):
-        """
-        Calculate the variance of log2 CPM for each column.
-
-        Returns
-        -------
-        numpy.ndarray
-            Variance of log2 CPM per column.
-        """
-        log2cpm = self.get_log2cpm()
-        return np.nanvar(log2cpm, axis=0, ddof=1)
-
-    def get_rowMeans(self):
+    def _get_rowMeans(self):
         """
         Calculate the mean of each row.
 
@@ -774,7 +748,7 @@ class DataProperties:
         mtx = self.data
         return np.nanmean(mtx, axis=1)
 
-    def get_rowSd(self):
+    def _get_rowSd(self):
         """
         Calculate the standard deviation of each row.
 
@@ -786,7 +760,7 @@ class DataProperties:
         mtx = self.data
         return np.nanstd(mtx, axis=1, ddof=1)
 
-    def get_colSd(self):
+    def _get_colSd(self):
         """
         Calculate the standard deviation of each column.
 
@@ -807,7 +781,7 @@ class DataProperties:
         float
             Mean of the row means.
         """
-        row_means = self.get_rowMeans()
+        row_means = self._get_rowMeans()
         return np.nanmean(row_means)
 
     def get_meanColMeans(self):
@@ -819,7 +793,7 @@ class DataProperties:
         float
             Mean of the column means.
         """
-        col_means = self.get_colMeans()
+        col_means = self._get_colMeans()
         return np.nanmean(col_means)
 
     def get_sdRowMeans(self):
@@ -831,7 +805,7 @@ class DataProperties:
         float
             Standard deviation of the row means.
         """
-        row_means = self.get_rowMeans()
+        row_means = self._get_rowMeans()
         return np.nanstd(row_means, ddof=1)
 
     def get_sdColMeans(self):
@@ -843,7 +817,7 @@ class DataProperties:
         float
             Standard deviation of the column means.
         """
-        col_means = self.get_colMeans()
+        col_means = self._get_colMeans()
         return np.nanstd(col_means, ddof=1)
 
     def get_meanRowSd(self):
@@ -855,7 +829,7 @@ class DataProperties:
         float
             Mean of the row standard deviations.
         """
-        row_sd = self.get_rowSd()
+        row_sd = self._get_rowSd()
         return np.nanmean(row_sd)
 
     def get_meanColSd(self):
@@ -867,7 +841,7 @@ class DataProperties:
         float
             Mean of the column standard deviations.
         """
-        col_sd = self.get_colSd()
+        col_sd = self._get_colSd()
         return np.nanmean(col_sd)
 
     def get_sdRowSd(self):
@@ -879,7 +853,7 @@ class DataProperties:
         float
             Standard deviation of the row standard deviations.
         """
-        row_sd = self.get_rowSd()
+        row_sd = self._get_rowSd()
         return np.nanstd(row_sd, ddof=1)
 
     def get_sdColSd(self):
@@ -891,7 +865,7 @@ class DataProperties:
         float
             Standard deviation of the column standard deviations.
         """
-        col_sd = self.get_colSd()
+        col_sd = self._get_colSd()
         return np.nanstd(col_sd, ddof=1)
 
     def get_medianRowVars(self):
@@ -903,7 +877,7 @@ class DataProperties:
         float
             Median of the row variances.
         """
-        row_vars = self.get_rowSd() ** 2
+        row_vars = self._get_rowSd() ** 2
         return np.nanmedian(row_vars)
 
     def get_medianColVars(self):
@@ -915,10 +889,10 @@ class DataProperties:
         float
             Median of the column variances.
         """
-        col_vars = self.get_colSd() ** 2
+        col_vars = self._get_colSd() ** 2
         return np.nanmedian(col_vars)
 
-    def _get_rowCorr(self, nmaxFeature=100):
+    def _get_rowCorr(self, nmaxFeature=500):
         """
         Calculate pairwise correlations of rows. Only used internally.
 
@@ -995,8 +969,11 @@ class DataProperties:
         float
             Spearman correlation coefficient.
         """
-        p0_col = self.get_p0Col()
+        p0_col = self._get_p0Col()
         col_sums = self._get_colSums()
+        if np.all(p0_col == p0_col[0]) or np.all(col_sums == col_sums[0]):
+            self.logger.info("Constant values in p0_col or col_sums. Returning NaN.")
+            return np.nan
         corr, _ = scipy.stats.spearmanr(p0_col, col_sums)
         return corr
 
@@ -1018,7 +995,6 @@ class DataProperties:
         corr_values = corr_res["res"].flatten()
         corr_values = corr_values[~np.isnan(corr_values)]
         seed_used = corr_res["seed"]
-
         try:
             gmm = GaussianMixture(n_components=2, covariance_type="spherical", max_iter=10000)
             gmm.fit(corr_values.reshape(-1, 1))
@@ -1075,7 +1051,7 @@ class DataProperties:
         float
             Mean of the row means of log2 CPM.
         """
-        row_means_log2cpm = self.get_rowMeansLog2cpm()
+        row_means_log2cpm = self._get_rowMeansLog2cpm()
         return np.nanmean(row_means_log2cpm)
 
     def get_medianRowMediansLog2cpm(self):
@@ -1087,7 +1063,7 @@ class DataProperties:
         float
             Median of the row medians of log2 CPM.
         """
-        row_medians_log2cpm = self.get_rowMediansLog2cpm()
+        row_medians_log2cpm = self._get_rowMediansLog2cpm()
         return np.nanmedian(row_medians_log2cpm)
 
     def get_meanColSums(self):
@@ -1111,7 +1087,7 @@ class DataProperties:
         float
             Mean of the row variances of log2 CPM.
         """
-        row_vars_log2cpm = self.get_rowVarsLog2cpm()
+        row_vars_log2cpm = self._get_rowVarsLog2cpm()
         return np.nanmean(row_vars_log2cpm)
 
     def get_meanColCorr(self):
@@ -1155,7 +1131,7 @@ class DataProperties:
         float
             Standard deviation of the row means of log2 CPM.
         """
-        row_means_log2cpm = self.get_rowMeansLog2cpm()
+        row_means_log2cpm = self._get_rowMeansLog2cpm()
         return np.nanstd(row_means_log2cpm, ddof=1)
 
     def get_sdRowMediansLog2cpm(self):
@@ -1167,7 +1143,7 @@ class DataProperties:
         float
             Standard deviation of the row medians of log2 CPM.
         """
-        row_medians_log2cpm = self.get_rowMediansLog2cpm()
+        row_medians_log2cpm = self._get_rowMediansLog2cpm()
         return np.nanstd(row_medians_log2cpm, ddof=1)
 
     def get_sdRowVarsLog2cpm(self):
@@ -1179,7 +1155,7 @@ class DataProperties:
         float
             Standard deviation of the row variances of log2 CPM.
         """
-        row_vars_log2cpm = self.get_rowVarsLog2cpm()
+        row_vars_log2cpm = self._get_rowVarsLog2cpm()
         return np.nanstd(row_vars_log2cpm, ddof=1)
 
     def get_sdColCorr(self):
@@ -1225,8 +1201,8 @@ class DataProperties:
         float
             Linear coefficient.
         """
-        x = self.get_rowMeansLog2cpm()
-        y = self.get_rowVarsLog2cpm()
+        x = self._get_rowMeansLog2cpm()
+        y = self._get_rowVarsLog2cpm()
         valid = ~np.isnan(x) & ~np.isnan(y)
         x = x[valid]
         y = y[valid]
@@ -1246,8 +1222,8 @@ class DataProperties:
         float
             Quadratic coefficient.
         """
-        x = self.get_rowMeansLog2cpm()
-        y = self.get_rowVarsLog2cpm()
+        x = self._get_rowMeansLog2cpm()
+        y = self._get_rowVarsLog2cpm()
         valid = ~np.isnan(x) & ~np.isnan(y)
         x = x[valid]
         y = y[valid]
@@ -1267,8 +1243,8 @@ class DataProperties:
         float
             Slope coefficient.
         """
-        x = self.get_p0Row()
-        y = self.get_rowMeansLog2cpm()
+        x = self._get_p0Row()
+        y = self._get_rowMeansLog2cpm()
         valid = ~np.isnan(x) & ~np.isnan(y)
         x = x[valid]
         y = y[valid]
@@ -1532,7 +1508,7 @@ class DataProperties:
         mtx = self.data
         return np.mean(np.isnan(mtx))
 
-    def get_pNACol(self):
+    def _get_pNACol(self):
         """
         Calculate the percentage of NaNs in each column.
 
@@ -1544,7 +1520,7 @@ class DataProperties:
         mtx = self.data
         return np.mean(np.isnan(mtx), axis=0)
 
-    def get_pNARow(self):
+    def _get_pNARow(self):
         """
         Calculate the percentage of NaNs in each row.
 
@@ -1565,7 +1541,7 @@ class DataProperties:
         float
             Mean percentage of NaNs per column.
         """
-        pNACol = self.get_pNACol()
+        pNACol = self._get_pNACol()
         return np.mean(pNACol)
 
     def get_meanPNARow(self):
@@ -1577,7 +1553,7 @@ class DataProperties:
         float
             Mean percentage of NaNs per row.
         """
-        pNARow = self.get_pNARow()
+        pNARow = self._get_pNARow()
         return np.mean(pNARow)
 
     def get_pRowsWoNA(self):
@@ -1602,42 +1578,21 @@ class DataProperties:
         float
             p-value of the correlation test.
         """
-        x = self.get_pNACol()
-        y = self.get_colMeans()
+        x = self._get_pNACol()
+        y = self._get_colMeans()
         if len(x) < 3:
+            return np.nan
+        if np.all(x == x[0]) or np.all(y == y[0]):
+            self.logger.info("Constant values in pNACol or colMeans. Returning NaN.")
             return np.nan
         try:
             if self.cor_method == "spearman":
                 corr_res = scipy.stats.spearmanr(x, y)
-            else:
+            if self.cor_method == "pearson":
                 corr_res = scipy.stats.pearsonr(x, y)
             return corr_res.pvalue
         except Exception as e:
             self.logger.error(f"Error computing pvalCorrpNAColAndColMeans: {e}")
-            return np.nan
-
-    def get_corrpNAColAndColMeans(self):
-        """
-        Calculate the correlation between percentage of NaNs per column and column means.
-
-        Returns
-        -------
-        float
-            Correlation coefficient.
-        """
-        x = self.get_pNACol()
-        y = self.get_colMeans()
-        if len(x) < 3:
-            return np.nan
-        try:
-            if self.cor_method == "spearman":
-                corr_res = scipy.stats.spearmanr(x, y)
-                return corr_res.correlation
-            else:
-                corr_res = scipy.stats.pearsonr(x, y)
-                return corr_res[0]
-        except Exception as e:
-            self.logger.error(f"Error computing corrpNAColAndColMeans: {e}")
             return np.nan
 
     def get_pvalCorrpNARowAndRowMeans(self):
@@ -1649,8 +1604,13 @@ class DataProperties:
         float
             p-value of the correlation test.
         """
-        x = self.get_pNARow()
-        y = self.get_rowMeans()
+        x = self._get_pNARow()
+        y = self._get_rowMeans()
+
+        if np.all(x == x[0]) or np.all(y == y[0]):
+            self.logger.info("Constant values in pNACol or colMeans. Returning NaN.")
+            return np.nan
+
         if len(x) < 3:
             return np.nan
         try:
@@ -1672,8 +1632,12 @@ class DataProperties:
         float
             Correlation coefficient.
         """
-        x = self.get_pNARow()
-        y = self.get_rowMeans()
+        x = self._get_pNARow()
+        y = self._get_rowMeans()
+        if np.all(x == x[0]) or np.all(y == y[0]):
+            self.logger.info("Constant values in pNACol or colMeans. Returning NaN.")
+            return np.nan
+
         if len(x) < 3:
             return np.nan
         try:
@@ -1696,7 +1660,7 @@ class DataProperties:
         float
             Quotient value.
         """
-        row_means = self.get_rowMeans()
+        row_means = self._get_rowMeans()
         quantile_value = np.nanpercentile(row_means, 10)
         indices = np.where(row_means < quantile_value)[0]
         if len(indices) == 0:
