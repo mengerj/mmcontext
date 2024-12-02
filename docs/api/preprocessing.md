@@ -57,7 +57,6 @@ With all dimensions aligned a dataset can be constructed with can be used to cre
     :nosignatures:
 
     pp.DataSetConstructor
-    pp.EmbeddingDataset
 ```
 
 ```{bibliography}

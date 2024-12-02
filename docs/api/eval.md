@@ -35,5 +35,4 @@ The function {func}`mmcontext.eval.compare_data_properties`, computes data prope
     :nosignatures:
 
     eval.DataProperties
-    eval.compare_data_properties
 ```
