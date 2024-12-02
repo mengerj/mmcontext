@@ -433,9 +433,11 @@ class Trainer:
                     if save:
                         best_val_loss = val_loss
                         for name, encoder in self.encoders.items():
-                            encoder.save(file_path=save_dir / f"best_{name}_weights.pth")
+                            os.makedirs(save_dir / "best_encoder_weights", exist_ok=True)
+                            encoder.save(file_path=save_dir / "best_encoder_weights" / f"best_{name}_weights.pth")
                             self.logger.info(f"Validation loss improved. Encoder '{name}' weights saved.")
-                        self.decoder.save(file_path=save_dir / "best_decoder_weights.pth")
+                        os.makedirs(save_dir / "best_decoder_weights", exist_ok=True)
+                        self.decoder.save(file_path=save_dir / "best_decoder_weights" / "best_decoder_weights.pth")
                         self.logger.info("Validation loss improved. Decoder weights saved.")
                 else:
                     epochs_no_improve += 1
