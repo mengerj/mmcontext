@@ -524,6 +524,11 @@ class Trainer:
         # Subset the adata object to only include the samples in the data loader and remove it from memory
         adata = adata[all_indices]
 
+        # remove keys from obs that contain "norm" as these are not very interesting
+        for key in adata.obs.keys():
+            if "norm" in key:
+                del adata.obs[key]
+
         # Write the filtered adata to Zarr
         adata.write_zarr(output_zarr_path, chunks=[adata.shape[0], chunk_size])
         # To create the reconstructed matrices, we need the genes
