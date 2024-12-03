@@ -5,7 +5,7 @@ import logging
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
-
+import time
 from mmcontext.engine import ContrastiveLoss, LossManager, PlaceholderModel, ZINBLoss
 
 
@@ -175,6 +175,7 @@ class Trainer:
         if self.loss_manager is not None:
             self._validate_input_embeddings()
 
+        self.logger.info(f"Initialized Trainer on device: {self.device}")
     def _validate_input_embeddings(self):
         for loss_fn, _ in self.loss_manager.loss_functions:
             if isinstance(loss_fn, ContrastiveLoss):
@@ -404,7 +405,7 @@ class Trainer:
             self.logger.error("Validation DataLoader is required to save the model checkpoints.")
             raise ValueError("Validation DataLoader is required to save the model checkpoints.")
         best_val_loss = float("inf")
-
+        start_time = time.time()
         for epoch in range(1, epochs + 1):
             self.logger.info(f"Starting Epoch {epoch}/{epochs}")
             train_loss = self.train_epoch(train_loader)
@@ -427,6 +428,8 @@ class Trainer:
             else:
                 self.logger.info(f"Epoch {epoch}/{epochs} - Train Loss: {train_loss:.4f}")
             self.logger.info(f"Temperature: {self.temperature}")
+        end_time = time.time()
+        self.logger.info(f"Training complete. Time taken: {end_time - start_time:.2f} seconds for {epochs} epochs.")
 
     def infer(self, data_loader: DataLoader) -> dict[str, torch.Tensor]:
         """
@@ -587,7 +590,7 @@ class Trainer:
         for sample_id in sample_ids_in_adata:
             embedding = id_to_embedding.get(sample_id)
             if embedding is None:
-                self.logger.warning(f"Sample ID {sample_id} not found in inference outputs.")
+                #self.logger.warning(f"Sample ID {sample_id} not found in inference outputs.")
                 sample_ids_to_cut.append(sample_id)
                 # jump to the next iteration
                 continue
@@ -607,6 +610,6 @@ class Trainer:
         adata_new.obsm["mod_emb"] = embeddings_tensor.detach().numpy()
         # If a different decoder than PlaceholderModel is used, reconstruct the data
         if not isinstance(self.decoder, PlaceholderModel):
-            reconstructed = sample_zinb(out_distribution["mu"], out_distribution["theta"], out_distribution["pi"])
+            reconstructed = sample_zinb(out_distribution["mu"].cpu(), out_distribution["theta"].cpu(), out_distribution["pi"].cpu())
             adata_new.layers["reconstructed"] = reconstructed.detach().numpy()
         return adata_new

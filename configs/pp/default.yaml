@@ -19,9 +19,9 @@ embedder:
   data_embedder:
     use_precalculated: True
     precalculated_obsm_key: scvi
-    type: None
+    type: null
 normalizer:
-  type: None #min-max or z-score or None
+  type: null #min-max or z-score or null
 aligner:
   latent_dim: 64
   type: pca
