@@ -10,6 +10,7 @@ tests/__pycache__/
 # Log files
 *.log
 *.log.*
+*.log.*
 
 # anndata files
 # only track data files in data/demo
@@ -35,3 +36,5 @@ out/*
 docs/notebooks/*zarr
 #venv
 venv/
+
+docs/notebooks/*zarr*

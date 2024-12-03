@@ -1,0 +1,66 @@
+# config.yaml
+defaults:
+  - pp/default
+  - engine/default
+  - engine/losses/default
+  - override hydra/job_logging: default
+  - override hydra/hydra_logging: default
+ID:
+  name: some_run
+data:
+  dir: data
+  sample_key: soma_joinid
+  batch_key: dataset_id
+  cell_type_key: cell_type
+  train:
+    subdir: ${data.dir}/train_data
+    filenames: [subset_large_cellxgene.h5ad]
+    out_dir: ${data.dir}/train_data_processed_${ID.name}
+  test:
+    subdir: ${data.dir}/test_data
+    filenames: [subset2_large_cellxgene.h5ad]
+    out_dir: ${data.dir}/test_data_processed_${ID.name}
+pp:
+  embedder:
+    context_embedder:
+      type: categorical # Overriding context_embedder.type
+    category_embedder:
+      one_hot: True
+      metadata_categories: ["cell_type"]
+      combination_method: concatenate
+    data_embedder:
+      precalculated_obsm_key: "scvi"
+
+  normalizer:
+    type: "z-score"
+
+  aligner:
+    latent_dim: 64
+    pca_eval:
+      evaluate_pca: True
+
+  dataset_constructor:
+    seq_length: 20
+    batch_size: 64
+
+engine:
+  models:
+    encoder:
+      hidden_dim: 64
+      num_layers: 2
+      num_heads: 1
+      use_self_attention: False
+      use_cross_attention: False
+    decoder:
+      train: True
+      hidden_dims: [64]
+  trainer:
+    epochs: 1
+
+  losses:
+    infoNCE_data_context:
+      use: False
+
+    zinb_loss:
+      use: True
+      weight: 0.01
