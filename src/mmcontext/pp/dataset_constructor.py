@@ -1,7 +1,4 @@
-# mmcontext/pp/data_set_constructor.py
-
-
-import numpy as np
+import dask.array as da
 import pandas as pd
 import scipy.sparse as sp
 import torch
@@ -11,320 +8,298 @@ from torch.utils.data import Dataset
 
 class DataSetConstructor:
     """
-    Constructs datasets from aligned embeddings stored in AnnData objects.
-
-    Allows combining multiple AnnData objects into a single dataset suitable for use with PyTorch DataLoaders.
-    Ensures sample ID consistency and that data and context embeddings have the same dimensions.
-
-    If non default 'out_keys' are used, make sure to also pass them to the loss function and the trainer.
+    Constructs datasets from embeddings stored in AnnData objects.
 
     Parameters
     ----------
-    in_data_key
-        Key for data embeddings in the AnnData object.
-    in_context_key
-        Key for context embeddings in the AnnData object.
-    in_sample_id_key
-        Key for sample IDs in the AnnData object.
-    out_data_key
-        Key to be used for data embeddings in the Dataset.
-    out_context_key
-        Key to be used for context embeddings in the Dataset.
-    out_sample_id_key
+    out_emb_keys : Dict[str, str]
+        Dictionary mapping internal names to output names in the Dataset.
+        Example: {'data_embeddings': 'data_emb', 'context_embeddings': 'context_emb'}
+    out_sample_id_key : str
         Key to be used for sample IDs in the Dataset.
-    out_raw_data_key
+    out_raw_data_key : str
         Key to be used for raw data in the Dataset.
+    use_raw : bool
+        Whether to include raw data (adata.X) in the Dataset.
+    chunk_size : int
+        Chunk size to use for Dask arrays.
+    batch_size : int
+        Batch size for the DataLoader.
     """
 
     def __init__(
         self,
-        in_data_key: str = "d_emb_aligned",
-        in_context_key: str = "c_emb_aligned",
-        in_sample_id_key: str = "sample_id",
-        out_data_key: str = "data_embedding",
-        out_context_key: str = "context_embedding",
+        out_emb_keys: dict,
         out_sample_id_key: str = "sample_id",
         out_raw_data_key: str = "raw_data",
+        use_raw: bool = True,
+        chunk_size: int | None = None,
+        batch_size: int | None = None,
     ):
-        self.in_data_key = in_data_key
-        self.in_context_key = in_context_key
-        self.in_sample_id_key = in_sample_id_key
-        self.out_data_key = out_data_key
-        self.out_context_key = out_context_key
+        self.out_emb_keys = out_emb_keys  # Dict[str, str]
         self.out_sample_id_key = out_sample_id_key
         self.out_raw_data_key = out_raw_data_key
-        self.data_embeddings: list[np.ndarray] = []
-        self.context_embeddings: list[np.ndarray] = []
-        self.sample_ids: list[str] = []
-        self.raw_data: list[np.ndarray] = []
+        self.use_raw = use_raw
+        self.chunk_size = chunk_size
+        self.batch_size = batch_size
 
-    def add_anndata(self, adata: AnnData):
+        # Initialize empty dicts for embeddings
+        self.embeddings = {key: None for key in self.out_emb_keys.keys()}
+        self.sample_ids_list = []  # For checking duplicate sample ids
+        self.sample_ids = None
+        self.raw_data = None
+        self.total_samples = 0
+
+        if batch_size is None:
+            raise ValueError(
+                "Batch size must be specified. Not used here, but important to ensure it is valid for the data size."
+            )
+        if chunk_size is None:
+            raise ValueError(
+                "Chunk size must be specified. Ideally it should be a multiple of the batch size and the sequence length."
+            )
+
+    def add_anndata(self, adata: AnnData, emb_keys: dict, sample_id_key: str):
         """
         Adds data from an AnnData object into the dataset.
 
         Parameters
         ----------
-        adata
-            The AnnData object containing data and context embeddings.
-
-        Raises
-        ------
-        ValueError
-            If embeddings are missing, dimensions do not match, or sample IDs are inconsistent.
+        adata : AnnData
+            The AnnData object containing embeddings.
+        emb_keys : Dict[str, str]
+            Dictionary mapping internal names (same as in out_emb_keys) to keys in adata.obsm where the embeddings are stored.
+        sample_id_key : str
+            Key in adata.obs where sample IDs are stored.
         """
-        # Check that the embeddings exist
-        if self.in_data_key not in adata.obsm:
-            raise ValueError(f"Data embeddings '{self.in_data_key}' not found in adata.obsm.")
-        if self.in_context_key not in adata.obsm:
-            raise ValueError(f"Context embeddings '{self.in_context_key}' not found in adata.obsm.")
-
-        # Retrieve embeddings
-        d_emb = adata.obsm[self.in_data_key]
-        c_emb = adata.obsm[self.in_context_key]
-        # Retrieve raw data
-        raw_data = adata.X.toarray() if isinstance(adata.X, sp.spmatrix) else adata.X
-
-        # Check that the embeddings have the same number of samples
-        if d_emb.shape[0] != c_emb.shape[0]:
-            raise ValueError("Data and context embeddings have different numbers of samples.")
-
-        # Check that the embeddings have the same dimensions
-        if d_emb.shape[1] != c_emb.shape[1]:
-            raise ValueError("Data and context embeddings have different dimensions.")
-
-        # If embeddings have been previously added, check that dimensions match
-        if self.data_embeddings:
-            expected_dim = self.data_embeddings[0].shape[1]
-            if d_emb.shape[1] != expected_dim:
-                raise ValueError(
-                    f"Inconsistent embedding dimensions: expected {expected_dim}, but got {d_emb.shape[1]}."
-                )
+        # Check that the sample_id_key exists in adata.obs
+        if sample_id_key not in adata.obs:
+            raise ValueError(f"Sample IDs '{sample_id_key}' not found in adata.obs.")
 
         # Verify sample IDs are integers
-        sample_ids = adata.obs[self.in_sample_id_key].tolist()
         try:
-            pd.to_numeric(adata.obs[self.in_sample_id_key], downcast="integer")  # Convert to integer
+            pd.to_numeric(adata.obs[sample_id_key], downcast="integer")
         except ValueError as err:
             raise ValueError(
-                f"Sample IDs must be integers. Non-integer values found in '{self.in_sample_id_key}' column."
+                f"Sample IDs must be integers. Non-integer values found in '{sample_id_key}' column."
             ) from err
 
-        # Verify sample IDs consistency
-        if len(self.sample_ids) > 0:
+        sample_ids_list = adata.obs[sample_id_key].tolist()
+        if len(self.sample_ids_list) > 0:
             # Verify that there are no duplicate sample IDs
-            duplicate_ids = set(self.sample_ids).intersection(set(sample_ids))
+            duplicate_ids = set(self.sample_ids_list).intersection(set(sample_ids_list))
             if duplicate_ids:
                 raise ValueError(f"Duplicate sample IDs found: {duplicate_ids}")
+        # Collect all sample ids to check for duplicates
+        self.sample_ids_list.extend(sample_ids_list)
 
-        # Append embeddings and sample IDs and raw data
-        self.data_embeddings.append(d_emb)
-        self.context_embeddings.append(c_emb)
-        self.sample_ids.extend(sample_ids)
-        self.raw_data.extend(raw_data)
+        emb_dims = []
+        # Retrieve embeddings and store them in self.embeddings
+        for key in self.out_emb_keys.keys():
+            in_key = emb_keys[key]
+            if in_key not in adata.obsm:
+                raise ValueError(f"Embedding '{in_key}' not found in adata.obsm.")
+            emb_array = adata.obsm[in_key]
+            emb_dims.append(emb_array.shape[1])
+            if len(set(emb_dims)) > 1:
+                raise ValueError("Input embeddings have different dimensions. (within adata)")
+            emb_dask = da.from_array(emb_array, chunks=(adata.shape[0], self.chunk_size))
 
-    def construct_dataset(self, seq_length: int = None) -> Dataset:
+            if self.embeddings[key] is not None:
+                # Check dimensions of new embeddings
+                if emb_dask.shape[1] != self.embeddings[key].shape[1]:
+                    raise ValueError(
+                        f"Inconsistent embedding dimensions between adata objects for '{key}': expected {self.embeddings[key].shape[1]}, but got {emb_dask.shape[1]}."
+                    )
+                # Concatenate
+                self.embeddings[key] = da.concatenate([self.embeddings[key], emb_dask], axis=0)
+            else:
+                self.embeddings[key] = emb_dask
+
+        # Retrieve sample IDs
+        sample_ids = da.from_array(adata.obs[sample_id_key].values, chunks=self.chunk_size)
+        if self.sample_ids is not None:
+            self.sample_ids = da.concatenate([self.sample_ids, sample_ids], axis=0)
+        else:
+            self.sample_ids = sample_ids
+
+        # Optionally retrieve raw data
+        if self.use_raw:
+            X = adata.X
+            if isinstance(X, sp.spmatrix):
+                X = X.toarray()
+            raw_data = da.from_array(X, chunks=(adata.shape[0], self.chunk_size))
+            if self.raw_data is not None:
+                self.raw_data = da.concatenate([self.raw_data, raw_data], axis=0)
+            else:
+                self.raw_data = raw_data
+
+        # Update total_samples
+        self.total_samples += adata.shape[0]
+
+        # Check that all embeddings have the same number of samples
+        for key in self.embeddings:
+            if self.embeddings[key].shape[0] != self.sample_ids.shape[0]:
+                raise ValueError(f"Number of samples mismatch between embeddings and sample IDs for '{key}'.")
+
+    def construct_dataset(self, seq_length: int = None, return_indices=False) -> Dataset:
         """
         Constructs and returns a PyTorch Dataset combining all added embeddings.
 
         Parameters
         ----------
-        seq_length
-            Length of sequences. If provided, data will be divided into sequences of this length.
+        seq_length : int, optional
+            Length of sequences.
+        return_indices : bool, optional
+            If True, the dataset will return the index of the sample.
 
         Returns
         -------
-        A PyTorch Dataset containing data embeddings, context embeddings, and sample IDs.
-
-        Raises
-        ------
-        ValueError
-            If no data has been added.
+        Dataset
+            A PyTorch Dataset containing embeddings and sample IDs.
         """
-        if not self.data_embeddings or not self.context_embeddings:
+        # Remove self.sample_ids_list to save memory
+        self.sample_ids_list = None
+        if not self.embeddings:
             raise ValueError("No data has been added to the dataset.")
+        if seq_length is not None and self.batch_size * seq_length > self.total_samples:
+            raise ValueError("Batch size and sequence length are too large for the dataset.")
 
-        # Concatenate all embeddings
-        data_embeddings = np.vstack(self.data_embeddings)
-        context_embeddings = np.vstack(self.context_embeddings)
-        sample_ids = np.array(self.sample_ids)
-        raw_data = np.vstack(self.raw_data)
-
-        if seq_length is not None:
-            # Use the create_sequences method to split data into sequences
-            (
-                data_embeddings_seq,
-                context_embeddings_seq,
-                sample_ids_seq,
-                raw_data_seq,
-            ) = self.create_sequences(data_embeddings, context_embeddings, sample_ids, raw_data, seq_length)
-            # Create and return a PyTorch Dataset with sequences
-            dataset = EmbeddingDataset(
-                data_embeddings_seq,
-                context_embeddings_seq,
-                sample_ids_seq,
-                raw_data_seq,
-                out_data_key=self.out_data_key,
-                out_context_key=self.out_context_key,
-                out_sample_id_key=self.out_sample_id_key,
-                out_raw_data_key=self.out_raw_data_key,
-                seq_length=seq_length,
-            )
-        else:
-            # Create and return a PyTorch Dataset with individual samples
-            dataset = EmbeddingDataset(
-                data_embeddings,
-                context_embeddings,
-                sample_ids,
-                raw_data,
-                out_data_key=self.out_data_key,
-                out_context_key=self.out_context_key,
-                out_sample_id_key=self.out_sample_id_key,
-                out_raw_data_key=self.out_raw_data_key,
-                seq_length=None,
-            )
-
+        dataset = DaskEmbeddingDataset(
+            embeddings=self.embeddings,
+            sample_ids=self.sample_ids,
+            raw_data=self.raw_data,
+            return_indices=return_indices,
+            seq_length=seq_length,
+            out_emb_keys=self.out_emb_keys,
+            out_sample_id_key=self.out_sample_id_key,
+            out_raw_data_key=self.out_raw_data_key,
+        )
         return dataset
 
-    def reset_dataset(self):
-        """Resets the dataset to be empty."""
-        self.data_embeddings = []
-        self.context_embeddings = []
-        self.sample_ids = []
 
-    def create_sequences(
-        self,
-        data_embeddings: np.ndarray,
-        context_embeddings: np.ndarray,
-        sample_ids: np.ndarray,
-        raw_data: np.ndarray,
-        seq_length: int = 64,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Splits embeddings and sample IDs into sequences of a specified length.
-
-        Parameters
-        ----------
-        data_embeddings
-            Data embeddings of shape (num_samples, embedding_dim).
-        context_embeddings
-            Context embeddings of shape (num_samples, embedding_dim).
-        sample_ids
-            Sample IDs of shape (num_samples,).
-        seq_length
-            The desired sequence length. Each sequence can be used for attention mechanisms.
-
-        Returns
-        -------
-        Tuple containing:
-            data_embeddings_seq: Data embeddings reshaped into sequences.
-            context_embeddings_seq: Context embeddings reshaped into sequences.
-            sample_ids_seq: Sample IDs reshaped into sequences.
-        """
-        num_samples = data_embeddings.shape[0]
-        num_sequences = num_samples // seq_length
-
-        # Calculate the total number of samples that can be evenly divided into sequences
-        total_samples = num_sequences * seq_length
-
-        # Truncate the arrays to have total_samples
-        data_embeddings = data_embeddings[:total_samples]
-        context_embeddings = context_embeddings[:total_samples]
-        sample_ids = sample_ids[:total_samples]
-        raw_data = raw_data[:total_samples]
-
-        # Reshape into sequences
-        data_embeddings_seq = data_embeddings.reshape(num_sequences, seq_length, -1)
-        context_embeddings_seq = context_embeddings.reshape(num_sequences, seq_length, -1)
-        sample_ids_seq = sample_ids.reshape(num_sequences, seq_length)
-        raw_data_seq = raw_data.reshape(num_sequences, seq_length, -1)
-
-        return data_embeddings_seq, context_embeddings_seq, sample_ids_seq, raw_data_seq
-
-
-class EmbeddingDataset(Dataset):
-    """A PyTorch Dataset class for embeddings, supporting both individual samples and sequences.
-
-    The constructed DataSet object can be used with PyTorch DataLoaders for training and evaluation.
-    Data and context embeddings are returned as tensors, and sample IDs are returned as numpy arrays.
+class DaskEmbeddingDataset(Dataset):
+    """
+    Custom PyTorch Dataset class to load embeddings from Dask arrays.
 
     Parameters
     ----------
-    data_embeddings
-        Data embeddings of shape (num_samples, embedding_dim) or (num_sequences, seq_length, embedding_dim).
-    context_embeddings
-        Context embeddings of shape matching data_embeddings.
-    sample_ids
-        Sample IDs corresponding to the embeddings.
-    raw_data
-        Raw data corresponding to the embeddings.
-    seq_length
-        Length of sequences. If provided, data will be divided into sequences of this length.
+    embeddings : Dict[str, da.Array]
+        Dictionary of embeddings.
+    sample_ids : da.Array
+        Dask array containing sample IDs.
+    raw_data : da.Array, optional
+        Dask array containing raw data, if use_raw is True.
+    return_indices : bool, optional
+        If True, the dataset will return the index of the sample.
+    seq_length : int, optional
+        Length of sequences. If None, the dataset will return individual samples.
+    out_emb_keys : Dict[str, str]
+        Dictionary mapping internal names to output names in the Dataset.
+    out_sample_id_key : str
+        Key to be used for sample IDs in the Dataset.
+    out_raw_data_key : str
+        Key to be used for raw data in the Dataset.
     """
 
     def __init__(
         self,
-        data_embeddings: np.ndarray,
-        context_embeddings: np.ndarray,
-        sample_ids: np.ndarray,
-        raw_data: np.ndarray,
-        out_data_key: str,
-        out_context_key: str,
-        out_sample_id_key: str,
-        out_raw_data_key: str,
+        embeddings: dict,
+        sample_ids: da.Array,
+        raw_data: da.Array = None,
+        return_indices: bool = False,
         seq_length: int = None,
+        out_emb_keys: dict = None,
+        out_sample_id_key: str = "sample_id",
+        out_raw_data_key: str = "raw_data",
     ):
+        self.embeddings = embeddings
+        self.sample_ids = sample_ids
+        self.raw_data = raw_data
+        self.return_indices = return_indices
         self.seq_length = seq_length
-        self.out_data_key = out_data_key
-        self.out_context_key = out_context_key
+        self.out_emb_keys = out_emb_keys
         self.out_sample_id_key = out_sample_id_key
         self.out_raw_data_key = out_raw_data_key
-        # Convert numpy arrays to torch tensors
-        self.data_embeddings = torch.tensor(data_embeddings, dtype=torch.float32)
-        self.context_embeddings = torch.tensor(context_embeddings, dtype=torch.float32)
-        self.sample_ids = sample_ids  # Keep as numpy array for IDs
-        self.raw_data = raw_data
 
-        # Determine data structure (individual samples or sequences)
-        if seq_length is not None:
-            # If seq_length is provided, ensure data is in sequences
-            if self.data_embeddings.ndim != 3:
-                raise ValueError("Data embeddings must be 3-dimensional when seq_length is specified.")
-            self.num_sequences = self.data_embeddings.shape[0]
-        else:
-            # If seq_length is not provided, data can be individual samples
-            if self.data_embeddings.ndim != 2:
-                raise ValueError("Data embeddings must be 2-dimensional when seq_length is not specified.")
+        # Compute total number of samples
+        self.total_samples = self.sample_ids.shape[0]
 
     def __len__(self):
         if self.seq_length is not None:
-            return self.num_sequences
+            return self.total_samples // self.seq_length
         else:
-            return len(self.sample_ids)
+            return self.total_samples
 
     def __getitem__(self, idx):
         if self.seq_length is not None:
-            # Return sequence
-            data_seq = self.data_embeddings[idx]
-            context_seq = self.context_embeddings[idx]
-            sample_ids_seq = self.sample_ids[idx]
-            raw_data_seq = self.raw_data[idx]
-
-            return {
-                self.out_data_key: data_seq,  # Shape: (seq_length, embedding_dim)
-                self.out_context_key: context_seq,  # Shape: (seq_length, embedding_dim)
-                self.out_sample_id_key: sample_ids_seq,  # Shape: (seq_length,)
-                self.out_raw_data_key: raw_data_seq,  # Shape: (seq_length, num_features)
-            }
+            start_idx = idx * self.seq_length
+            end_idx = start_idx + self.seq_length
+            return self._get_sequence(start_idx, end_idx)
         else:
-            # Return individual sample
-            data_sample = self.data_embeddings[idx]
-            context_sample = self.context_embeddings[idx]
-            sample_id = self.sample_ids[idx]
-            raw_data = self.raw_data[idx]
+            return self._get_sample(idx)
 
-            return {
-                self.out_data_key: data_sample,  # Shape: (embedding_dim,)
-                self.out_context_key: context_sample,  # Shape: (embedding_dim,)
-                self.out_sample_id_key: sample_id,  # Scalar
-                self.out_raw_data_key: raw_data,  # Shape: (num_features,)
-            }
+    def _get_sample(self, idx):
+        # Build a list of arrays to compute
+        arrays_to_compute = []
+        for key in self.embeddings:
+            arrays_to_compute.append(self.embeddings[key][idx])
+        arrays_to_compute.append(self.sample_ids[idx])
+        if self.raw_data is not None:
+            arrays_to_compute.append(self.raw_data[idx])
+
+        # Compute all arrays
+        computed_arrays = da.compute(*arrays_to_compute)
+
+        # Build the sample dict
+        sample = {}
+        i = 0
+        for key in self.embeddings:
+            out_key = self.out_emb_keys[key]
+            sample[out_key] = torch.tensor(computed_arrays[i], dtype=torch.float32)
+            i += 1
+
+        sample[self.out_sample_id_key] = computed_arrays[i]
+        i += 1
+
+        if self.raw_data is not None:
+            sample[self.out_raw_data_key] = torch.tensor(computed_arrays[i], dtype=torch.float32)
+            i += 1
+
+        if self.return_indices:
+            sample["indices"] = idx
+
+        return sample
+
+    def _get_sequence(self, start_idx, end_idx):
+        slices = slice(start_idx, end_idx)
+        # Build a list of arrays to compute
+        arrays_to_compute = []
+        for key in self.embeddings:
+            arrays_to_compute.append(self.embeddings[key][slices])
+        arrays_to_compute.append(self.sample_ids[slices])
+        if self.raw_data is not None:
+            arrays_to_compute.append(self.raw_data[slices])
+
+        # Compute all arrays
+        computed_arrays = da.compute(*arrays_to_compute)
+
+        # Build the sample dict
+        sample = {}
+        i = 0
+        for key in self.embeddings:
+            out_key = self.out_emb_keys[key]
+            sample[out_key] = torch.tensor(computed_arrays[i], dtype=torch.float32)
+            i += 1
+
+        sample[self.out_sample_id_key] = computed_arrays[i]
+        i += 1
+
+        if self.raw_data is not None:
+            sample[self.out_raw_data_key] = torch.tensor(computed_arrays[i], dtype=torch.float32)
+            i += 1
+
+        if self.return_indices:
+            sample["indices"] = torch.arange(start_idx, end_idx)
+
+        return sample
