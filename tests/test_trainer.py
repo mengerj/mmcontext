@@ -225,7 +225,7 @@ def test_trainer_save_load_weights(tmp_path):
     # Run training to have something to save
     trainer.fit(train_loader, val_loader, epochs=1, save=True, save_dir=save_dir)
     default_encoder_name = "data_encoder"
-    save_path_enc = save_dir / f"best_{default_encoder_name}_weights.pth"
+    save_path_enc = save_dir / "best_encoder_weights" / f"best_{default_encoder_name}_weights.pth"
     # Check if file exists
     assert save_path_enc.exists(), "Enocder file was not saved."
     # Load and verify
