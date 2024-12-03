@@ -455,7 +455,8 @@ class Trainer:
         self,
         adata,
         sample_id_key: str,
-        emb_keys: dict[str, str] | None = None,
+        out_emb_keys: dict[str, str] | None = None,
+        in_emb_keys: dict[str, str] | None = None,
         seq_length: int | None = None,
         batch_size: int | None = None,
         chunk_size: int | None = None,
@@ -471,8 +472,10 @@ class Trainer:
             AnnData object containing the data to infer on.
         sample_id_key : str
             Key in `adata.obs` containing the sample IDs.
-        emb_keys : dict, optional
-            Keys from 'adata.obsm' to use as embeddings.
+        in_emb_keys : dict, optional
+            Keys from 'adata.obsm' to use as embeddings. Default is {'data_embedding': 'd_emb_aligned', 'context_embedding': 'c_emb_aligned'}.
+        out_emb_keys : dict, optional
+            Keys to store embeddings in dataset. Default is {'data_embedding': 'd_emb', 'context_embedding': 'c_emb'}.
         seq_length : int, optional
             Sequence length for the data loader.
         batch_size : int, optional
@@ -487,19 +490,21 @@ class Trainer:
         from mmcontext.engine import sample_zinb
         from mmcontext.pp import DataSetConstructor
 
-        if emb_keys is None:
-            emb_keys = {"data_embedding": "d_emb", "context_embedding": "c_emb"}
+        if in_emb_keys is None:
+            in_emb_keys = {"data_embedding": "d_emb_aligned", "context_embedding": "c_emb_aligned"}
+        if out_emb_keys is None:
+            out_emb_keys = {"data_embedding": "d_emb", "context_embedding": "c_emb"}
         if chunk_size is None:
             self.logger.error("chunk_size not provided. Please provide chunk_size to the infer_adata method.")
             raise ValueError("chunk_size not provided. Please provide chunk_size to the infer_adata method.")
 
         dataset_constructor = DataSetConstructor(
-            out_emb_keys=emb_keys,
+            out_emb_keys=out_emb_keys,
             out_sample_id_key=sample_id_key,
             chunk_size=chunk_size,
             batch_size=batch_size,
         )
-        dataset_constructor.add_anndata(adata, sample_id_key=sample_id_key, emb_keys=emb_keys)
+        dataset_constructor.add_anndata(adata, sample_id_key=sample_id_key, emb_keys=in_emb_keys)
 
         if seq_length is None:
             if self.seq_length is None:
@@ -576,7 +581,7 @@ class Trainer:
                 outputs, _targets = self.process_batch(batch)
                 # Save embeddings
                 for encoder_name in self.encoders.keys():
-                    mod_emb = outputs[emb_keys["data_embedding"]]
+                    mod_emb = outputs[out_emb_keys["data_embedding"]]
                     flat_mod_emb = mod_emb.view(-1, mod_emb.size(-1))
                     embeddings_zarr_path = os.path.join(output_zarr_path, "obsm", f"{encoder_name}_mod_emb")
                     embeddings_zarr = zarr_module.open_array(embeddings_zarr_path, mode="r+")

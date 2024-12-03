@@ -260,6 +260,33 @@ def test_trainer_predictions(tmp_path):
         batch_size=6,
         chunk_size=6 * seq_length,
         output_zarr_path=f"{tmp_path}/test.zarr",
+        in_emb_keys={"data_embedding": "d_emb", "context_embedding": "c_emb"},
+    )
+    new_adata = anndata.read_zarr(f"{tmp_path}/test.zarr")
+    assert new_adata, "No predictions returned."
+    assert "data_encoder_mod_emb" in new_adata.obsm, "Predictions missing 'mod_emb'."
+
+
+def test_trainer_predictions_custom_keys(tmp_path):
+    logger = logging.getLogger(__name__)
+    logger.info("TEST: test_trainer_predictions")
+    emb_dim = 16
+    seq_length = 10
+    # Model and loss setup
+    encoder = MMContextEncoder(embedding_dim=emb_dim, hidden_dim=16)
+    # Trainer initialization
+    trainer = Trainer(encoders=encoder, optimizer=torch.optim.Adam(encoder.parameters()))
+    # generate test adata
+    adata = create_test_emb_anndata(n_samples=100, emb_dim=emb_dim, data_key="data_emb", context_key="context_emb")
+    trainer.infer_adata(
+        adata,
+        sample_id_key="sample_id",
+        seq_length=seq_length,
+        batch_size=6,
+        chunk_size=6 * seq_length,
+        output_zarr_path=f"{tmp_path}/test.zarr",
+        out_emb_keys={"data_embedding": "d_emb", "context_embedding": "c_emb"},
+        in_emb_keys={"data_embedding": "data_emb", "context_embedding": "context_emb"},
     )
     new_adata = anndata.read_zarr(f"{tmp_path}/test.zarr")
     assert new_adata, "No predictions returned."
@@ -374,9 +401,9 @@ def test_fit_with_decoder():
     assert temp1 == temp2 == 0.1, "Temperature should not change after training."
 
 
-def test_using_only_decoder():
+def test_train_using_only_decoder():
     logger = logging.getLogger(__name__)
-    logger.info("TEST: test_using_only_decoder")
+    logger.info("TEST: test_train_using_only_decoder")
     emb_dim = 16
     n_samples = 100
     train_loader = create_test_dataloader(
@@ -420,7 +447,8 @@ def test_inference_only_decoder(tmp_path):
         adata,
         sample_id_key="sample_id",
         seq_length=10,
-        emb_keys={"data_embedding": "mod_emb"},
+        in_emb_keys={"data_embedding": "mod_emb"},
+        out_emb_keys={"data_embedding": "mod_emb"},
         batch_size=6,
         chunk_size=6 * 10,
         output_zarr_path=f"{tmp_path}/test.zarr",
