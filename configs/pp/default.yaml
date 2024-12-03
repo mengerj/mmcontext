@@ -1,6 +1,5 @@
 #pp/default.yaml
 general:
-  train_size: 0.8
   # Consolidate or remove the following categories if they have less samples than the treshhold
   categories: ["cell_type", "dataset_id"]
   threshold: 5
@@ -8,25 +7,26 @@ general:
 embedder:
   context_embedder:
     use_precalculated: False
-    precalculated_obsm_key: c_emb
+    precalculated_obsm_key: null
     type: categorical # categorical currently the only option
-  category_embedder:
-    metadata_categories: ["cell_type"]
-    one_hot: False
-    model: text-embedding-3-small
-    combination_method: concatenate
-    embeddings_file_path: ${data.dir}/emb_dicts/category_embeddings_{.model}_metadata_embeddings.pkl.gz
+    specs:
+      metadata_categories: ["cell_type"]
+      one_hot: False
+      model: text-embedding-3-small
+      combination_method: concatenate
+      embeddings_file_path: ${data.dir}/emb_dicts/category_embeddings_{.model}_metadata_embeddings.pkl.gz
   data_embedder:
     use_precalculated: True
     precalculated_obsm_key: scvi
-    type: null
+    type: None
 normalizer:
-  type: null #min-max or z-score or null
+  type: None #min-max or z-score or None
 aligner:
   latent_dim: 64
   type: pca
+additional:
   pca_eval:
-    evaluate_pca: False
+    evaluate_pca: True
     save_path: pca_eval
     scree_plot: True
     cumulative_variance_plot: True

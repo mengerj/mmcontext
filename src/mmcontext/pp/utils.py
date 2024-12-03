@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
+from omegaconf import DictConfig
 
 
 def split_anndata(adata: anndata.AnnData, train_size: float = 0.8):
@@ -67,7 +68,9 @@ def consolidate_low_frequency_categories(adata: anndata.AnnData, columns: list, 
     -------
     anndata.AnnData: The modified AnnData object.
     """
-    adata = adata.copy()
+    # Ensure the object is loaded into memory if it's in backed mode
+    if adata.isbacked:
+        adata = adata.to_memory()
 
     for col in columns:
         if col in adata.obs.columns:
@@ -83,7 +86,8 @@ def consolidate_low_frequency_categories(adata: anndata.AnnData, columns: list, 
 
             if remove:
                 # Remove entries with low frequency categories entirely
-                adata = adata[~adata.obs[col].isin(low_freq_categories)].copy()
+                mask = ~adata.obs[col].isin(low_freq_categories)
+                adata._inplace_subset_obs(mask)
                 # Convert column back to categorical with new categories
                 adata.obs[col] = pd.Categorical(adata.obs[col])
             else:
@@ -241,3 +245,64 @@ def remove_entries(adata):
     sc.pp.filter_cells(adata, min_genes=1)
     # remove duplicate cells
     # remove_duplicate_cells(adata)
+
+
+"""
+def adata_to_dask(
+    adata,
+    chunk_size=1000,
+    data_embedding_key="d_emb_aligned",
+    context_embedding_key="c_emb_aligned",
+    sample_id_key="sample_id",
+):
+    if not isinstance(adata.X, da.Array):
+        adata.X = da.from_array(adata.X, chunks=(adata.X.shape[0], chunk_size))
+    if data_embedding_key:
+        if data_embedding_key not in adata.obsm:
+            raise ValueError(f"Data embedding key '{data_embedding_key}' not found in adata.obsm.")
+        elif not isinstance(adata.obsm[data_embedding_key], da.Array):
+            adata.obsm[data_embedding_key] = da.from_array(
+                adata.obsm[data_embedding_key], chunks=(adata.obsm[data_embedding_key].shape[0], chunk_size)
+            )
+    if context_embedding_key:
+        if data_embedding_key not in adata.obsm:
+            raise ValueError(f"Context embedding key '{context_embedding_key}' not found in adata.obsm.")
+        elif not isinstance(adata.obsm[context_embedding_key], da.Array):
+            adata.obsm[context_embedding_key] = da.from_array(
+                adata.obsm[context_embedding_key], chunks=(adata.obsm[context_embedding_key].shape[0], chunk_size)
+            )
+
+    if sample_id_key:
+        if sample_id_key not in adata.obs:
+            raise ValueError(f"Sample ID key '{sample_id_key}' not found in adata.obs.")
+        # Ensure that sample ids are integers
+        try:
+            pd.to_numeric(adata.obs[sample_id_key], downcast="integer")  # Convert to integer
+        except ValueError as err:
+            raise ValueError(
+                f"Sample IDs must be integers. Non-integer values found in '{sample_id_key}' column."
+            ) from err
+        if not isinstance(adata.obs[sample_id_key], da.Array):
+            adata.obs[sample_id_key] = da.from_array(adata.obs[sample_id_key].values, chunks=chunk_size)
+"""
+
+
+def get_chunk_size(cfg: DictConfig) -> int:
+    """
+    Calculates the chunk size based on configuration parameters.
+
+    Args:
+        cfg (DictConfig): Hydra configuration.
+
+    Returns
+    -------
+        int: Computed chunk size.
+    """
+    seq_length = cfg.dataset.seq_length
+    batch_size = cfg.dataset.batch_size
+    multiplier = cfg.dataset.multiplier
+
+    if seq_length is not None:
+        return seq_length * batch_size * multiplier
+    else:
+        return batch_size * 100

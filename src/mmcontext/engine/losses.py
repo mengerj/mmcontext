@@ -49,13 +49,9 @@ class LossManager:
 
     def __init__(
         self,
-        data_key: str = "data_embedding",
-        context_key: str = "context_embedding",
         logger: logging.Logger | None = None,
     ):
         self.loss_functions = []
-        self.data_key = data_key
-        self.context_key = context_key
         self.logger = logger or logging.getLogger(__name__)
 
     def add_loss(self, loss_function: LossFunction, weight: float = 1.0):
@@ -89,7 +85,11 @@ class LossManager:
         """
         total_loss = 0.0
         for loss_function, weight in self.loss_functions:
-            loss = loss_function.compute_loss(outputs, targets, self.data_key, self.context_key)
+            try:
+                loss = loss_function.compute_loss(outputs, targets)
+            except KeyError as e:
+                self.logger.error(f"KeyError while computing loss: {loss_function.description} - {e}")
+                raise e
             # self.logger.debug("Loss: %s: %.4f", loss_function.description, loss*weight)
             total_loss += weight * loss
         return total_loss
@@ -152,6 +152,8 @@ class ContrastiveLoss(LossFunction):
         self,
         target_mode: str = "context_context",
         current_mode: str = "data_context",
+        data_key: str = "d_emb",
+        context_key: str = "c_emb",
         similarity_metric: str = "cosine",
         logger: logging.Logger | None = None,
         temperature: float = 0.07,
@@ -160,12 +162,15 @@ class ContrastiveLoss(LossFunction):
         self.current_mode = current_mode
         self.similarity_metric = similarity_metric
         self.temperature = temperature
+        self.data_key = data_key
+        self.context_key = context_key
         self.logger = logger or logging.getLogger(__name__)
         self.description = f"ContrastiveLoss(target_mode={target_mode}, current_mode={current_mode}, similarity_metric={similarity_metric})"
 
-    def compute_loss(
-        self, outputs: dict, targets: dict, data_key: str = "data_embedding", context_key: str = "context_embedding"
-    ):
+        if self.target_mode == "infoNCE":
+            self.temperature_dependent = True
+
+    def compute_loss(self, outputs: dict, targets: dict):
         """
         Computes the contrastive loss between the current and target similarity matrices.
 
@@ -175,23 +180,17 @@ class ContrastiveLoss(LossFunction):
             Dictionary containing modified embeddings, e.g., 'data_embedding', 'context_embedding'.
         targets
             Dictionary containing original embeddings, e.g., 'data_embedding', 'context_embedding'.
-        data_key
-            The key for accessing data embeddings.
-        context_key
-            The key for accessing context embeddings.
 
         Returns
         -------
         The computed contrastive loss.
         """
-        self.data_key = data_key
-        self.context_key = context_key
-        if "context" in self.current_mode and context_key not in outputs:
+        if "context" in self.current_mode and self.context_key not in outputs:
             self.logger.error(
-                f"{context_key} not found in outputs but current_mode contains context. Either change current mode or provide context embeddings in outputs."
+                f"{self.context_key} not found in outputs but current_mode contains context. Either change current mode or provide context embeddings in outputs."
             )
             raise KeyError(
-                f"{context_key} not found in outputs but current_mode contains context. Either change current mode or provide context embeddings in outputs."
+                f"{self.context_key} not found in outputs but current_mode contains context. Either change current mode or provide context embeddings in outputs."
             )
         if self.target_mode == "infoNCE":
             self.temperature = outputs["temperature"]
@@ -316,7 +315,7 @@ class ContrastiveLoss(LossFunction):
 class ReconstructionLoss(LossFunction):
     """Computes reconstruction loss between outputs and targets."""
 
-    def __init__(self, reduction="mean", logger=None):
+    def __init__(self, reduction="mean", logger=None, data_key: str = "d_emb"):
         """
         Initializes the ReconstructionLoss.
 
@@ -325,9 +324,10 @@ class ReconstructionLoss(LossFunction):
         """
         self.reduction = reduction
         self.logger = logger or logging.getLogger(__name__)
-        self.description = f"ReconstructionLoss(reduction={reduction})"
+        self.description = f"ReconstructionLoss(reduction={reduction}) on {data_key}"
+        self.data_key = data_key
 
-    def compute_loss(self, outputs, targets, data_key, context_key):
+    def compute_loss(self, outputs, targets):
         """
         Computes the reconstruction loss.
 
@@ -339,8 +339,8 @@ class ReconstructionLoss(LossFunction):
         -------
             Tensor: The reconstruction loss.
         """
-        output_embeddings = outputs[data_key]
-        target_embeddings = targets[data_key]
+        output_embeddings = outputs[self.data_key]
+        target_embeddings = targets[self.data_key]
 
         loss = F.mse_loss(output_embeddings, target_embeddings, reduction=self.reduction)
         return loss
@@ -364,7 +364,7 @@ class ZINBLoss(LossFunction):
         self.eps = eps
         self.description = "ZINBLoss"
 
-    def compute_loss(self, outputs: dict, targets: dict, data_key: str = None, context_key: str = None):
+    def compute_loss(self, outputs: dict, targets: dict):
         """
         Computes the ZINB negative log-likelihood loss.
 

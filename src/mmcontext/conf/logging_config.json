@@ -20,7 +20,7 @@
     },
     "file": {
       "class": "logging.handlers.RotatingFileHandler",
-      "level": "DEBUG",
+      "level": "INFO",
       "formatter": "json",
       "filename": "mmcontext.log",
       "maxBytes": 10000000,
@@ -28,7 +28,7 @@
     }
   },
   "loggers": {
-    "sigCompanion": {
+    "mmcontext": {
       "level": "DEBUG",
       "handlers": [],
       "propagate": true
