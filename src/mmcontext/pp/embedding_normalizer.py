@@ -24,7 +24,7 @@ def configure_normalizer(cfg):
         return ZScoreNormalizer()
     elif cfg.type == "min-max":
         return MinMaxNormalizer()
-    elif cfg.type is None:
+    elif cfg.type in ["none", "None"]:
         return PlaceHolderNormalizer()
     else:
         raise ValueError(f"Unknown normalizer type: {cfg.type}")

@@ -20,12 +20,14 @@ optimizer:
     lr: 0.001
     weight_decay: 0.0
     betas: [0.9, 0.999]
+    max_lr: None
 
   - type: adam
     use: False
     lr: 0.01
     weight_decay: 0.1
     betas: [0.9, 0.999]
+    max_lr: None
 
 scheduler: # Currently schedulers will be applied after each epoch
   - type: step
@@ -42,5 +44,5 @@ trainer:
   input_embeddings: #This determines which embeddings are used as input to the model. If you changed the default names of the embeddings, you need to change them here
     main: data_embedding
     cross: context_embedding
-  temperature: null # This relates to cosine similarity loss and will be learned if null, or can be set to fixed value
+  temperature: null # This relates to cosine similarity loss and will be learned if None, or can be set to fixed value
   epochs: 100

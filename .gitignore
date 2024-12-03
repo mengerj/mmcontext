@@ -10,6 +10,7 @@ tests/__pycache__/
 # Log files
 *.log
 *.log.*
+*.log.*
 
 # anndata files
 # only track data files in data/demo
@@ -31,6 +32,6 @@ hm.ipynb
 
 # output files
 outputs/*
-
+out/*
 #venv
 venv/

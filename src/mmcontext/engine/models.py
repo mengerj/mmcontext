@@ -102,7 +102,7 @@ class MMContextEncoder(BaseModel):
         dropout: float = 0.1,
     ):
         super().__init__()
-
+        self.embedding_dim = embedding_dim
         encoder_layer = CustomTransformerEncoderLayer(
             embedding_dim=embedding_dim,
             hidden_dim=hidden_dim,
@@ -202,7 +202,7 @@ class MMContextEncoder(BaseModel):
         elif self.temperature:
             temperature = self.temperature
         else:
-            temperature = 1.0
+            temperature = 1.0  # Default temperature
         return output, temperature
 
 
@@ -402,8 +402,8 @@ class ZINBDecoder(BaseModel):
 class PlaceholderModel(BaseModel):
     """A placeholder model that inherits from BaseModel."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self):
+        super().__init__()
         self.logger.info("Placeholder model initialized.")
 
     def forward(self, *inputs):
