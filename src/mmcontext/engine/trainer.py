@@ -146,6 +146,7 @@ class Trainer:
     ):
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger = logger or logging.getLogger(__name__)
+        self.logger.info(f"Running on device: {self.device}")
         # Initialize encoders
         if encoders is None:
             self.encoders = {}
