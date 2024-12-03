@@ -8,10 +8,19 @@ import psutil
 
 
 class SystemMonitor:
-    """A class for monitoring system resource usage over time."""
+    """A class for monitoring system resource usage over time.
 
-    def __init__(self, interval=1):
+    Parameters
+    ----------
+    interval : int, optional
+        The interval in seconds between each monitoring update. Default is 1 second.
+    gpu_idx : int, optional
+        The index of the GPU to monitor. Default is 2. Because of IMBI GPU setup.
+    """
+
+    def __init__(self, interval=1, gpu_idx=2):
         self.interval = interval
+        self.gpu_idx = gpu_idx
         self.num_cpus = psutil.cpu_count(logical=True)
         self.cpu_usage = []
         self.cpu_per_core = []
@@ -38,7 +47,7 @@ class SystemMonitor:
             import pynvml
 
             pynvml.nvmlInit()
-            self.gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            self.gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(self.gpu_idx)
             self.gpu_total_memory = pynvml.nvmlDeviceGetMemoryInfo(self.gpu_handle).total / (1024**3)  # GB
             self.gpu_name = pynvml.nvmlDeviceGetName(self.gpu_handle).encode()
             self.gpu_available = True
