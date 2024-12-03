@@ -40,7 +40,7 @@ class SystemMonitor:
             pynvml.nvmlInit()
             self.gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             self.gpu_total_memory = pynvml.nvmlDeviceGetMemoryInfo(self.gpu_handle).total / (1024**3)  # GB
-            self.gpu_name = pynvml.nvmlDeviceGetName(self.gpu_handle).decode()
+            self.gpu_name = pynvml.nvmlDeviceGetName(self.gpu_handle).encode()
             self.gpu_available = True
             self.gpu_type = "NVIDIA"
             self.logger.info(f"Detected NVIDIA GPU: {self.gpu_name}")
