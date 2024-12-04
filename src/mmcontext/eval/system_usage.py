@@ -90,14 +90,14 @@ class SystemMonitor:
 
             # Measure disk I/O
             disk_io_counters = psutil.disk_io_counters()
-            read_bytes = disk_io_counters.read_bytes - prev_disk_io_counters.read_bytes
-            write_bytes = disk_io_counters.write_bytes - prev_disk_io_counters.write_bytes
-            if interval_duration > 0:
-                read_rate_mb_s = (read_bytes / (1024**2)) / interval_duration
-                write_rate_mb_s = (write_bytes / (1024**2)) / interval_duration
+            if prev_disk_io_counters is not None:
+                read_bytes = disk_io_counters.read_bytes - prev_disk_io_counters.read_bytes
+                write_bytes = disk_io_counters.write_bytes - prev_disk_io_counters.write_bytes
+                read_rate_mb_s = (read_bytes / (1024**2)) / interval_duration if interval_duration > 0 else 0
+                write_rate_mb_s = (write_bytes / (1024**2)) / interval_duration if interval_duration > 0 else 0
             else:
-                read_rate_mb_s = 0
-                write_rate_mb_s = 0
+                read_rate_mb_s = write_rate_mb_s = 0  # First iteration
+
             self.disk_io.append((timestamp, read_rate_mb_s, write_rate_mb_s))
             prev_disk_io_counters = disk_io_counters
 
