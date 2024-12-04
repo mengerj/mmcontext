@@ -1,4 +1,5 @@
 import logging
+import os
 import platform
 import threading
 import time
@@ -27,6 +28,7 @@ class SystemMonitor:
         self.memory_usage = []
         self.disk_io = []
         self.total_memory = psutil.virtual_memory().total / (1024**3)  # GB
+        self.baseline_memory = psutil.virtual_memory().used / (1024**3)  # GB
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._monitor)
         self.logger = logging.getLogger(__name__)
@@ -67,7 +69,7 @@ class SystemMonitor:
 
     def _monitor(self):
         process = psutil.Process()
-        prev_disk_io_counters = psutil.disk_io_counters()
+        prev_disk_io_counters = None
         prev_time = time.time()
         while not self._stop_event.is_set():
             timestamp = time.time()
@@ -83,6 +85,7 @@ class SystemMonitor:
             # Measure memory usage
             mem = psutil.virtual_memory()
             used_memory_gb = (mem.total - mem.available) / (1024**3)
+            used_memory_gb -= self.baseline_memory
             self.memory_usage.append((timestamp, used_memory_gb))
 
             # Measure disk I/O
@@ -170,6 +173,7 @@ class SystemMonitor:
         summary["memory_usage_mean"] = sum(memory_usages) / len(memory_usages)
         summary["memory_usage_max"] = max(memory_usages)
         summary["total_memory"] = self.total_memory
+        summary["baseline_memory"] = self.baseline_memory
 
         # Disk I/O
         read_rates = [read for _, read, _ in self.disk_io]
@@ -212,6 +216,7 @@ class SystemMonitor:
         )
         print(f"Memory Usage (mean/max GB): {summary['memory_usage_mean']:.2f}/{summary['memory_usage_max']:.2f} GB")
         print(f"Total System Memory: {summary['total_memory']:.2f} GB")
+        print("Baseline Memory Usage: {:.2f} GB".format(summary["baseline_memory"]))
         print(
             f"Disk Read Rate (mean/max MB/s): {summary['disk_read_mb_s_mean']:.2f}/{summary['disk_read_mb_s_max']:.2f} MB/s"
         )
@@ -230,6 +235,17 @@ class SystemMonitor:
         else:
             print("No supported GPU detected.")
         print(f"Number of Threads (mean/max): {summary['num_threads_mean']:.2f}/{summary['num_threads_max']}")
+
+    def save(self, save_dir):
+        """Save the metrics as a csv file."""
+        import pandas as pd
+
+        name = "sys_metrics.csv"
+        save_path = os.path.join(save_dir, name)
+        summary = self.summarize()
+        df = pd.DataFrame([summary])
+        df.to_csv(save_path, index=False)
+        self.logger.info(f"Metrics saved to {save_path}")
 
     def plot_metrics(self, save_dir=None):
         """
@@ -325,6 +341,23 @@ class SystemMonitor:
             else:
                 plt.show()
 
+        # GPU Memory Usage Plot
+        if self.gpu_available and any(usage is not None for _, usage in self.gpu_memory_usage):
+            timestamps, gpu_mem_usages = zip(*self.gpu_memory_usage, strict=False)
+            gpu_mem_usages = [usage if usage is not None else 0 for usage in gpu_mem_usages]
+            tick_positions, tick_labels = format_time_ticks(timestamps)
+            plt.figure()
+            plt.plot(gpu_mem_usages)
+            plt.xlabel("Time")
+            plt.ylabel("GPU Memory Usage (GB)")
+            plt.title("GPU Memory Usage Over Time")
+            plt.xticks(tick_positions, tick_labels, rotation=45)
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "gpu_memory_usage.png"))
+                plt.close()
+            else:
+                plt.show()
         # Save or Show Plots
         if save_dir:
             self.logger.info(f"Plots saved to {save_dir}")
