@@ -282,6 +282,7 @@ class SystemMonitor:
         plt.ylabel("CPU Usage (avg % / core)")
         plt.title(f"Avg. CPU Usage Over Time from {self.num_cpus} Cores")
         plt.xticks(tick_positions, tick_labels, rotation=45)
+        plt.ylim(0, 100)  # Set the y-axis limits from 0 to 100
         plt.tight_layout()
         if save_dir:
             plt.savefig(os.path.join(save_dir, "cpu_usage.png"))
@@ -332,6 +333,7 @@ class SystemMonitor:
             plt.plot(gpu_usages)
             plt.xlabel("Time")
             plt.ylabel("GPU Usage (%)")
+            plt.ylim(0, 100)  # Set the y-axis limits from 0 to 100
             plt.title("GPU Usage Over Time")
             plt.xticks(tick_positions, tick_labels, rotation=45)
             plt.tight_layout()
