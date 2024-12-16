@@ -39,7 +39,7 @@ dependencies = [
   "seaborn",
   "session-info",
   "torch",
-  "zarr",
+  "zarr<=2.18.4",
 ]
 optional-dependencies.dev = [
   "pre-commit",
