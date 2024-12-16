@@ -166,6 +166,7 @@ class scibEvaluator:
                 sc.pp.neighbors(adata, use_rep=use_rep)
             except Exception as e:
                 self.logger.error(f"Error computing neighbors using embedding '{use_rep}': {e}")
+                raise e
 
         # Perform clustering
         me.cluster_optimal_resolution(adata, cluster_key=cluster_key, label_key=self.label_key)
