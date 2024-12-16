@@ -585,7 +585,13 @@ class Trainer:
                 outputs, _targets = self.process_batch(batch)
                 # Save embeddings
                 for encoder_name in self.encoders.keys():
-                    mod_emb = outputs[out_emb_keys["data_embedding"]]
+                    if isinstance(self.encoders[encoder_name], MMContextEncoder):
+                        out_key = self.encoder_inputs[encoder_name]["in_main"]
+                    else:
+                        raise ValueError(
+                            "Encoder is not a MMContextEncoder. Inference not implemented for this encoder."
+                        )
+                    mod_emb = outputs[out_key]
                     flat_mod_emb = mod_emb.view(-1, mod_emb.size(-1))
                     embeddings_zarr_path = os.path.join(output_zarr_path, "obsm", f"{encoder_name}_mod_emb")
                     embeddings_zarr = zarr_module.open_array(embeddings_zarr_path, mode="r+")
