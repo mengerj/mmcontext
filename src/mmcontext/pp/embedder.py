@@ -1,39 +1,10 @@
 # pp/embedder.py
 import logging
-from pathlib import Path
 
 import anndata
 import numpy as np
-from hydra.utils import to_absolute_path
-from omegaconf import DictConfig
 
-from mmcontext.pp import CategoryEmbedder, ContextEmbedder, DataEmbedder
-
-
-def configure_embedder(cfg: DictConfig) -> tuple[DataEmbedder | None, ContextEmbedder | None, str | None, str | None]:
-    """Uses a configuration object, such as the one provided by Hydra, to configure the Embedder."""
-    context_embedding_key = None
-    if cfg.context_embedder.use_precalculated:
-        context_embedder = None
-        context_embedding_key = cfg.context_embedder.precalculated_obsm_key
-    elif cfg.context_embedder.type == "categorical":
-        # Initialize the CategoryEmbedder
-        context_embedder = CategoryEmbedder(
-            metadata_categories=cfg.context_embedder.specs.metadata_categories,
-            model=cfg.context_embedder.specs.model,
-            combination_method=cfg.context_embedder.specs.combination_method,
-            embeddings_file_path=Path(to_absolute_path(cfg.context_embedder.specs.embeddings_file_path)),
-            one_hot=cfg.context_embedder.specs.one_hot,
-        )
-    else:
-        raise ValueError("Invalid context embedder class")
-    data_embedding_key = None
-    if cfg.data_embedder.use_precalculated:
-        data_embedder = None
-        data_embedding_key = cfg.data_embedder.precalculated_obsm_key
-    else:
-        raise ValueError("Invalid data embedder class (Non implemented. Provide precalculated embeddings)")
-    return data_embedder, context_embedder, data_embedding_key, context_embedding_key
+from mmcontext.pp import ContextEmbedder, DataEmbedder
 
 
 class Embedder:

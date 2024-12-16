@@ -7,29 +7,6 @@ import numpy as np
 from anndata import AnnData
 
 
-def configure_normalizer(cfg):
-    """Configures the normalizer based on the configuration.
-
-    Parameters
-    ----------
-    cfg
-        The configuration object.
-
-    Returns
-    -------
-    EmbeddingNormalizer
-        The configured normalizer.
-    """
-    if cfg.type == "z-score":
-        return ZScoreNormalizer()
-    elif cfg.type == "min-max":
-        return MinMaxNormalizer()
-    elif cfg.type in ["none", "None"]:
-        return PlaceHolderNormalizer()
-    else:
-        raise ValueError(f"Unknown normalizer type: {cfg.type}")
-
-
 class EmbeddingNormalizer(ABC):
     """Abstract base class for normalizing embeddings in an AnnData object."""
 

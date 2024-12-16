@@ -10,89 +10,9 @@ import numpy as np
 import torch
 import zarr as zarr_module
 from numcodecs import Blosc
-from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from mmcontext.engine import MMContextEncoder, PlaceholderModel
-
-
-def configure_optimizer(cfg: DictConfig, model_parameters) -> torch.optim.Optimizer | None:
-    """
-    Configures the optimizer based on the configuration.
-
-    Parameters
-    ----------
-    cfg
-        The configuration object.
-    model_parameters
-        The model parameters to optimize.
-
-    Returns
-    -------
-    torch.optim.Optimizer
-        The configured optimizer.
-    """
-    logger = logging.getLogger(__name__)
-    config = cfg.get("optimizer", [])
-    # shortly check if there are multiple optimizers set to True and issue a warning that the first one will be selected
-    if sum([opt_cfg.get("use") for opt_cfg in config]) > 1:
-        logger.warning("Multiple optimizers set to True. The first optimizer will be selected.")
-    for opt_cfg in config:
-        if not opt_cfg.get("use"):
-            continue
-        opt_type = opt_cfg.get("type")
-        if opt_type in ["adam"]:
-            return torch.optim.Adam(
-                model_parameters,
-                lr=cfg.get("lr", 0.001),
-                betas=cfg.get("betas", (0.9, 0.999)),
-                weight_decay=cfg.get("weight_decay", 0.0),
-            )
-        elif opt_type in ["sgd"]:
-            return torch.optim.SGD(
-                model_parameters,
-                lr=cfg.get("lr", 0.01),
-                momentum=cfg.get("momentum", 0.9),
-                weight_decay=cfg.get("weight_decay", 0.0),
-            )
-        else:
-            raise ValueError(f"Unknown optimizer type: {opt_type}")
-
-
-def configure_scheduler(cfg: DictConfig, optimizer: torch.optim.Optimizer):
-    """Configures the scheduler based on the configuration.
-
-    Parameters
-    ----------
-    cfg
-        The configuration object.
-    optimizer
-        The optimizer object.
-    """
-    logger = logging.getLogger(__name__)
-    config = cfg.get("scheduler", [])
-    # shortly check if there are multiple schedulers set to True and issue a warning that the first one will be selected
-    if sum([sch_cfg.get("use") for sch_cfg in config]) > 1:
-        logger.warning("Multiple schedulers set to True. The first scheduler will be selected.")
-    for sch_cfg in config:
-        if not sch_cfg.get("use", True):
-            continue
-        sch_type = sch_cfg.get("type")
-        if sch_type in ["step"]:
-            return torch.optim.lr_scheduler.StepLR(
-                optimizer, step_size=cfg.get("step_size", 30), gamma=cfg.get("gamma", 0.1)
-            )
-        elif sch_type in ["cosine"]:
-            return torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=cfg.get("T_max", 10), eta_min=cfg.get("eta_min", 0)
-            )
-        elif sch_type in ["None", "none"]:
-            # Return a lambda scheduler that does nothing
-            return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
-        else:
-            raise ValueError(f"Unknown scheduler type: {sch_type}")
-    # If no scheduler is configured, return LambdaLR with constant function
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
 
 
 class Trainer:
@@ -585,7 +505,13 @@ class Trainer:
                 outputs, _targets = self.process_batch(batch)
                 # Save embeddings
                 for encoder_name in self.encoders.keys():
-                    mod_emb = outputs[out_emb_keys["data_embedding"]]
+                    if isinstance(self.encoders[encoder_name], MMContextEncoder):
+                        out_key = self.encoder_inputs[encoder_name]["in_main"]
+                    else:
+                        raise ValueError(
+                            "Encoder is not a MMContextEncoder. Inference not implemented for this encoder."
+                        )
+                    mod_emb = outputs[out_key]
                     flat_mod_emb = mod_emb.view(-1, mod_emb.size(-1))
                     embeddings_zarr_path = os.path.join(output_zarr_path, "obsm", f"{encoder_name}_mod_emb")
                     embeddings_zarr = zarr_module.open_array(embeddings_zarr_path, mode="r+")

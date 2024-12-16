@@ -76,7 +76,8 @@ def consolidate_low_frequency_categories(adata: anndata.AnnData, columns: list, 
         if col in adata.obs.columns:
             # Convert column to string if it's categorical
             if isinstance(adata.obs[col].dtype, pd.CategoricalDtype):
-                adata.obs[col] = adata.obs[col].astype(str)
+                as_string = adata.obs[col].astype(str)
+                adata.obs[col] = as_string
 
             # Calculate the frequency of each category
             freq = adata.obs[col].value_counts()
