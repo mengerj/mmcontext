@@ -35,6 +35,8 @@ outputs/*
 out/*
 docs/notebooks/*zarr
 #venv
-venv/
+venv*/
 
 docs/notebooks/*zarr*
+
+dist/
