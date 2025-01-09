@@ -33,7 +33,7 @@ class SystemMonitor:
         self._thread = threading.Thread(target=self._monitor)
         self.logger = logging.getLogger(__name__)
         self.num_threads = []
-        self.cpu_affinity = []
+        #self.cpu_affinity = []
 
         # GPU Monitoring Initialization
         self.gpu_available = False
@@ -103,7 +103,7 @@ class SystemMonitor:
 
             # Get number of threads and cpu core affinity
             self.num_threads.append((timestamp, process.num_threads()))
-            self.cpu_affinity.append((timestamp, process.cpu_affinity()))
+            #self.cpu_affinity.append((timestamp, process.cpu_affinity()))
 
             # GPU Monitoring
             if self.gpu_available:
