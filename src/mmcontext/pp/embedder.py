@@ -62,8 +62,7 @@ class Embedder:
             data_embeddings = self.data_embedder.embed(adata)
             self.store_embeddings(adata, data_embeddings, key="d_emb")
         else:
-            self.logger.error("Data embeddings are missing, and no data embedder is provided.")
-            raise ValueError("Data embeddings are missing, and no data embedder is provided.")
+            self.logger.info("Data embeddings are missing, and no data embedder is provided.")
 
         # Store external context embeddings if provided
         if context_embeddings is not None:
@@ -74,9 +73,8 @@ class Embedder:
             context_embeddings = self.context_embedder.embed(adata)
             self.store_embeddings(adata, context_embeddings, key="c_emb")
         else:
-            self.logger.error("Context embeddings are missing, and no context embedder is provided.")
-            raise ValueError("Context embeddings are missing, and no context embedder is provided.")
-
+            self.logger.info("Context embeddings are missing, and no context embedder is provided.")
+            
     def store_embeddings(self, adata: anndata.AnnData, embeddings: np.ndarray, key: str):
         """
         Stores embeddings in adata.obsm with the given key, after validating the shape.
