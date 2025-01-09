@@ -64,8 +64,17 @@ class Trainer:
         raw_data_key: str = "raw_data",
         temperature: float | None = None,
     ):
-        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger = logger or logging.getLogger(__name__)
+
+        if device:
+            self.device = device
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
+
         self.logger.info(f"Running on device: {self.device}")
         # Initialize encoders
         if encoders is None:
@@ -213,7 +222,11 @@ class Trainer:
                 if self.batch_size is None:
                     self.batch_size = in_embedding.size(0)
             if isinstance(encoder, MMContextEncoder):
-                mod_emb, temp = encoder(in_main=encoder_in["in_main"], in_cross=encoder_in["in_cross"])
+                if "in_cross" in encoder_in.keys():
+                    in_cross = encoder_in["in_cross"]
+                else:
+                    in_cross = None
+                mod_emb, temp = encoder(in_main=encoder_in["in_main"], in_cross=in_cross)
                 output = {input_dict["in_main"]: mod_emb, "temperature": temp}
                 self.temperature = temp
                 all_outputs.update(output)
