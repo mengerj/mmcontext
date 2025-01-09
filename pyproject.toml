@@ -14,13 +14,12 @@ maintainers = [
 authors = [
   { name = "Jonatan Menger" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
   "anndata",
@@ -75,6 +74,9 @@ packages = [ { include = "mmcontext", from = "src" } ]
 [tool.hatch.envs.default]
 installer = "uv"
 features = [ "dev" ]
+#post-install-commands = [
+#    "python -m ipykernel install --user --name mmcontext --display-name 'Python (mmcontext)'"
+#]
 
 [tool.hatch.envs.docs]
 features = [ "doc" ]
