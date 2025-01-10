@@ -1,13 +1,14 @@
 import logging
 import os
-from typing import List, Tuple, Optional
+
 import anndata
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import seaborn as sns
+from matplotlib.patches import Patch
+from scipy.sparse import issparse
 
 
 def plot_umap(
@@ -28,7 +29,8 @@ def plot_umap(
     save_format: str = "png",
     **kwargs,
 ):
-    """
+    """Plot a umap with custom options.
+
     Plots a UMAP visualization for the given annotated data using Scanpy. This
     version supports multiple color keys and an optional embedding key.
 
@@ -91,7 +93,7 @@ def plot_umap(
     ...     embedding_key="X_pca",
     ...     color_key=["origin", "cell_type", "cluster"],
     ...     sample_size=1000,
-    ...     save_plot=False
+    ...     save_plot=False,
     ... )
     """
     logger = logging.getLogger(__name__)
@@ -108,9 +110,7 @@ def plot_umap(
         if color_key is not None:
             # If color_key is a single string, wrap it in a list for convenience
             keys_to_check = [color_key] if isinstance(color_key, str) else color_key
-            adata = consolidate_low_frequency_categories(
-                adata, columns=keys_to_check, threshold=10, remove=True
-            )
+            adata = consolidate_low_frequency_categories(adata, columns=keys_to_check, threshold=10, remove=True)
 
     try:
         # Compute neighbors
@@ -122,7 +122,7 @@ def plot_umap(
             sc.pp.neighbors(adata, **kwargs)
 
         # Compute UMAP if not already present
-        #if "X_umap" not in adata.obsm:
+        # if "X_umap" not in adata.obsm:
         sc.tl.umap(adata, random_state=42)
 
         # Prepare figure for plotting
@@ -171,15 +171,6 @@ def plot_umap(
         raise e
 
 
-import logging
-import numpy as np
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-from typing import Optional, List
-from scipy.sparse import issparse
-import scanpy as sc
-
 def plot_clustered_heatmap(
     adata: sc.AnnData,
     num_hvgs: int = 20,
@@ -188,9 +179,10 @@ def plot_clustered_heatmap(
     figsize: tuple = (10, 12),
     cmap: str = "coolwarm",
     show: bool = True,
-    save_path: Optional[str] = None
+    save_path: str | None = None,
 ) -> None:
-    """
+    """Plot a heatmap
+
     Plot a heatmap with cells on the y-axis and genes on the x-axis.
     Only the cell dimension is clustered, not the gene dimension. Each cell
     is labeled (text) by its cell_type, and colored by its origin.
@@ -283,8 +275,8 @@ def plot_clustered_heatmap(
 
     expression_df = pd.DataFrame(
         data_matrix,
-        index=adata_hvgs.obs_names,   # cell IDs
-        columns=adata_hvgs.var_names  # gene names
+        index=adata_hvgs.obs_names,  # cell IDs
+        columns=adata_hvgs.var_names,  # gene names
     )
 
     # -- Prepare row labels (text) for cell_type
@@ -295,22 +287,16 @@ def plot_clustered_heatmap(
     origins = adata_hvgs.obs["origin"].unique().tolist()
     # Create a color palette for each distinct origin
     palette = sns.color_palette("hsv", len(origins))
-    origin_color_map = dict(zip(origins, palette))
-    #set the origin as a string
+    origin_color_map = dict(zip(origins, palette, strict=False))
+    # set the origin as a string
     adata_hvgs.obs["origin"] = adata_hvgs.obs["origin"].astype(str)
     row_colors = adata_hvgs.obs["origin"].map(origin_color_map)
-    #set the origin back to category
+    # set the origin back to category
     adata_hvgs.obs["origin"] = adata_hvgs.obs["origin"].astype("category")
-
-    
 
     # Build legend handles from your origin_color_map, which looks like:
     # {'0': (0.5176, 1.0, 0.0), '2': (0.0, 1.0, 0.9647), '1': (0.4470, 0.0, 1.0)}
-    handles = [
-        Patch(facecolor=color, label=f"origin={orig}")
-        for orig, color in origin_color_map.items()
-    ]
-
+    handles = [Patch(facecolor=color, label=f"origin={orig}") for orig, color in origin_color_map.items()]
 
     # Create the cluster map
     # Cluster only cells (rows), hence col_cluster=False.
@@ -323,11 +309,11 @@ def plot_clustered_heatmap(
         col_cluster=False,
         row_colors=row_colors,
         figsize=figsize,
-        xticklabels=True,   # Gene names on x-axis
+        xticklabels=True,  # Gene names on x-axis
         yticklabels=False,  # We'll manually set row labels
         dendrogram_ratio=(0.15, 0.02),
         cbar_pos=(0.02, 0.8, 0.02, 0.15),  # Move colorbar if desired
-        standard_scale=None
+        standard_scale=None,
     )
     # Place the legend on the figure or a specific axis
     # Here we attach it to the heatmap axis:
@@ -336,7 +322,7 @@ def plot_clustered_heatmap(
         title="Origin",
         bbox_to_anchor=(0, 1.2),  # Adjust placement if desired
         loc="upper left",
-        borderaxespad=0
+        borderaxespad=0,
     )
 
     g.figure.suptitle("Cells vs. HVGs: Clustered on Cells Only", y=1.02)
@@ -368,137 +354,11 @@ def plot_clustered_heatmap(
     else:
         logger.info("Plot generated but not displayed (show=False).")
 
-'''
 
-def plot_clustered_heatmap(
-    adata: sc.AnnData,
-    num_hvgs: int = 20,
-    clustering_method: str = "leiden",
-    resolution: float = 1.0,
-    figsize: tuple = (12, 10),
-    cmap: str = "viridis",
-    show: bool = True,
-    save_path: Optional[str] = None
-) -> None:
-    """
-    Plot a clustered heatmap of highly variable genes (HVGs) across different cell types and origins.
-    
-    Parameters
-    ----------
-    adata : scanpy.AnnData
-        The annotated data matrix.
-    num_hvgs : int, optional
-        Number of highly variable genes to select based on original data. Defaults to 20.
-    clustering_method : str, optional
-        Method to use for clustering. Defaults to "leiden".
-    resolution : float, optional
-        Resolution parameter for clustering. Higher values lead to more clusters. Defaults to 1.0.
-    figsize : tuple, optional
-        Size of the figure (width, height). Defaults to (12, 10).
-    cmap : str, optional
-        Colormap to use for the heatmap. Defaults to "viridis".
-    show : bool, optional
-        Whether to display the plot interactively. Defaults to True.
-    save_path : str, optional
-        Path to save the heatmap image. If provided, the plot will be saved to this path. Defaults to None.
-    
-    Returns
-    -------
-    None
-        Displays and optionally saves the clustered heatmap.
-    
-    Raises
-    ------
-    ValueError
-        If the required annotations are missing from `adata.obs`.
-    """
-    
-    logger.info("Starting to plot clustered heatmap.")
-    
-    # Validate required annotations
-    required_obs = ["origin", "cell_type"]
-    missing_obs = [obs for obs in required_obs if obs not in adata.obs]
-    if missing_obs:
-        logger.error(f"Missing required annotations in adata.obs: {missing_obs}")
-        raise ValueError(f"Missing required annotations in adata.obs: {missing_obs}")
-    
-    # Subset to original data for HVG selection
-    original_cells = adata[adata.obs["origin"] == "0"]
-    if original_cells.n_obs == 0:
-        logger.error("No cells with origin '0' found in adata.")
-        raise ValueError("No cells with origin '0' found in adata.")
-    
-    logger.info(f"Computing {num_hvgs} highly variable genes from original data.")
-    
-    # Identify highly variable genes based on original data
-    sc.pp.highly_variable_genes(original_cells, n_top_genes=num_hvgs, subset=True, inplace=True)
-    hvgs = original_cells.var["highly_variable"].index.tolist()
-    
-    logger.info(f"Selected HVGs: {hvgs}")
-    
-    # Ensure HVGs are present in the full dataset
-    hvgs = [gene for gene in hvgs if gene in adata.var_names]
-    if not hvgs:
-        logger.error("No highly variable genes found in the dataset after filtering.")
-        raise ValueError("No highly variable genes found in the dataset after filtering.")
-    
-    # Extract expression data for HVGs
-    expression_data = adata[:, hvgs].X.toarray() if isinstance(adata[:, hvgs].X, np.ndarray) else adata[:, hvgs].X.to_dense()
-    expression_df = pd.DataFrame(expression_data, index=adata.obs_names, columns=hvgs)
-    
-    # Optional: Normalize or scale the data if necessary
-    #sc.pp.scale(adata, max_value=10)
-    
-    # Perform clustering
-    logger.info(f"Clustering cells using {clustering_method} with resolution {resolution}.")
-    sc.pp.neighbors(adata, use_rep="X")
-    sc.tl.leiden(adata, resolution=resolution)
-    
-    # Create a combined label for origin and cell_type
-    adata.obs["combined_label"] = adata.obs["origin"].astype(str) + "_" + adata.obs["cell_type"].astype(str)
-    
-    # Prepare annotations for the heatmap
-    annotation_df = adata.obs[["origin", "cell_type", "combined_label"]]
-    unique_labels = annotation_df["combined_label"].unique()
-    label_mapping = {label: idx for idx, label in enumerate(unique_labels)}
-    annotation_df["label_idx"] = annotation_df["combined_label"].map(label_mapping)
-    
-    # Create a color palette
-    num_labels = len(unique_labels)
-    palette = sns.color_palette("hsv", num_labels)
-    lut = dict(zip(unique_labels, palette))
-    row_colors = annotation_df["combined_label"].map(lut)
-    
-    # Create the heatmap
-    plt.figure(figsize=figsize)
-    sns.clustermap(
-        expression_df.T,
-        cmap=cmap,
-        col_cluster=True,
-        row_cluster=True,
-        col_colors=row_colors,
-        linewidths=0.5,
-        figsize=figsize,
-        standard_scale=0
-    )
-    
-    plt.title("Clustered Heatmap of Highly Variable Genes")
-    plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path, dpi=300)
-        logger.info(f"Heatmap saved successfully at {save_path}.")
-    
-    if show:
-        plt.show()
-        logger.info("Displayed clustered heatmap interactively.")
-    else:
-        logger.info("Heatmap generation complete without displaying.")
-'''
 def plot_grouped_bar_chart(
     data: pd.DataFrame,
     save_plot: bool = False,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
     figsize: tuple = (12, 6),
     title: str = "Comparison of Metrics by Type",
     xlabel: str = "Metric",
@@ -507,9 +367,10 @@ def plot_grouped_bar_chart(
     legend_title: str = "Type",
     bbox_to_anchor: tuple = (1.05, 1),
     loc: str = "upper left",
-    edgecolor: str = "black"
+    edgecolor: str = "black",
 ) -> None:
-    """
+    """Plot a grouped bar chart of various metrics.
+
     Plot a grouped bar chart of various metrics, with metrics on the x-axis and
     different 'type' values shown as different colors. Optionally save the plot to a file.
 
@@ -552,28 +413,33 @@ def plot_grouped_bar_chart(
 
     Examples
     --------
-    >>> data = pd.DataFrame({
-    ...     "type": [
-    ...         "raw", "reconstructed1", "reconstructed2", 
-    ...         "embedding_scvi", "embedding_data_encoder_mod_emb",
-    ...         "embedding_context_encoder_mod_emb"
-    ...     ],
-    ...     "ARI": [0.319397, -0.001102, 0.000448, 0.388573, 0.403889, 0.403889],
-    ...     "NMI": [0.650722, 0.177398, 0.198209, 0.701891, 0.690134, 0.690134],
-    ...     "ASW": [0.412581, 0.435318, 0.416072, 0.507724, 0.505978, 0.505978],
-    ...     "Isolated_Labels_ASW": [0.508366, 0.439518, 0.425415, 0.552753, 0.547546, 0.547546],
-    ...     "Isolated_Labels_F1": [0.363206, 0.114639, 0.130031, 0.362576, 0.399302, 0.399302],
-    ...     "Bio_Conservation_Score": [0.450854, 0.233154, 0.234035, 0.502703, 0.509370, 0.509370],
-    ...     "Silhouette_Batch": [0.712724, 0.879405, 0.889953, 0.797206, 0.788198, 0.788198],
-    ...     "Graph_Connectivity": [0.889386, 0.239613, 0.266225, 0.912457, 0.914519, 0.914519],
-    ...     "Batch_Integration_Score": [0.801055, 0.559509, 0.578089, 0.854832, 0.851359, 0.851359],
-    ...     "Overall_Score": [0.590935, 0.363696, 0.371656, 0.643555, 0.646165, 0.646165]
-    ... })
+    >>> data = pd.DataFrame(
+    ...     {
+    ...         "type": [
+    ...             "raw",
+    ...             "reconstructed1",
+    ...             "reconstructed2",
+    ...             "embedding_scvi",
+    ...             "embedding_data_encoder_mod_emb",
+    ...             "embedding_context_encoder_mod_emb",
+    ...         ],
+    ...         "ARI": [0.319397, -0.001102, 0.000448, 0.388573, 0.403889, 0.403889],
+    ...         "NMI": [0.650722, 0.177398, 0.198209, 0.701891, 0.690134, 0.690134],
+    ...         "ASW": [0.412581, 0.435318, 0.416072, 0.507724, 0.505978, 0.505978],
+    ...         "Isolated_Labels_ASW": [0.508366, 0.439518, 0.425415, 0.552753, 0.547546, 0.547546],
+    ...         "Isolated_Labels_F1": [0.363206, 0.114639, 0.130031, 0.362576, 0.399302, 0.399302],
+    ...         "Bio_Conservation_Score": [0.450854, 0.233154, 0.234035, 0.502703, 0.509370, 0.509370],
+    ...         "Silhouette_Batch": [0.712724, 0.879405, 0.889953, 0.797206, 0.788198, 0.788198],
+    ...         "Graph_Connectivity": [0.889386, 0.239613, 0.266225, 0.912457, 0.914519, 0.914519],
+    ...         "Batch_Integration_Score": [0.801055, 0.559509, 0.578089, 0.854832, 0.851359, 0.851359],
+    ...         "Overall_Score": [0.590935, 0.363696, 0.371656, 0.643555, 0.646165, 0.646165],
+    ...     }
+    ... )
     >>> plot_grouped_bar_chart(data, save_plot=True, save_path="metrics_comparison.png")
     """
     logger = logging.getLogger(__name__)
     logger.info("Generating grouped bar chart with metrics on x-axis and type categories as color groups.")
-    
+
     # List of metric columns (you can adjust this to your own subset if desired)
     metric_cols = [
         "ARI",
@@ -585,44 +451,33 @@ def plot_grouped_bar_chart(
         "Silhouette_Batch",
         "Graph_Connectivity",
         "Batch_Integration_Score",
-        "Overall_Score"
+        "Overall_Score",
     ]
-    
+
     # Validate required columns
     required_columns = ["type"] + metric_cols
     missing_columns = [col for col in required_columns if col not in data.columns]
     if missing_columns:
         logger.error(f"The following required columns are missing from the data: {missing_columns}")
         raise ValueError(f"The following required columns are missing from the data: {missing_columns}")
-    
-    # Melt the DataFrame to long format: 
+
+    # Melt the DataFrame to long format:
     # - 'type' is our category
     # - 'metric' is the variable name
     # - 'value' is the metric value
-    df_melted = data.melt(
-        id_vars=["type"],
-        value_vars=metric_cols,
-        var_name="metric",
-        value_name="value"
-    )
-    
+    df_melted = data.melt(id_vars=["type"], value_vars=metric_cols, var_name="metric", value_name="value")
+
     # Create the grouped bar plot
     plt.figure(figsize=figsize)
-    bar_plot = sns.barplot(
-        data=df_melted,
-        x="metric",
-        y="value",
-        hue="type",
-        edgecolor=edgecolor
-    )
-    
+    sns.barplot(data=df_melted, x="metric", y="value", hue="type", edgecolor=edgecolor)
+
     plt.title(title)
     plt.xticks(rotation=rotation, ha="right")
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.legend(title=legend_title, bbox_to_anchor=bbox_to_anchor, loc=loc)
     plt.tight_layout()
-    
+
     if save_plot:
         if not save_path:
             logger.error("save_path must be provided if save_plot is True.")
@@ -636,95 +491,3 @@ def plot_grouped_bar_chart(
     else:
         plt.show()
         logger.info("Displayed grouped bar chart interactively.")
-
-'''
-def plot_grouped_bar_chart(data: pd.DataFrame) -> None:
-    """
-    Plot a grouped bar chart of various metrics, with metrics on the x-axis and
-    different 'type' values shown as different colors.
-
-    Parameters
-    ----------
-    data : pandas.DataFrame
-        A dataframe containing columns for 'type' and the metrics you want to plot.
-        It must include at least these columns:
-        ['type', 'ARI', 'NMI', 'ASW', 'Isolated_Labels_ASW', 'Isolated_Labels_F1',
-         'Bio_Conservation_Score', 'Silhouette_Batch', 'Graph_Connectivity',
-         'Batch_Integration_Score', 'Overall_Score'].
-
-    Returns
-    -------
-    None
-        Displays a grouped bar chart; does not return a value.
-
-    References
-    ----------
-    Data source: User-provided table.
-
-    Examples
-    --------
-    >>> data = pd.DataFrame({
-    ...     "type": [
-    ...         "raw", "reconstructed1", "reconstructed2", 
-    ...         "embedding_scvi", "embedding_data_encoder_mod_emb",
-    ...         "embedding_context_encoder_mod_emb"
-    ...     ],
-    ...     "ARI": [0.319397, -0.001102, 0.000448, 0.388573, 0.403889, 0.403889],
-    ...     "NMI": [0.650722, 0.177398, 0.198209, 0.701891, 0.690134, 0.690134],
-    ...     "ASW": [0.412581, 0.435318, 0.416072, 0.507724, 0.505978, 0.505978],
-    ...     "Isolated_Labels_ASW": [0.508366, 0.439518, 0.425415, 0.552753, 0.547546, 0.547546],
-    ...     "Isolated_Labels_F1": [0.363206, 0.114639, 0.130031, 0.362576, 0.399302, 0.399302],
-    ...     "Bio_Conservation_Score": [0.450854, 0.233154, 0.234035, 0.502703, 0.509370, 0.509370],
-    ...     "Silhouette_Batch": [0.712724, 0.879405, 0.889953, 0.797206, 0.788198, 0.788198],
-    ...     "Graph_Connectivity": [0.889386, 0.239613, 0.266225, 0.912457, 0.914519, 0.914519],
-    ...     "Batch_Integration_Score": [0.801055, 0.559509, 0.578089, 0.854832, 0.851359, 0.851359],
-    ...     "Overall_Score": [0.590935, 0.363696, 0.371656, 0.643555, 0.646165, 0.646165]
-    ... })
-    >>> plot_grouped_bar_chart(data)
-    """
-    logger = logging.getLogger(__name__)
-    logger.info("Generating grouped bar chart with metrics on x-axis and type categories as color groups.")
-    
-    # List of metric columns (you can adjust this to your own subset if desired)
-    metric_cols = [
-        "ARI",
-        "NMI",
-        "ASW",
-        "Isolated_Labels_ASW",
-        "Isolated_Labels_F1",
-        "Bio_Conservation_Score",
-        "Silhouette_Batch",
-        "Graph_Connectivity",
-        "Batch_Integration_Score",
-        "Overall_Score"
-    ]
-    
-    # Melt the DataFrame to long format: 
-    # - 'type' is our category
-    # - 'metric' is the variable name
-    # - 'value' is the metric value
-    df_melted = data.melt(
-        id_vars=["type"],
-        value_vars=metric_cols,
-        var_name="metric",
-        value_name="value"
-    )
-    
-    # Create the grouped bar plot
-    plt.figure(figsize=(12, 6))
-    sns.barplot(
-        data=df_melted,
-        x="metric",
-        y="value",
-        hue="type",
-        edgecolor="black"
-    )
-    
-    plt.title("Comparison of Metrics by Type")
-    plt.xticks(rotation=45, ha="right")
-    plt.xlabel("Metric")
-    plt.ylabel("Value")
-    plt.legend(title="Type", bbox_to_anchor=(1.05, 1), loc="upper left")
-    plt.tight_layout()
-    plt.show()
-'''

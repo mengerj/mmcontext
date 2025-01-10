@@ -1,15 +1,13 @@
 import logging
-import numpy as np
+
 import anndata
+import numpy as np
 import scanpy as sc
-from typing import Optional
 
 
-def combine_original_and_reconstructions(
-    adata: anndata.AnnData,
-    max_reconstructions: int = 3
-) -> anndata.AnnData:
-    """
+def combine_original_and_reconstructions(adata: anndata.AnnData, max_reconstructions: int = 3) -> anndata.AnnData:
+    """Combine original and reconstructed data from anndata object
+
     Combine the original data in ``adata.X`` with up to ``max_reconstructions``
     from ``adata.layers[...]``, and mark each subset in ``.obs["origin"]``.
 
@@ -32,7 +30,7 @@ def combine_original_and_reconstructions(
 
     Notes
     -----
-    Data reference: Single-cell RNA-seq data. Original data is in .X, 
+    Data reference: Single-cell RNA-seq data. Original data is in .X,
     reconstructed data is in .layers["reconstructedX"], etc.
 
     Examples
@@ -46,8 +44,7 @@ def combine_original_and_reconstructions(
     # Identify the layers that match the pattern "reconstructed" (or any logic you prefer).
     # Here we simply look for any layer with 'reconstructed' in its name.
     # If you name them differently, adjust this filter.
-    reconstruction_layers = [layer_name for layer_name in adata.layers.keys()
-                             if "reconstructed" in layer_name]
+    reconstruction_layers = [layer_name for layer_name in adata.layers.keys() if "reconstructed" in layer_name]
 
     # Sort them or pick them deterministically, e.g. "reconstructed1", "reconstructed2", etc.
     reconstruction_layers = sorted(reconstruction_layers)
@@ -63,23 +60,15 @@ def combine_original_and_reconstructions(
     adatas_to_concat = []
 
     # 1) Original
-    original_adata = anndata.AnnData(
-        X=adata.X.copy(),
-        obs=adata.obs.copy(),
-        var=adata.var.copy(),
-        uns=adata.uns.copy()
-    )
+    original_adata = anndata.AnnData(X=adata.X.copy(), obs=adata.obs.copy(), var=adata.var.copy(), uns=adata.uns.copy())
     original_adata.obs["origin"] = "original"
     adatas_to_concat.append(original_adata)
 
     # 2) Each reconstruction
-    for idx, layer in enumerate(reconstruction_layers, start=1):
+    for _idx, layer in enumerate(reconstruction_layers, start=1):
         logger.info("Processing reconstruction layer: %s", layer)
         recon_adata = anndata.AnnData(
-            X=adata.layers[layer].copy(),
-            obs=adata.obs.copy(),
-            var=adata.var.copy(),
-            uns=adata.uns.copy()
+            X=adata.layers[layer].copy(), obs=adata.obs.copy(), var=adata.var.copy(), uns=adata.uns.copy()
         )
         recon_adata.obs["origin"] = layer
         adatas_to_concat.append(recon_adata)
@@ -87,11 +76,11 @@ def combine_original_and_reconstructions(
     logger.info("Concatenating %d AnnData objects.", len(adatas_to_concat))
     combined_adata = anndata.concat(
         adatas_to_concat,
-        join="inner",         # or "outer" to include all genes, if you prefer
-        label="origin",       # a new column in obs that identifies each chunk 
-        keys=None,            # rely on the existing "origin" column if you prefer
+        join="inner",  # or "outer" to include all genes, if you prefer
+        label="origin",  # a new column in obs that identifies each chunk
+        keys=None,  # rely on the existing "origin" column if you prefer
         merge="unique",
-        index_unique=None
+        index_unique=None,
     )
 
     logger.info("Combination complete. Returning combined AnnData with shape %s.", combined_adata.shape)
@@ -102,16 +91,17 @@ def cluster_combined_adata(
     combined_adata: anndata.AnnData,
     clustering_method: str = "leiden",
     resolution: float = 1.0,
-    n_top_genes: Optional[int] = None
+    n_top_genes: int | None = None,
 ) -> anndata.AnnData:
-    """
+    """Cluster anddata
+
     Take a combined AnnData (e.g., from ``combine_original_and_reconstructions``)
     and perform clustering.
 
     Parameters
     ----------
     combined_adata : anndata.AnnData
-        AnnData object containing both original data (in some rows) and 
+        AnnData object containing both original data (in some rows) and
         reconstructed data (in other rows), typically indicated by
         ``.obs["origin"]``.
     clustering_method : str, optional
@@ -145,7 +135,7 @@ def cluster_combined_adata(
     sc.pp.normalize_total(combined_adata, target_sum=1e4)
     sc.pp.log1p(combined_adata)
     sc.pp.scale(combined_adata, max_value=10)
-    sc.tl.pca(combined_adata, svd_solver='arpack')
+    sc.tl.pca(combined_adata, svd_solver="arpack")
 
     sc.pp.neighbors(combined_adata, n_neighbors=10, n_pcs=50)
 
@@ -196,7 +186,8 @@ def subsample_adata(adata: anndata.AnnData, subsample_size: int = 1000, random_s
     if subsample_size >= adata.n_obs:
         logger.warning(
             "Requested subsample_size (%d) is >= number of cells (%d). Returning original data.",
-            subsample_size, adata.n_obs
+            subsample_size,
+            adata.n_obs,
         )
         return adata
 

@@ -57,7 +57,7 @@ class scibEvaluator:
         self.n_top_genes = n_top_genes
         self.max_cells = max_cells
         self.logger = logger or logging.getLogger(__name__)
-        #check if all keys are present in adata
+        # check if all keys are present in adata
         if self.embedding_key is not None:
             if isinstance(self.embedding_key, list):
                 for key in self.embedding_key:
