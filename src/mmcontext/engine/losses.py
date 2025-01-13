@@ -68,7 +68,7 @@ class LossManager:
         self.logger.info("Adding loss function: %s with weight %.2f", loss_function.description, weight)
         self.loss_functions.append((loss_function, weight))
 
-    def compute_total_loss(self, outputs: dict, targets: dict):
+    def compute_total_loss(self, outputs: dict, targets: dict, max_batches=64):
         """
         Computes the total loss by combining individual losses.
 
@@ -78,11 +78,14 @@ class LossManager:
             Dictionary containing model outputs and other necessary data, such as the original 'in_cross' embeddings and the sample ids.
         targets
             Dictionary containing target values, same keys as outputs, but before any modifications.
+        max_samples
+            Maximum number of samples to use for computing the loss. If None, all samples are used.
 
         Returns
         -------
         The total loss.
         """
+        outputs, targets = self.create_subset(outputs, targets, num_batches=max_batches)
         total_loss = 0.0
         for loss_function, weight in self.loss_functions:
             try:
@@ -93,6 +96,46 @@ class LossManager:
             # self.logger.debug("Loss: %s: %.4f", loss_function.description, loss*weight)
             total_loss += weight * loss
         return total_loss
+
+    def create_subset(self, outputs, targets, num_batches=None):
+        """Creates subsets of the matrices in outputs and targets using consistent sampling."""
+        if num_batches is None:
+            return outputs, targets
+        seed = 42  # Fixed seed for reproducibility
+        torch.manual_seed(seed)
+
+        # Determine the total number of samples
+        keys = list(outputs.keys())
+        total_batches = outputs[keys[0]].shape[0]
+
+        # Generate random indices
+        indices = torch.randperm(total_batches)[:num_batches]
+
+        # Subset the outputs and targets
+        outputs_subset = {}
+        targets_subset = {}
+
+        for key, value in outputs.items():
+            if not isinstance(value, torch.Tensor) or value.dim() < 2:
+                outputs_subset[key] = value
+            elif value.dim() == 2:
+                outputs_subset[key] = value[indices]
+            elif value.dim() == 3:
+                outputs_subset[key] = value[indices, :, :]
+            else:
+                raise ValueError(f"Unsupported number of dimensions ({value.dim()}) for outputs[{key}]")
+
+        for key, value in targets.items():
+            if not isinstance(value, torch.Tensor) or value.dim() < 2:
+                targets_subset[key] = value
+            elif value.dim() == 2:
+                targets_subset[key] = value[indices]
+            elif value.dim() == 3:
+                targets_subset[key] = value[indices, :, :]
+            else:
+                raise ValueError(f"Unsupported number of dimensions ({value.dim()}) for targets[{key}]")
+
+        return outputs_subset, targets_subset
 
     def configure_losses(self, cfg: DictConfig):
         """Configures and adds loss functions based on the provided configuration."""

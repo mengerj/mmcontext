@@ -6,7 +6,7 @@
       "format": "%(name)s - %(levelname)s - %(message)s"
     },
     "json": {
-      "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+      "()": "pythonjsonlogger.json.JsonFormatter",
       "format": "%(asctime)s %(name)s %(levelname)s %(message)s",
       "datefmt": "%Y-%m-%dT%H:%M:%S%z"
     }

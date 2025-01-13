@@ -16,9 +16,8 @@ in particular, the [API documentation][]. This project was build with the amazin
 ## Installation
 
 You need to have Python 3.10 or newer installed on your system.
-If you don't have Python installed, we recommend installing [Mambaforge][].
 
-There are several alternative options to install mmcontext:
+Currently mmcontext can be installed from source.
 
 <!--
 1) Install the latest release of `mmcontext` from [PyPI][]:
@@ -47,8 +46,6 @@ If you found a bug, please use the [issue tracker][].
 > t.b.a
 
 [scverse cookie cutter template]: https://github.com/scverse/cookiecutter-scverse
-[mambaforge]: https://github.com/conda-forge/miniforge#mambaforge
-[scverse discourse]: https://discourse.scverse.org/
 [issue tracker]: https://github.com/mengerj/mmcontext/issues
 [tests]: https://github.com/mengerj/mmcontext/actions/workflows/test.yml
 [documentation]: https://mmcontext.readthedocs.io

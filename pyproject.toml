@@ -14,18 +14,16 @@ maintainers = [
 authors = [
   { name = "Jonatan Menger" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
   "anndata",
   "dask",
-  "hydra-core",
   "ipykernel",
   "matplotlib",
   "numba==0.60",        # was needed due to issues with scanpy and scib automatic load
@@ -39,7 +37,7 @@ dependencies = [
   "seaborn",
   "session-info",
   "torch",
-  "zarr",
+  "zarr<=2.18.4",
 ]
 optional-dependencies.dev = [
   "pre-commit",
@@ -76,6 +74,9 @@ packages = [ { include = "mmcontext", from = "src" } ]
 [tool.hatch.envs.default]
 installer = "uv"
 features = [ "dev" ]
+#post-install-commands = [
+#    "python -m ipykernel install --user --name mmcontext --display-name 'Python (mmcontext)'"
+#]
 
 [tool.hatch.envs.docs]
 features = [ "doc" ]

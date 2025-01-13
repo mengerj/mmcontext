@@ -6,48 +6,6 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from omegaconf import DictConfig
-
-
-def configure_models(cfg: DictConfig, decoder_out_dim: int):
-    """Configures the model based on the configuration.
-
-    Parameters
-    ----------
-    cfg
-        Configuration object.
-    output_dim
-        Number of samples in a batch.
-
-    Returns
-    -------
-    encoder
-        Encoder model.
-    decoder
-        Decoder model.
-    """
-    cfg_e = cfg.encoder
-    cfg_d = cfg.decoder
-    if cfg_e.type == "mmcontext_encoder":
-        encoder = MMContextEncoder(
-            embedding_dim=cfg_e.latent_dim,  # this has to be the same dimension as the latent dimension of the aligner
-            hidden_dim=cfg_e.hidden_dim,
-            num_layers=cfg_e.num_layers,
-            num_heads=cfg_e.num_heads,
-            use_self_attention=cfg_e.use_self_attention,
-            use_cross_attention=cfg_e.use_cross_attention,
-            activation=cfg_e.activation,
-            dropout=cfg_e.dropout,
-        )
-    else:
-        raise ValueError(f"Unknown model type: {cfg.type}")
-    if cfg_d.type == "zinb_decoder":
-        decoder = ZINBDecoder(
-            input_dim=cfg_e.latent_dim,
-            hidden_dims=cfg_d.hidden_dims,
-            output_dim=decoder_out_dim,
-        )
-    return encoder, decoder
 
 
 class BaseModel(nn.Module, metaclass=abc.ABCMeta):

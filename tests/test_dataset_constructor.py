@@ -5,8 +5,6 @@ import pytest
 from torch.utils.data import DataLoader
 
 from mmcontext.pp import DataSetConstructor
-
-# , EmbeddingDataset
 from mmcontext.utils import create_test_anndata, create_test_emb_anndata
 
 

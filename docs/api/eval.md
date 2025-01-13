@@ -27,7 +27,7 @@ The {class}`mmcontext.eval.scibEvaluator` implements the batch-integration and b
 
 ## Comparison based on data characteristics
 
-The function {func}`mmcontext.eval.compare_data_properties`, computes data properties for a numpy array, which are defined in {class}`mmcontext.eval.DataProperties`, and allow a detailed comparison of two datasets. This allows to judge how realistic the reconstructed data is.
+The class {class}`mmcontext.eval.DataProperties` can be used to add different original and reconstructed datasets and compute log2foldchanges between the properties of reconstructed and original data This allows to judge how realistic the reconstructed data is.
 
 ```{eval-rst}
 .. autosummary::

@@ -33,7 +33,7 @@ class SystemMonitor:
         self._thread = threading.Thread(target=self._monitor)
         self.logger = logging.getLogger(__name__)
         self.num_threads = []
-        self.cpu_affinity = []
+        # self.cpu_affinity = []
 
         # GPU Monitoring Initialization
         self.gpu_available = False
@@ -103,7 +103,7 @@ class SystemMonitor:
 
             # Get number of threads and cpu core affinity
             self.num_threads.append((timestamp, process.num_threads()))
-            self.cpu_affinity.append((timestamp, process.cpu_affinity()))
+            # self.cpu_affinity.append((timestamp, process.cpu_affinity()))
 
             # GPU Monitoring
             if self.gpu_available:
@@ -210,9 +210,8 @@ class SystemMonitor:
         """Prints a formatted summary of the metrics."""
         summary = self.summarize()
         print("\nSystem Resource Usage Summary:")
-        print(f"CPU Usage (mean/max cores): {summary['cpu_usage_mean']:.2f}/{summary['cpu_usage_max']:.2f}")
         print(
-            f"Core Utilization (mean/max % per core): {summary['core_usage_mean']:.2f}/{summary['core_usage_max']:.2f}%"
+            f"Core Utilization (mean/max % per core): {summary['core_usage_mean']:.2f}/{summary['core_usage_max']:.2f}% on {self.num_cpus} cores"
         )
         print(f"Memory Usage (mean/max GB): {summary['memory_usage_mean']:.2f}/{summary['memory_usage_max']:.2f} GB")
         print(f"Total System Memory: {summary['total_memory']:.2f} GB")

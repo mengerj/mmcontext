@@ -57,6 +57,14 @@ class scibEvaluator:
         self.n_top_genes = n_top_genes
         self.max_cells = max_cells
         self.logger = logger or logging.getLogger(__name__)
+        # check if all keys are present in adata
+        if self.embedding_key is not None:
+            if isinstance(self.embedding_key, list):
+                for key in self.embedding_key:
+                    if key not in self.adata.obsm.keys():
+                        raise ValueError(f"Embedding key '{key}' not found in adata.obsm.")
+            elif self.embedding_key not in self.adata.obsm.keys():
+                raise ValueError(f"Embedding key '{self.embedding_key}' not found in adata.obsm.")
 
     def evaluate(self) -> pd.DataFrame:
         """Computes metrics for raw data, embeddings, and reconstructed data."""
@@ -166,6 +174,7 @@ class scibEvaluator:
                 sc.pp.neighbors(adata, use_rep=use_rep)
             except Exception as e:
                 self.logger.error(f"Error computing neighbors using embedding '{use_rep}': {e}")
+                raise e
 
         # Perform clustering
         me.cluster_optimal_resolution(adata, cluster_key=cluster_key, label_key=self.label_key)
