@@ -1,7 +1,22 @@
 # tests/utils.py
+import importlib
+import json
+import logging
+
 import anndata
 import numpy as np
 import pandas as pd
+
+
+def setup_logging():
+    """Load the logging configuration from the logging_config.json file and configure the logging system."""
+    with importlib.resources.open_text("mmcontext.conf", "logging_config.json") as config_file:
+        config_dict = json.load(config_file)
+
+    # Configure logging
+    logging.config.dictConfig(config_dict)
+    logger = logging.getLogger(__name__)
+    logger.info("mmcontext logging configured using the specified configuration file.")
 
 
 def create_test_anndata(n_samples=20, n_features=100, cell_types=None, tissues=None, batch_categories=None):
