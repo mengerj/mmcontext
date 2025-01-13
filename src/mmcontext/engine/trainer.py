@@ -171,7 +171,7 @@ class Trainer:
                 if not any(len(input) >= 2 for input in inputs):
                     raise KeyError("Loss function requires two inputs, but only one input is provided.")
 
-    def process_batch(self, batch: dict[str, Any]) -> (dict[str, Any], dict[str, Any]):
+    def process_batch(self, batch: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         """
         Process a single batch of data.
 
