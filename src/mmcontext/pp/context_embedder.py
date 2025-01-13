@@ -7,9 +7,9 @@ from abc import ABC, abstractmethod
 
 import anndata
 import numpy as np
-import openai
 import pandas as pd
-from openai import OpenAI
+
+from mmcontext.pp.llm_client import BaseLLMClient
 
 
 class ContextEmbedder(ABC):
@@ -89,6 +89,7 @@ class CategoryEmbedder(ContextEmbedder):
         self,
         metadata_categories: list,
         embeddings_file_path: str,
+        llm_client: BaseLLMClient | None = None,
         model: str = "text-embedding-3-small",
         combination_method: str = "concatenate",
         one_hot: bool = False,
@@ -98,6 +99,7 @@ class CategoryEmbedder(ContextEmbedder):
         super().__init__(logger)
         self.metadata_categories = metadata_categories
         self.embeddings_file_path = embeddings_file_path
+        self.llm_client = llm_client
         self.model = model
         self.combination_method = combination_method
         self.one_hot = one_hot
@@ -263,7 +265,7 @@ class CategoryEmbedder(ContextEmbedder):
             for value in values:
                 if value not in self.metadata_embeddings[category]:
                     # Generate embedding for new value
-                    embedding = self.generate_text_embedding(value)
+                    embedding = self.llm_client.generate_embedding(value)
                     if embedding is not None:
                         self.metadata_embeddings[category][value] = embedding
                         self.logger.info(f"Generated new embedding for '{value}' in '{category}'")
@@ -278,42 +280,6 @@ class CategoryEmbedder(ContextEmbedder):
             self.logger.info("Updated embeddings dictionary saved.")
         else:
             self.logger.info("No new embeddings generated; dictionary loaded from file and not updated.")
-
-    def generate_text_embedding(self, text: str) -> list | None:
-        """
-        Generates an embedding for the given text using OpenAI's embedding model.
-
-        Parameters
-        ----------
-        text
-            The text for which to generate an embedding.
-
-        Returns
-        -------
-        A list representing the embedding vector, or None in case of failure.
-        """
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            self.logger.warning("OPENAI_API_KEY is not set.")
-            return None
-
-        client = OpenAI(api_key=api_key)
-        try:
-            response = client.embeddings.create(input=text, model=self.model)
-            embedding = response.data[0].embedding
-            return embedding
-        except openai.error.InvalidRequestError as e:
-            self.logger.warning(f"Invalid request for embedding generation: {e}")
-        except openai.error.AuthenticationError as e:
-            self.logger.warning(f"Authentication failed for embedding generation: {e}")
-        except openai.error.APIError as e:
-            self.logger.warning(f"OpenAI API error occurred: {e}")
-        except openai.error.APIConnectionError as e:
-            self.logger.warning(f"Network error when trying to generate embedding: {e}")
-        except openai.error.RateLimitError as e:
-            self.logger.warning(f"Rate limit exceeded for embedding generation: {e}")
-
-        return None
 
     def load_metadata_embeddings(self) -> dict:
         """

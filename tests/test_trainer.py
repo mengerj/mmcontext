@@ -131,7 +131,7 @@ def test_trainer_successful_training():
 def test_trainer_data_context_missing_cross():
     logger = logging.getLogger(__name__)
     logger.info("TEST: test_trainer_data_context_missing_cross")
-    data_loader = create_test_dataloader()
+    data_loader = create_test_dataloader(emb_dim=16)
 
     # Create a simplified encoder and loss for the test
     encoder = MMContextEncoder(embedding_dim=16, hidden_dim=16)
@@ -440,7 +440,12 @@ def test_inference_only_decoder(tmp_path):
     # Model and loss setup
     decoder = ZINBDecoder(input_dim=emb_dim, hidden_dims=[16], output_dim=n_samples)
     # Trainer initialization
-    trainer = Trainer(decoder=decoder, optimizer=torch.optim.Adam(decoder.parameters()), decoder_input_key="mod_emb")
+    trainer = Trainer(
+        decoder=decoder,
+        optimizer=torch.optim.Adam(decoder.parameters()),
+        decoder_input_key="mod_emb",
+        device=torch.device("cpu"),
+    )
     # generate test adata
     adata = create_test_emb_anndata(n_samples=100, emb_dim=emb_dim, data_key="mod_emb")
     trainer.infer_adata(
