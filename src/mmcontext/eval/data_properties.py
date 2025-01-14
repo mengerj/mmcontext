@@ -1208,6 +1208,7 @@ class DataProperties:
         y = y[valid]
         if len(x) < 3:
             return np.nan
+
         coeffs = np.polyfit(x, y, 2)
         return coeffs[1]
 
@@ -1229,6 +1230,8 @@ class DataProperties:
         y = y[valid]
         if len(x) < 3:
             return np.nan
+        if np.ptp(x) == 0 or np.ptp(y) == 0:  # Check range (max - min)
+            return np.nan
         coeffs = np.polyfit(x, y, 2)
         return coeffs[0]
 
@@ -1249,6 +1252,8 @@ class DataProperties:
         x = x[valid]
         y = y[valid]
         if len(x) < 2:
+            return np.nan
+        if np.ptp(x) == 0 or np.ptp(y) == 0:  # Check range (max - min)
             return np.nan
         coeffs = np.polyfit(x, y, 1)
         return coeffs[0]
