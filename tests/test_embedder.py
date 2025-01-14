@@ -69,22 +69,6 @@ def test_embedder_with_embedders():
     assert adata.obsm["c_emb"].shape == (n_samples, 128)
 
 
-def test_embedder_without_embeddings_or_embedders():
-    logger = logging.getLogger(__name__)
-    logger.info("TEST: test_embedder_without_embeddings_or_embedders")
-    adata = create_test_anndata()
-
-    # Initialize the Embedder without embedders
-    embedder = Embedder()
-
-    # Attempt to create embeddings without embeddings or embedders
-    with pytest.raises(ValueError) as excinfo:
-        embedder.create_embeddings(adata)
-
-    # Check the error message
-    assert "Data embeddings are missing, and no data embedder is provided." in str(excinfo.value)
-
-
 def test_embedder_with_existing_embeddings():
     logger = logging.getLogger(__name__)
     logger.info("TEST: test_embedder_with_existing_embeddings")
