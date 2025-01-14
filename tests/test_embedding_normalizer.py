@@ -94,12 +94,12 @@ def test_constant_embeddings_zscore():
     with pytest.warns(RuntimeWarning):
         normalizer.normalize(adata)
 
-    assert np.isnan(
-        adata.obsm["d_emb_norm"]
-    ).all(), "Expected NaN values in d_emb_norm for constant embeddings in ZScoreNormalizer"
-    assert np.isnan(
-        adata.obsm["c_emb_norm"]
-    ).all(), "Expected NaN values in c_emb_norm for constant embeddings in ZScoreNormalizer"
+    assert np.isnan(adata.obsm["d_emb_norm"]).all(), (
+        "Expected NaN values in d_emb_norm for constant embeddings in ZScoreNormalizer"
+    )
+    assert np.isnan(adata.obsm["c_emb_norm"]).all(), (
+        "Expected NaN values in c_emb_norm for constant embeddings in ZScoreNormalizer"
+    )
 
 
 def test_constant_embeddings_minmax():
@@ -121,12 +121,12 @@ def test_constant_embeddings_minmax():
         # Normalize the embeddings
         normalizer.normalize(adata)
 
-    assert np.isnan(
-        adata.obsm["d_emb_norm"]
-    ).all(), "Expected NaN values in d_emb_norm for constant embeddings in MinMaxNormalizer"
-    assert np.isnan(
-        adata.obsm["c_emb_norm"]
-    ).all(), "Expected NaN values in c_emb_norm for constant embeddings in MinMaxNormalizer"
+    assert np.isnan(adata.obsm["d_emb_norm"]).all(), (
+        "Expected NaN values in d_emb_norm for constant embeddings in MinMaxNormalizer"
+    )
+    assert np.isnan(adata.obsm["c_emb_norm"]).all(), (
+        "Expected NaN values in c_emb_norm for constant embeddings in MinMaxNormalizer"
+    )
 
 
 def test_extreme_values_zscore():
@@ -144,12 +144,12 @@ def test_extreme_values_zscore():
 
     # Apply normalization, and it should handle extreme values without NaN or Inf
     normalizer.normalize(adata)
-    assert np.isfinite(
-        adata.obsm["d_emb_norm"]
-    ).all(), "ZScoreNormalizer should handle extreme values without NaNs or Infs"
-    assert np.isfinite(
-        adata.obsm["c_emb_norm"]
-    ).all(), "ZScoreNormalizer should handle extreme values without NaNs or Infs"
+    assert np.isfinite(adata.obsm["d_emb_norm"]).all(), (
+        "ZScoreNormalizer should handle extreme values without NaNs or Infs"
+    )
+    assert np.isfinite(adata.obsm["c_emb_norm"]).all(), (
+        "ZScoreNormalizer should handle extreme values without NaNs or Infs"
+    )
 
 
 def test_extreme_values_minmax():
@@ -169,12 +169,12 @@ def test_extreme_values_minmax():
     # Apply normalization and check if extreme values are normalized correctly
     normalizer.normalize(adata)
 
-    assert np.isfinite(
-        adata.obsm["d_emb_norm"]
-    ).all(), "MinMaxNormalizer should handle extreme values without NaNs or Infs"
-    assert np.isfinite(
-        adata.obsm["c_emb_norm"]
-    ).all(), "MinMaxNormalizer should handle extreme values without NaNs or Infs"
+    assert np.isfinite(adata.obsm["d_emb_norm"]).all(), (
+        "MinMaxNormalizer should handle extreme values without NaNs or Infs"
+    )
+    assert np.isfinite(adata.obsm["c_emb_norm"]).all(), (
+        "MinMaxNormalizer should handle extreme values without NaNs or Infs"
+    )
 
 
 def test_mixed_datatypes_zscore():
