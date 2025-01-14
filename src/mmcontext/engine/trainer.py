@@ -124,6 +124,7 @@ class Trainer:
 
         if self.loss_manager is not None:
             self._validate_encoders()
+            self._validate_loss_manager()
         if all(isinstance(encoder, PlaceholderModel) for encoder in self.encoders.values()) and isinstance(
             self.decoder, PlaceholderModel
         ):
@@ -150,6 +151,25 @@ class Trainer:
                 if self.temperature is None:
                     for encoder in self.encoders.values():
                         encoder.learn_temperature = True
+
+    def _validate_loss_manager(self):
+        # Check if the chosen loss current_mode and/or target_mode use need multiple inputs
+        for loss_fn, _ in self.loss_manager.loss_functions:
+            if hasattr(loss_fn, "current_mode") and loss_fn.current_mode in ["data_context", "context_data"]:
+                inputs = []
+                for encoder_name in self.encoder_inputs.keys():
+                    # Only one of the encoders needs to have multiple inputs
+                    inputs.append(self.encoder_inputs[encoder_name].keys())
+                if not any(len(input) >= 2 for input in inputs):
+                    raise KeyError("Loss function requires two inputs, but only one input is provided.")
+
+            if hasattr(loss_fn, "target_mode") and loss_fn.target_mode in ["data_context", "context_data"]:
+                inputs = []
+                for encoder_name in self.encoder_inputs.keys():
+                    # Only one of the encoders needs to have multiple inputs
+                    inputs.append(self.encoder_inputs[encoder_name].keys())
+                if not any(len(input) >= 2 for input in inputs):
+                    raise KeyError("Loss function requires two inputs, but only one input is provided.")
 
     def process_batch(self, batch: dict[str, Any]) -> (dict[str, Any], dict[str, Any]):
         """
