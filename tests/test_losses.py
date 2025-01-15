@@ -171,9 +171,9 @@ def test_contrastive_loss_zero_when_embeddings_identical():
         context_key="context_embeddings",
     )
     loss = loss_fn.compute_loss(outputs, targets)
-    assert torch.isclose(
-        loss, torch.tensor(0.0), atol=1e-6
-    ), f"Loss should be close to zero when embeddings are identical, got {loss.item()}"
+    assert torch.isclose(loss, torch.tensor(0.0), atol=1e-6), (
+        f"Loss should be close to zero when embeddings are identical, got {loss.item()}"
+    )
 
 
 def test_contrastive_loss_positive_when_embeddings_different():
@@ -424,6 +424,6 @@ def test_contrastive_loss_infoNCE():
     logits = loss_fn.get_similarity_matrix(outputs, "data_context")
     labels = torch.arange(logits.shape[0], device=logits.device)
     manual_loss = F.cross_entropy(logits, labels)
-    assert torch.isclose(
-        loss, manual_loss, atol=1e-6
-    ), f"InfoNCE loss should match manual computation, got {loss.item()} and {manual_loss.item()}"
+    assert torch.isclose(loss, manual_loss, atol=1e-6), (
+        f"InfoNCE loss should match manual computation, got {loss.item()} and {manual_loss.item()}"
+    )

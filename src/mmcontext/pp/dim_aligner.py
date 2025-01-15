@@ -324,7 +324,7 @@ class PCAReducer(DimAligner):
         loadings = loadings[:, :n_components]
 
         # Create DataFrame for easier handling
-        loadings_df = pd.DataFrame(loadings, columns=[f"PC{i+1}" for i in range(n_components)])
+        loadings_df = pd.DataFrame(loadings, columns=[f"PC{i + 1}" for i in range(n_components)])
 
         # Check if one_hot_order is provided and valid
         one_hot_order = self.config.get("one_hot_order", None)
