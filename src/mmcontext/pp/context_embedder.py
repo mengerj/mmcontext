@@ -65,8 +65,8 @@ class CategoryEmbedder(ContextEmbedder):
         List of metadata categories to process.
     embeddings_file_path
         Path to the dictionary to save/load embeddings.
-    model
-        Text embedding model to use.
+    llm_client
+        Client for the Language Model API.
     combination_method
         Method to combine embeddings ('average', 'concatenate').
     one_hot

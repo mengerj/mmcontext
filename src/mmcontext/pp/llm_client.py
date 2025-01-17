@@ -42,31 +42,25 @@ class OpenAILLMClient(BaseLLMClient):
             The name of the OpenAI model to use for embedding.
         """
         self.model = model
+        self.api_key = os.environ.get("OPENAI_API_KEY")
+        self.logger = logging.getLogger(__name__)
+        if not self.api_key:
+            self.logger.warning("OPENAI_API_KEY is not set.")
+            return None
 
     def generate_embedding(self, text: str) -> list[float] | None:
         """Generates an embedding for the given text using the OpenAI API."""
         import openai  # keep the import local if you prefer
 
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            self.logger.warning("OPENAI_API_KEY is not set.")
-            return None
-
-        client = openai.OpenAI(api_key=api_key)
+        if not self.api_key:
+            raise RuntimeError("OpenAI API key is not set.")
+        client = openai.OpenAI(api_key=self.api_key)
         try:
             response = client.embeddings.create(input=text, model=self.model)
             embedding = response.data[0].embedding
             return embedding
-        except openai.error.InvalidRequestError as e:
-            self.logger.warning(f"Invalid request for embedding generation: {e}")
-        except openai.error.AuthenticationError as e:
-            self.logger.warning(f"Authentication failed for embedding generation: {e}")
-        except openai.error.APIError as e:
-            self.logger.warning(f"OpenAI API error occurred: {e}")
-        except openai.error.APIConnectionError as e:
-            self.logger.warning(f"Network error when trying to generate embedding: {e}")
-        except openai.error.RateLimitError as e:
-            self.logger.warning(f"Rate limit exceeded for embedding generation: {e}")
+        except Exception as e:
+            self.logger.error("Error calling OpenAI API: %s", e)
 
         return None
 
