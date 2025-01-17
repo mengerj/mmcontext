@@ -3,6 +3,7 @@ import json
 import logging.config
 
 import pytest
+from dotenv import load_dotenv
 
 
 def setup_logging():
@@ -19,3 +20,8 @@ def setup_logging():
 @pytest.fixture(scope="session", autouse=True)
 def configure_logging():
     setup_logging()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def load_env():
+    load_dotenv()

@@ -51,3 +51,15 @@ docs/notebooks/*zarr*
 
 #package info
 *.egg-info/
+
+#env variables
+.env
+
+#egg-info
+*.egg-info
+
+#vs-code
+.vscode/
+
+#ds store
+.DS_Store
