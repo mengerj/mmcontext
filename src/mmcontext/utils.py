@@ -10,7 +10,7 @@ import pandas as pd
 
 def setup_logging():
     """Load the logging configuration from the logging_config.json file and configure the logging system."""
-    with importlib.resources.open_text("mmcontext.conf", "logging_config.json") as config_file:
+    with importlib.resources.files("mmcontext.conf", "logging_config.json") as config_file:
         config_dict = json.load(config_file)
 
     # Configure logging
