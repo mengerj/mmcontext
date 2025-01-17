@@ -48,7 +48,7 @@ class EncoderPreTrained:
         self,
         encoders: dict[str, torch.nn.Module],
         weights_paths: dict[str, str],
-        device=torch.device | None,
+        device: torch.device | None = None,
         data_obsm_key_final: str = "X_data_final",
         context_obsm_key_final: str = "X_context_final",
     ):

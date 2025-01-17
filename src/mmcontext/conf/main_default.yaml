@@ -1,0 +1,134 @@
+dataset:
+  seq_length: 64 # eventhough the dataset is not created during preprocessing, the sequence length is used to determine the chunk size of zarr storage for efficiency
+  batch_size: 32
+  multiplier: 1 # Multiplied by the seq-length * batch_size to give the chunk size for zarr storage
+  chunk_size: null # Overwrite in python scirpt
+  out_emb_keys:
+    data_embedding: d_emb
+    context_embedding: c_emb
+  in_emb_keys:
+    data_embedding: d_emb_aligned
+    context_embedding: c_emb_aligned
+  use_raw: False #If you want to train a decoder jointly with a loss function that requires raw data, set this to True
+  use_dask: False #If you want to use dask for data loading, set this to True. Good for large datasets.
+pp:
+  general:
+    # Consolidate or remove the following categories if they have less samples than the treshhold
+    categories: ["cell_type", "dataset_id"]
+    threshold: 5
+    remove: True
+  embedder:
+    context_embedder:
+      type: categorical # categorical currently the only option
+      specs:
+        metadata_categories: ["cell_type"]
+        one_hot: False
+        model: text-embedding-3-small
+        combination_method: concatenate
+        embeddings_file_path: ${data.dir}/emb_dicts/category_embeddings_${.model}_metadata_embeddings.pkl.gz #Need to make sure that this path is found
+    data_embedder:
+      type: precalculated #This embedder will take embeddings already store in anndata.obsm
+      specs:
+        obsm_key: scvi
+  normalizer:
+    type: None #min-max or z-score or None
+  aligner:
+    latent_dim: 64
+    type: pca
+    additional:
+      pca_eval:
+        evaluate_pca: True
+        save_path: pca_eval
+        scree_plot: True
+        cumulative_variance_plot: True
+        loadings_heatmap: True
+        loadings_heatmap_options:
+          threshold: 0 # Only include loadings above this threshold
+          top_n_components: 64 # Number of principal components to include in the heatmap
+          top_n_variables: 100 # Number of variables to display in the heatmap
+models:
+  encoder:
+    type: mmcontext_encoder #mmcontext_encoder
+    latent_dim: null # will be overwritten from the preprocessing config to ensure consistency
+    hidden_dim: 64
+    num_layers: 2
+    num_heads: 1
+    use_self_attention: False
+    use_cross_attention: False
+    activation: relu
+    dropout: 0.1
+  decoder:
+    type: zinb_decoder
+    train: True
+    hidden_dims: [64]
+optimizer:
+  - type: adam
+    use: True
+    lr: 0.001
+    weight_decay: 0.0
+    betas: [0.9, 0.999]
+    max_lr: None
+
+  - type: adam
+    use: False
+    lr: 0.01
+    weight_decay: 0.1
+    betas: [0.9, 0.999]
+    max_lr: None
+
+scheduler: # Currently schedulers will be applied after each epoch
+  - type: step
+    use: True
+    step_size: 10
+    gamma: 0.1
+
+  - type: cosine
+    use: False
+    T_max: 10
+    eta_min: 0.0001
+losses:
+  infoNCE_data_context:
+    type: contrastive_loss
+    use: False
+    weight: 1.0
+    target_mode: infoNCE #Predict exact pairs (Classic Contrastive Loss)
+    current_mode: data_context # Has to be between data and context here
+    similarity_metric: cosine
+  context_context_data_data:
+    type: contrastive_loss
+    use: False
+    weight: 1.0
+    target_mode: context_context # Use only context embeddings to get a target similarity matrix
+    current_mode: data_data # Use only data embeddings to get a current similarity matrix
+    similarity_metric: cosine
+  context_context_data_context:
+    type: contrastive_loss
+    use: False
+    weight: 1.0
+    target_mode: context_context
+    current_mode: data_context # Use the similarity between data and context embeddings as the current similarity matrix
+    similarity_metric: cosine
+  data_data_data_context:
+    type: contrastive_loss
+    use: False
+    weight: 1.0
+    target_mode: data_data # Use only data embeddings to get a target similarity matrix. This should help keep the original similarities
+    current_mode: data_context # Use the similarity between data and context embeddings as the current similarity matrix
+    similarity_metric: cosine
+  reconstruction_loss:
+    type: reconstruction_loss
+    use: False
+    weight: 1.0
+    reduction: mean
+  zinb_loss:
+    type: zinb_loss
+    use: False
+    weight: 1.0
+    eps: 1e-7
+trainer:
+  encoder_inputs: #d_emb and c_emb are the default names for the data and context embeddings
+    data_encoder: # If you use multiple embedders, add a new key for each encoder. Default name of first is data_encoder
+      in_main: d_emb
+      in_cross: c_emb
+  temperature: null # This relates to cosine similarity loss and will be learned if None, or can be set to fixed value
+  epochs: 100
