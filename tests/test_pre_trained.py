@@ -102,11 +102,16 @@ def weights_paths(tmp_path) -> dict:
     -----
     Adjust these paths to match your actual file system structure.
     """
-
-    return {
-        "data_encoder": "best_data_encoder_weights.pth",
-        "context_encoder": "best_context_encoder_weights.pth",
-    }
+    with importlib.resources.path("mmcontext.data", "best_encoder_weights") as actual_weight_paths:
+        temp_file_paths = {}
+        weights_paths = {
+            "data_encoder": "best_data_encoder_weights.pth",
+            "context_encoder": "best_context_encoder_weights.pth",
+        }
+        for key in weights_paths:
+            temp_file_paths[key] = tmp_path / weights_paths[key]
+            shutil.copy(actual_weight_paths / weights_paths[key], temp_file_paths[key])
+    return temp_file_paths
 
 
 @pytest.fixture
@@ -120,25 +125,21 @@ def encoder_pretrained(data_context_encoders, weights_paths, tmp_path):
         An instance of the class under test, loaded with the specified models and weights.
     """
     # Import inside the fixture to avoid import-time side effects
-    from mmcontext.engine import EncoderPreTrained  # <--- Adjust to your actual import path
+    import torch
 
-    with importlib.resources.path("mmcontext.data", "best_encoder_weights") as actual_weight_paths:
-        temp_file_paths = {}
-        for key in weights_paths:
-            temp_file_paths[key] = tmp_path / weights_paths[key]
-            shutil.copy(actual_weight_paths / weights_paths[key], temp_file_paths[key])
+    from mmcontext.engine import EncoderPreTrained
 
-        encoder_pretrained_obj = EncoderPreTrained(
-            encoders=data_context_encoders,
-            weights_paths=temp_file_paths,
-            data_obsm_key_final="X_data_final",
-            context_obsm_key_final="X_context_final",
-        )
+    encoder_pretrained_obj = EncoderPreTrained(
+        encoders=data_context_encoders,
+        weights_paths=weights_paths,
+        data_obsm_key_final="X_data_final",
+        context_obsm_key_final="X_context_final",
+        device=torch.device("cpu"),
+    )
     return encoder_pretrained_obj
 
 
-@pytest.fixture
-def data_embedder():
+class DataEmbedder:
     """
     Create a simple AnnDataStoredEmbedder or a custom function that places
     initial data embeddings into adata.obsm["X_data_init"].
@@ -146,11 +147,12 @@ def data_embedder():
     For demonstration, we place random embeddings. In practice, you could
     instantiate something like `AnnDataStoredEmbedder(...)`.
     """
+
     # from mmcontext.pp import AnnDataStoredEmbedder
     # embedder_obj = AnnDataStoredEmbedder(obsm_key="scvi")
 
     # For testing, just embed random vectors:
-    def _embed_func(adata: anndata.AnnData) -> None:
+    def embed(adata: anndata.AnnData) -> None:
         """
         Embeds data by generating random vectors.
 
@@ -159,13 +161,12 @@ def data_embedder():
         adata : anndata.AnnData
             The AnnData object into which we store random vectors.
         """
-        adata.obsm["X_data_init"] = np.random.rand(adata.n_obs, 64)
+        embeddings = np.random.rand(adata.n_obs, 64)
 
-    return _embed_func
+        return embeddings
 
 
-@pytest.fixture
-def context_embedder():
+class ContextEmbedder:
     """
     Create a simple CategoryEmbedder or a custom function that places
     initial context embeddings into adata.obsm["X_context_init"].
@@ -173,6 +174,7 @@ def context_embedder():
     For demonstration, we place random embeddings. In practice, you could
     instantiate `CategoryEmbedder(...)`.
     """
+
     # from mmcontext.pp import CategoryEmbedder
     # category_embedder = CategoryEmbedder(
     #     metadata_categories=["cell_type"],
@@ -183,7 +185,7 @@ def context_embedder():
     # )
 
     # For testing, just embed random vectors:
-    def _embed_func(adata: anndata.AnnData) -> None:
+    def embed(adata: anndata.AnnData) -> None:
         """
         Embeds context data by generating random vectors.
 
@@ -192,15 +194,15 @@ def context_embedder():
         adata : anndata.AnnData
             The AnnData object into which we store random vectors for context.
         """
-        adata.obsm["X_context_init"] = np.random.rand(adata.n_obs, 64)
+        embeddings = np.random.rand(adata.n_obs, 64)
 
-    return _embed_func
+        return embeddings
 
 
 def test_encoder_pretrained_data_flow(
     encoder_pretrained,
     toy_anndata,
-    data_embedder,
+    data_embedder=DataEmbedder,
 ):
     """
     Tests that the EncoderPreTrained class can embed data in two stages
@@ -239,7 +241,7 @@ def test_encoder_pretrained_data_flow(
 def test_encoder_pretrained_context_flow(
     encoder_pretrained,
     toy_anndata,
-    context_embedder,
+    context_embedder=ContextEmbedder,
 ):
     """
     Tests that the EncoderPreTrained class can embed context in two stages
@@ -275,7 +277,9 @@ def test_encoder_pretrained_context_flow(
     assert final_shape[0] == toy_anndata.n_obs, "Row count of final embeddings should match n_obs."
 
 
-def test_encoder_pretrained_missing_data_encoder(data_context_encoders, weights_paths, toy_anndata, data_embedder):
+def test_encoder_pretrained_missing_data_encoder(
+    data_context_encoders, weights_paths, toy_anndata, data_embedder=DataEmbedder
+):
     """
     Tests that missing the 'data_encoder' key in the encoders dictionary
     raises an appropriate ValueError.
@@ -299,25 +303,3 @@ def test_encoder_pretrained_missing_data_encoder(data_context_encoders, weights_
     with pytest.raises(ValueError, match="No 'data_encoder' found"):
         encoder_pretrained = EncoderPreTrained(encoders_modified, weights_paths)
         encoder_pretrained.encode_data(toy_anndata, data_embedder)
-
-
-def test_encoder_pretrained_missing_init_obsm(encoder_pretrained, toy_anndata):
-    """
-    Tests that if the user-supplied embedder does not produce the expected
-    initial embeddings in adata.obsm, an error is raised.
-
-    Parameters
-    ----------
-    encoder_pretrained : EncoderPreTrained
-        The instance of EncoderPreTrained with loaded encoders.
-    toy_anndata : anndata.AnnData
-        Synthetic AnnData for testing.
-    """
-
-    # Provide a dummy embedder that does NOT write to adata.obsm["X_data_init"]
-    def faulty_embedder(adata: anndata.AnnData):
-        # This embedder does not store anything in adata.obsm
-        pass
-
-    with pytest.raises(ValueError, match="No initial data embeddings found"):
-        encoder_pretrained.encode_data(toy_anndata, faulty_embedder)

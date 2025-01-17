@@ -8,7 +8,7 @@ import shutil
 import numpy as np
 import pytest
 
-from mmcontext.pp import CategoryEmbedder, Embedder, PlaceholderDataEmbedder
+from mmcontext.pp import CategoryEmbedder, Embedder, OpenAILLMClient, PlaceholderDataEmbedder
 from mmcontext.utils import create_test_anndata
 
 
@@ -30,12 +30,13 @@ def test_context_embedder_with_missing_obs_columns(tmp_path):
         shutil.copy(resource_path, temp_file_path)
 
         model = "text-embedding-3-small"
+        llm_client = OpenAILLMClient(model=model)
         combination_method = "concatenate"
 
         context_embedder = CategoryEmbedder(
             metadata_categories=metadata_categories,
             embeddings_file_path=temp_file_path,
-            model=model,
+            llm_client=llm_client,
             combination_method=combination_method,
             one_hot=False,
         )
@@ -65,13 +66,13 @@ def test_embeddings_dictionary_loading(tmp_path, monkeypatch):
 
         # Copy the resource file to the temporary location
         shutil.copy(resource_path, temp_file_path)
-
+        llm_client = OpenAILLMClient(model="text-embedding-3-small")
         # Initialize the CategoryEmbedder without an API key
         metadata_categories = ["cell_type", "tissue"]
         context_embedder = CategoryEmbedder(
             metadata_categories=metadata_categories,
             embeddings_file_path=temp_file_path,
-            model="text-embedding-3-small",
+            llm_client=llm_client,
             combination_method="concatenate",
             one_hot=False,
             unknown_threshold=20,
@@ -111,20 +112,19 @@ def test_unknown_elements_less_than_threshold(tmp_path, monkeypatch):
 
         # Copy the resource file to the temporary location
         shutil.copy(resource_path, temp_file_path)
-
+        # Remove the API key from the environment (simulate missing API key)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        llm_client = OpenAILLMClient(model="text-embedding-3-small")
         # Initialize the CategoryEmbedder without an API key
         metadata_categories = ["cell_type", "tissue"]
         context_embedder = CategoryEmbedder(
             metadata_categories=metadata_categories,
             embeddings_file_path=temp_file_path,
-            model="text-embedding-3-small",
+            llm_client=llm_client,
             combination_method="concatenate",
             one_hot=False,
             unknown_threshold=20,  # Set threshold higher than the number of unknown elements
         )
-
-        # Remove the API key from the environment (simulate missing API key)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
         # Run the embedder
         context_embedder.embed(adata)
@@ -167,27 +167,26 @@ def test_unknown_elements_exceed_threshold_no_key(tmp_path, monkeypatch):
         temp_file_path = tmp_path / "test_dict.pkl.gz"
         # Copy the resource file to the temporary location
         shutil.copy(resource_path, temp_file_path)
-
+        # Remove the API key from the environment (simulate missing API key)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        llm_client = OpenAILLMClient(model="text-embedding-3-small")
         # Initialize the CategoryEmbedder without an API key
         metadata_categories = ["cell_type", "tissue"]
         context_embedder = CategoryEmbedder(
             metadata_categories=metadata_categories,
             embeddings_file_path=temp_file_path,
-            model="text-embedding-3-small",
+            llm_client=llm_client,
             combination_method="concatenate",
             one_hot=False,
             unknown_threshold=10,  # Set threshold lower than the number of unknown elements
         )
-
-        # Remove the API key from the environment (simulate missing API key)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
         # Attempt to run the embedder and expect an error
         with pytest.raises(ValueError) as excinfo:
             context_embedder.embed(adata)
 
         # Check that the error message is as expected
-        assert "Unknown elements exceed the threshold" in str(excinfo.value)
+        assert "Unknown elements exceed the threshold." in str(excinfo.value)
 
 
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
@@ -214,13 +213,13 @@ def test_unknown_elements_more_than_threshold_with_key(tmp_path):
 
         # Copy the resource file to the temporary location
         shutil.copy(resource_path, temp_file_path)
-
+        llm_client = OpenAILLMClient(model="text-embedding-3-small")
         # Initialize the CategoryEmbedder with unknown_threshold=0
         metadata_categories = ["cell_type", "tissue"]
         context_embedder = CategoryEmbedder(
             metadata_categories=metadata_categories,
             embeddings_file_path=temp_file_path,
-            model="text-embedding-3-small",
+            llm_client=llm_client,
             combination_method="concatenate",
             one_hot=False,
             unknown_threshold=0,  # Threshold smaller than number of unknown elements
@@ -297,12 +296,12 @@ def test_combination_methods(tmp_path):
 
         # Copy the resource file to the temporary location
         shutil.copy(resource_path, temp_file_path)
-
+        llm_client = OpenAILLMClient(model="text-embedding-3-small")
         # Test 'concatenate' method
         context_embedder_concat = CategoryEmbedder(
             metadata_categories=metadata_categories,
             embeddings_file_path=temp_file_path,
-            model="text-embedding-3-small",
+            llm_client=llm_client,
             combination_method="concatenate",
         )
         embeddings_concat = context_embedder_concat.embed(adata)
