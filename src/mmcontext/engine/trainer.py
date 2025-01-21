@@ -298,7 +298,7 @@ class Trainer:
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
                 self.logger.info(
                     # time per sample in microseconds
-                    f"Batch {batch_idx+1}/{num_batches}, Loss: {loss.item():.4f}, Time per sample: {time_per_sample*1e6:.2f}µs"
+                    f"Batch {batch_idx + 1}/{num_batches}, Loss: {loss.item():.4f}, Time per sample: {time_per_sample * 1e6:.2f}µs"
                 )
         self.scheduler.step()
         average_loss = total_loss / num_batches
