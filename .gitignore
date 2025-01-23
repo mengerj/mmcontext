@@ -40,6 +40,18 @@ venv/
 
 docs/notebooks/*zarr*
 
+#env variables
+.env
+
+#egg-info
+*.egg-info
+
+#vs-code
+.vscode/
+
+#ds store
+.DS_Store
+
 #env keys
 *.env
 

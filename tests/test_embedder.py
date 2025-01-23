@@ -5,7 +5,6 @@ import logging
 import shutil
 
 import numpy as np
-import pytest
 
 from mmcontext.pp.context_embedder import CategoryEmbedder, PlaceholderContextEmbedder
 from mmcontext.pp.data_embedder import AnnDataStoredEmbedder, PlaceholderDataEmbedder
