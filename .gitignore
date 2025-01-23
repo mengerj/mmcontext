@@ -39,3 +39,15 @@ venv/
 .venv/
 
 docs/notebooks/*zarr*
+
+#env keys
+*.env
+
+#vscode
+.vscode/
+
+#DS Store
+*.DS_Store
+
+#package info
+*.egg-info/

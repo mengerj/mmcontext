@@ -26,7 +26,7 @@ dependencies = [
   "dask",
   "ipykernel",
   "matplotlib",
-  "numba==0.60",        # was needed due to issues with scanpy and scib automatic load
+  "numba==0.60",           # was needed due to issues with scanpy and scib automatic load
   "numpy",
   "omegaconf",
   "openai",
@@ -35,6 +35,7 @@ dependencies = [
   "scib",
   "scikit-learn",
   "seaborn",
+  "sentence-transformers",
   "session-info",
   "torch",
   "zarr<=2.18.4",
@@ -152,3 +153,6 @@ skip = [
   "docs/references.md",
   "docs/notebooks/example.ipynb",
 ]
+
+[tool.uv.sources]
+sentence-transformers = { git = "https://github.com/mengerj/sentence-transformers.git", rev = "master" }
