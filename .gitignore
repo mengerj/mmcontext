@@ -34,6 +34,8 @@ hm.ipynb
 outputs/*
 out/*
 docs/notebooks/*zarr
+*.zarr
+*.h5ad
 #venv
 venv/
 .venv/
