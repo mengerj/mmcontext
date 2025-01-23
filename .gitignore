@@ -75,3 +75,7 @@ docs/notebooks/*zarr*
 
 #ds store
 .DS_Store
+
+#local dirs
+exploratory/
+old_stuff/
