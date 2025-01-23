@@ -5,7 +5,6 @@ from mmcontext.pp import (
     CategoryEmbedder,
     ContextEmbedder,
     DataEmbedder,
-    DataSetConstructor,
     MinMaxNormalizer,
     PCAReducer,
     PlaceHolderNormalizer,
@@ -89,21 +88,3 @@ def configure_normalizer(cfg):
         return PlaceHolderNormalizer()
     else:
         raise ValueError(f"Unknown normalizer type: {cfg.type}")
-
-
-def configure_dataset_constructor(cfg):
-    """Configures the dataset constructor based on the configuration.
-
-    Parameters
-    ----------
-    cfg
-        The configuration object.
-
-    Returns
-    -------
-    DatasetConstructor
-        The configured dataset constructor.
-    """
-    return DataSetConstructor(
-        out_emb_keys=cfg.out_emb_keys, chunk_size=cfg.chunk_size, batch_size=cfg.dataset.batch_size
-    )
