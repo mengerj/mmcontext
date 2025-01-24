@@ -1,7 +1,10 @@
+import logging
 import random
 
 import anndata
 from sentence_transformers.readers.InputExample import InputExample
+
+logger = logging.getLogger(__name__)
 
 
 class AnnDataDataSetConstructor:
@@ -30,8 +33,22 @@ class AnnDataDataSetConstructor:
             sample_id_key: Optional key in adata.obs to use for sample IDs.
                           If None, uses adata.obs_names
         """
+        # 1. Check extension
+        if not (file_path.endswith(".zarr")):
+            logger.error("Unsupported anndata format for file: %s", file_path)
+            raise ValueError(
+                f"File {file_path} does not appear to be .zarr format."
+                "You can convert it to .zarr using anndata.write_zarr(adata, 'filename.zarr')."
+            )
+
+        # 2. Check for duplicates
         if file_path in self.anndata_files:
-            raise ValueError(f"File {file_path} has already been added")
+            logger.error("File %s has already been added to the constructor.", file_path)
+            raise ValueError(f"File {file_path} has already been added.")
+
+        self.anndata_files.append(file_path)
+        self.sample_id_keys[file_path] = sample_id_key
+        logger.info("Successfully added anndata file: %s", file_path)
 
         self.anndata_files.append(file_path)
         self.sample_id_keys[file_path] = sample_id_key
