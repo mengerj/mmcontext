@@ -1,7 +1,44 @@
 # tests/utils.py
+import importlib
+import json
+import logging
+
 import anndata
 import numpy as np
 import pandas as pd
+
+
+def load_logging_config():
+    """
+    Load the logging configuration from `logging_config.json` in the `mmcontext.conf` module.
+
+    Returns
+    -------
+    dict
+        The parsed logging configuration as a dictionary.
+    """
+    try:
+        # Get the path to the logging_config.json file
+        resource_path = importlib.resources.files("mmcontext.conf") / "logging_config.json"
+
+        # Open the resource file
+        with resource_path.open("r", encoding="utf-8") as config_file:
+            logging_config = json.load(config_file)
+
+        return logging_config
+    except FileNotFoundError as err:
+        raise RuntimeError("The logging configuration file could not be found.") from err
+    except json.JSONDecodeError as err:
+        raise ValueError(f"Error decoding the JSON logging configuration: {err}") from err
+
+
+def setup_logging():
+    """Load the logging configuration from the logging_config.json file and configure the logging system."""
+    config_dict = load_logging_config()
+    # Configure logging
+    logging.config.dictConfig(config_dict)
+    logger = logging.getLogger(__name__)
+    logger.info("mmcontext logging configured using the specified configuration file.")
 
 
 def create_test_anndata(n_samples=20, n_features=100, cell_types=None, tissues=None, batch_categories=None):

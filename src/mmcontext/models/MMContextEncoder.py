@@ -37,43 +37,43 @@ class MMContextEncoder(nn.Module):
     ----------
     model_name
         Name of the model to be used for text data. Can be a huggingface model name.
-    processor_name
-        Name of the processor to be used for text data. Can be a huggingface processor name.
+    processor_obsm_key
+        The processor will retrieve a representation from the AnnData object .obsm with this key. It has to be computed beforehand and by
+        default expects to find the represenation in adata.obsm["X_pp"].
     cfg
         Configuration dictionary for the model. Has to have the following keys:
         - text_encoder_name (str): Name of the transformer model to be used for text data.
         - omics_encoder_cfg (dict): Configuration dictionary for the omics encoder model. See help(OmicsEncoder) for the parameters.
     """
 
-    def __init__(self, text_encoder_name, omics_processor_name, omics_encoder_cfg):
+    def __init__(self, text_encoder_name, omics_encoder_cfg, processor_obsm_key="X_pp"):
         super().__init__()
         self.text_encoder_name = text_encoder_name
-        self.omics_processor_name = omics_processor_name
+        self.processor_obsm_key = processor_obsm_key
         self.model = self._load_model(text_encoder_name, omics_encoder_cfg)
-        self.processor = self._load_processor(text_encoder_name, omics_processor_name)
+        self.processor = self._load_processor(text_encoder_name, processor_obsm_key)
 
     def _load_model(self, text_encoder_name, cfg):
         return MMContextModel(text_encoder_name, cfg)
 
-    def _load_processor(self, text_encoder_name, omics_processor_name):
-        return MMContextProcessor(omics_processor_name, text_encoder_name)
+    def _load_processor(self, text_encoder_name, processor_obsm_key):
+        return MMContextProcessor(obsm_key=processor_obsm_key, text_encoder_name=text_encoder_name)
 
     def forward(self, features):
         """Forward pass for MMContextEncoder.
 
         The input should be a dictionary containing omics and/or text data.
         These input features are first extracted with the tokenizer, so that they are torch tensors.
-        The "omics_embedding" string needs to be handled explicitly in the SentenceTransformerTrainer.collect_features method.
+        The "omics_representation" string needs to be handled explicitly in the SentenceTransformerTrainer.collect_features method.
         """
         omics_embeds = []
         text_embeds = []
 
-        if "omics_embedding" in features:
-            # feature_dim = features["omics_embedding"].size(1)
-            # if feature_dim != self.model.omics_encoder.embedding_dim:
-            #    device = next(self.parameters()).device
-            #    self.model.omics_projection = nn.Linear(feature_dim, self.model.omics_encoder.embedding_dim, device=device)
-            #    features["omics_embedding"] = self.model.omics_projection(features["omics_embedding"])
+        if "omics_representation" in features:
+            feature_dim = features["omics_representation"].size(1)
+            device = next(self.parameters()).device
+            self.model.omics_projection = nn.Linear(feature_dim, self.model.omics_encoder.embedding_dim, device=device)
+            features["omics_representation"] = self.model.omics_projection(features["omics_representation"])
             omics_embeds = self.model.omics_encoder(features)
 
         if "input_ids" in features:
@@ -104,13 +104,13 @@ class MMContextEncoder(nn.Module):
         Uses the tokenizer of the specified text encoder model from huggingface. The input texts is a list of multiple python objects.
         Strings will be handled by the text encoder, while dictionaries with the key "is_omics" set to True will be handled by the omics processor.
         """
-        omics_embeddings = []
+        omics_representations = []
         texts_values = []
         omics_text_info = []
 
         for _idx, data in enumerate(texts):
-            if isinstance(data, dict) and "is_omics" in data.keys() and data["is_omics"]:
-                omics_embeddings.append(data)
+            if isinstance(data, dict) and "file_path" in data.keys() and "sample_id" in data.keys():
+                omics_representations.append(data)
                 omics_text_info.append(0)
             else:
                 texts_values.append(data)
@@ -120,10 +120,10 @@ class MMContextEncoder(nn.Module):
         if len(texts_values):
             encoding = self.processor.tokenizer(texts_values, return_tensors="pt", padding=padding)
 
-        if len(omics_embeddings):
-            omics_features = self.processor.omics_processor.encode(omics_embeddings)
-            encoding["omics_embedding"] = omics_features
-        # You need to change SentenceTransfomerTrainer.collect_features to include the the "omics_embedding" string.
+        if len(omics_representations):
+            omics_features = self.processor.omics_processor.get_rep(omics_representations)
+            encoding["omics_representation"] = omics_features
+        # You need to change SentenceTransfomerTrainer.collect_features to include the the "omics_representation" string.
         encoding["omics_text_info"] = omics_text_info
         return dict(encoding)
 
@@ -133,7 +133,7 @@ class MMContextEncoder(nn.Module):
     def _get_config_dict(self) -> dict:
         return {
             "text_encoder_name": self.text_encoder_name,
-            "omics_processor_name": self.omics_processor_name,
+            "processor_obsm_key": self.processor_obsm_key,
             "omics_encoder_cfg": self.model.omics_encoder._get_config_dict(),
         }
 
@@ -181,12 +181,35 @@ class MMContextModel(nn.Module):
     as an MLP only model, or with attention heads.
     """
 
-    def __init__(self, text_encoder_name, omics_encoder_cfg):
+    def __init__(self, text_encoder_name, omics_encoder_cfg, freeze_text_encoder=False, unfreeze_last_n_layers=1):
         super().__init__()
         self.text_encoder_name = text_encoder_name
         self.omics_encoder_cfg = omics_encoder_cfg
         self.embedding_dim = omics_encoder_cfg["embedding_dim"]
+
+        # Load the text encoder
         self.text_encoder = transformers.AutoModel.from_pretrained(text_encoder_name)
+
+        # Freeze the text encoder parameters
+        if freeze_text_encoder:
+            for param in self.text_encoder.parameters():
+                param.requires_grad = False
+
+            # Unfreeze the last n transformer layers if specified
+            if unfreeze_last_n_layers > 0:
+                # For BERT-like models
+                if hasattr(self.text_encoder, "encoder"):
+                    layers = self.text_encoder.encoder.layer[-unfreeze_last_n_layers:]
+                # For RoBERTa-like models
+                elif hasattr(self.text_encoder, "roberta"):
+                    layers = self.text_encoder.roberta.encoder.layer[-unfreeze_last_n_layers:]
+                else:
+                    raise ValueError(f"Unsupported model architecture for {text_encoder_name}")
+
+                for layer in layers:
+                    for param in layer.parameters():
+                        param.requires_grad = True
+
         self.text_projection = nn.Linear(self.text_encoder.config.hidden_size, self.embedding_dim)
         self.omics_encoder = OmicsEncoder(**omics_encoder_cfg)
 
@@ -285,7 +308,7 @@ class OmicsEncoder(nn.Module):
             Output tensor of shape (batch_size, seq_length, embedding_dim).
         """
         # Extract relevant inputs
-        in_main = inputs.get("omics_embedding", None)
+        in_main = inputs.get("omics_representation", None)
         in_main_key_padding_mask = inputs.get("attention_mask", None)
         if in_main_key_padding_mask:
             in_main_key_padding_mask = in_main_key_padding_mask.bool()

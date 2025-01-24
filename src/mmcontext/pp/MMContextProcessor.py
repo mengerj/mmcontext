@@ -1,3 +1,4 @@
+import anndata
 import numpy as np
 import torch
 import transformers
@@ -13,50 +14,90 @@ class MMContextProcessor:
     The latter can be chosen from several apporaches
     """
 
-    def __init__(self, omics_processor_name="none", text_encoder_name="sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self, obsm_key="X_pp", text_encoder_name="sentence-transformers/all-MiniLM-L6-v2"):
         super().__init__()
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(text_encoder_name)
-        self.omics_processor = self._load_omics_processor(omics_processor_name)
+        self.omics_processor = self._load_omics_processor(obsm_key=obsm_key)
 
-    def _load_omics_processor(self, omics_processor_name):
-        if omics_processor_name == "none":
-            processor = NoneProcessor()
-            return processor
+    def _load_omics_processor(self, obsm_key):
+        processor = AnnDataRetrievalProcessor(obsm_key=obsm_key)
+        return processor
 
 
-class NoneProcessor:
+class AnnDataRetrievalProcessor:
     """Processor that retrieves the raw data without any processing."""
 
-    def encode(self, data):
-        """Take the raw data and return it as is.
+    def __init__(self, obsm_key):
+        self.obsm_key = obsm_key
+        # Add a cache for loaded AnnData files
+        self._adata_cache = {}
 
-        Encodes a list of omicsSample objects into a feature dictionary with
-        a tensor of shape (batch_size, seq_length, feature_dim).
+    def _convert_to_tensor(self, data):
+        """Convert data to torch tensor efficiently."""
+        if isinstance(data, torch.Tensor):
+            return data
+        if isinstance(data, sp.spmatrix):
+            return torch.from_numpy(data.toarray())
+        if isinstance(data, np.ndarray):
+            return torch.from_numpy(data)
+        raise ValueError(f"Unsupported data type: {type(data)}")
+
+    def get_rep(self, data):
+        """Use the given file_path and sample ID as well as the obsm_key to retrieve the correct representation of the data.
 
         Parameters
         ----------
         data : list
-            A list of omicsSample objects.
+            A list of dictionaries, each containing 'file_path' and 'sample_id' keys.
+        obsm_key : str
+            The key to access the desired representation in adata.obsm
 
         Returns
         -------
-        features : dict
-            A dictionary containing the omics embeddings tensor with shape
-            (batch_size, seq_length, feature_dim).
+        features : torch.Tensor
+            The omics representation tensor with shape
+            (batch_size, feature_dim).
         """
-        if isinstance(data, list):
-            omics_embeddings = []
+        if not isinstance(data, list):
+            raise ValueError("Data must be a list of dictionaries")
 
-            for sample in data:
-                counts = torch.tensor(sample.get("counts")).unsqueeze(0).float()  # Shape: [1, feature_dim]
-                omics_embeddings.append(counts)
+        batch_size = len(data)
 
-            # Concatenate along the batch dimension
-            features = torch.cat(omics_embeddings, dim=0)  # Shape: [batch_size, feature_dim]
-        else:
-            raise ValueError("Data must be a list of omicsSample objects")
+        # Load first file to get feature dimension
+        first_file = data[0]["file_path"]
+        if first_file not in self._adata_cache:
+            adata = anndata.read_zarr(first_file)
+            # Convert to tensor once during caching
+            # adata.obsm[self.obsm_key] = self._convert_to_tensor(adata.obsm[self.obsm_key])
+            self._adata_cache[first_file] = adata
+
+        first_adata = self._adata_cache[first_file]
+        feature_dim = first_adata.obsm[self.obsm_key].shape[1]
+
+        # Pre-allocate the output tensor
+        features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)
+
+        for i, sample_dict in enumerate(data):
+            file_path = sample_dict["file_path"]
+            sample_id = sample_dict["sample_id"]
+
+            # Use cached AnnData if available, otherwise load and convert
+            if file_path not in self._adata_cache:
+                adata = anndata.read_zarr(file_path)
+                # adata.obsm[self.obsm_key] = self._convert_to_tensor(adata.obsm[self.obsm_key])
+                self._adata_cache[file_path] = adata
+
+            adata = self._adata_cache[file_path]
+
+            # Get the specific sample's representation
+            sample_idx = adata.obs.index == sample_id
+            features[i] = self._convert_to_tensor(adata.obsm[self.obsm_key][sample_idx][0])
 
         return features
+
+    def clear_cache(self):
+        """Clear the AnnData cache to free memory"""
+        self._adata_cache.clear()
 
 
 class PCAOmicsProcessor:
