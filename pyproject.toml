@@ -76,9 +76,13 @@ urls.Documentation = "https://mmcontext.readthedocs.io/"
 urls.Homepage = "https://github.com/mengerj/mmcontext"
 urls.Source = "https://github.com/mengerj/mmcontext"
 
+[tool.setuptools]
+include-package-data = true
 [tool.setuptools.packages.find]
 where = [ "src" ]
 include = [ "mmcontext*" ]
+[tool.setuptools.package-data]
+"mmcontext.conf" = [ "*.json" ]
 
 [tool.ruff]
 line-length = 120
