@@ -50,9 +50,6 @@ class AnnDataDataSetConstructor:
         self.sample_id_keys[file_path] = sample_id_key
         logger.info("Successfully added anndata file: %s", file_path)
 
-        self.anndata_files.append(file_path)
-        self.sample_id_keys[file_path] = sample_id_key
-
     def buildCaption(self, file_path: str) -> None:
         """
         Build captions for an anndata file using the provided caption constructor.
