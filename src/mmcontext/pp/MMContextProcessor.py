@@ -62,7 +62,7 @@ class AnnDataRetrievalProcessor:
             raise ValueError("Data must be a list of dictionaries")
 
         batch_size = len(data)
-
+        self.clear_cache()
         # Load first file to get feature dimension
         first_file = data[0]["file_path"]
         if first_file not in self._adata_cache:
@@ -92,7 +92,6 @@ class AnnDataRetrievalProcessor:
             # Get the specific sample's representation
             sample_idx = adata.obs.index == sample_id
             features[i] = self._convert_to_tensor(adata.obsm[self.obsm_key][sample_idx][0])
-
         return features
 
     def clear_cache(self):
