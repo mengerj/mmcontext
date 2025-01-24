@@ -7,16 +7,19 @@ from sentence_transformers.readers.InputExample import InputExample
 logger = logging.getLogger(__name__)
 
 
-class AnnDataDataSetConstructor:
+class AnnDataSetConstructor:
     """Class to generate a dataset compatible with the SentenceTransformer library from anndata files."""
 
     def __init__(self, caption_constructor, negatives_per_sample: int = 1):
         """
-        Initialize the AnnDataDataSetConstructor.
+        Initialize the AnnDataSetConstructor.
 
-        Args:
-            caption_constructor: Constructor for creating captions
-            negatives_per_sample: Number of negative examples to create per positive example
+        Parameters
+        ----------
+        caption_constructor
+            Constructor for creating captions
+        negatives_per_sample
+            Number of negative examples to create per positive example
         """
         self.caption_constructor = caption_constructor
         self.negatives_per_sample = negatives_per_sample
@@ -24,17 +27,57 @@ class AnnDataDataSetConstructor:
         self.sample_id_keys = {}
         self.dataset = []
 
+    def _check_sample_id_uniqueness(self, adata: anndata.AnnData, file_path: str, sample_id_key: str | None) -> None:
+        """
+        Check if sample IDs are unique for the given anndata object.
+
+        Parameters
+        ----------
+        adata
+            AnnData object to check
+        file_path
+            Path to the anndata file (for error message)
+        sample_id_key
+            Key in adata.obs to use for sample IDs, if None uses adata.obs.index
+
+        Raises
+        ------
+            ValueError: If sample IDs are not unique
+        """
+        sample_ids = adata.obs.index if sample_id_key is None else adata.obs[sample_id_key]
+        n_total = len(sample_ids)
+        n_unique = len(set(sample_ids))
+
+        if n_unique < n_total:
+            duplicates = sample_ids[sample_ids.duplicated()].unique()
+            error_msg = (
+                f"Found {n_total - n_unique} duplicate sample IDs in {file_path}.\n"
+                f"Example duplicates: {list(duplicates)[:3]}...\n"
+                "To fix this, either:\n"
+                "1. Provide a different sample_id_key that contains unique identifiers, or\n"
+                "2. Remove duplicate samples from your dataset"
+            )
+            if sample_id_key is None:
+                error_msg += "\nCurrently using adata.obs.index as sample IDs."
+            else:
+                error_msg += f"\nCurrently using adata.obs['{sample_id_key}'] as sample IDs."
+
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
     def add_anndata(self, file_path: str, sample_id_key: str | None = None) -> None:
         """
         Add an anndata file to the constructor.
 
-        Args:
-            file_path: Path to the anndata file
-            sample_id_key: Optional key in adata.obs to use for sample IDs.
-                          If None, uses adata.obs_names
+        Parameters
+        ----------
+        file_path
+            Path to the anndata file
+        sample_id_key
+            Optional key in adata.obs to use for sample IDs. If None, uses adata.obs.index
         """
         # 1. Check extension
-        if not (file_path.endswith(".zarr")):
+        if not (file_path.endswith(".zarr") or file_path.endswith(".zarr/")):
             logger.error("Unsupported anndata format for file: %s", file_path)
             raise ValueError(
                 f"File {file_path} does not appear to be .zarr format."
@@ -45,6 +88,10 @@ class AnnDataDataSetConstructor:
         if file_path in self.anndata_files:
             logger.error("File %s has already been added to the constructor.", file_path)
             raise ValueError(f"File {file_path} has already been added.")
+
+        # 3. Check sample ID uniqueness
+        adata = anndata.read_zarr(file_path)
+        self._check_sample_id_uniqueness(adata, file_path, sample_id_key)
 
         self.anndata_files.append(file_path)
         self.sample_id_keys[file_path] = sample_id_key
@@ -88,11 +135,16 @@ class AnnDataDataSetConstructor:
         """
         Create a negative example by finding a caption that doesn't match the current sample.
 
-        Args:
-            current_file: Current file path
-            current_sample: Current sample ID
-            current_caption: Caption of the current sample
-            all_captions: Nested dict mapping file paths to {sample_id: caption} dicts
+        Parameters
+        ----------
+        current_file
+            Current file path
+        current_sample
+            Current sample ID
+        current_caption
+            Caption of the current sample
+        all_captions
+            Nested dict mapping file paths to {sample_id: caption} dicts
         """
         while True:
             # Randomly choose a file
@@ -144,6 +196,55 @@ class AnnDataDataSetConstructor:
                     dataset.append(negative_example)
 
         return dataset
+
+    def get_inference_dataset(self) -> tuple[list[dict[str, str]], list[str], list[str]]:
+        """Build a dataset from an anndata file suitable for SentenceTransformer.encode.
+
+        Build and return separate lists for inference: a list of metadata dicts, a list of captions,
+        and a parallel list of sample IDs (all in the same order).
+
+        The method reads each .zarr file (adding captions if not already present via `buildCaption`),
+        then extracts sample IDs and captions. This is useful for inference scenarios where you
+        need to maintain the exact order of samples for external reference.
+
+        Returns
+        -------
+        metadata_list : list of dict
+            Each dictionary contains ``{"file_path": <path_to_zarr>, "sample_id": <sample_id>}``.
+            This is useful if you need to retrieve the file path and sample ID for downstream processing.
+        captions_list : list of str
+            A list of caption strings corresponding to each sample in the dataset.
+        sample_ids : list of str
+            A list of sample IDs in the same index order as the captions_list.
+
+        Notes
+        -----
+        - This method internally calls ``buildCaption(file_path)`` to ensure each file
+        is annotated with a ``"caption"`` column. If the column already exists, the
+        constructor logic may simply overwrite or skip as needed.
+        - The data is sourced from the .zarr files previously added via ``add_anndata``.
+        - Logging messages are issued at various points to indicate progress.
+        """
+        metadata_list = []
+        captions_list = []
+        sample_ids = []
+
+        # For each file, ensure captions are built and then retrieved
+        for file_path in self.anndata_files:
+            logger.info("Building caption for inference from file: %s", file_path)
+            self.buildCaption(file_path)  # This will overwrite the .zarr file if new captions were generated
+
+            logger.info("Retrieving captions for inference from file: %s", file_path)
+            caption_dict = self.getCaption(file_path)
+
+            # Gather data into parallel lists
+            for sid, caption in caption_dict.items():
+                metadata_list.append({"file_path": file_path, "sample_id": sid})
+                captions_list.append(caption)
+                sample_ids.append(sid)
+
+        logger.info("Constructed inference dataset with %d samples.", len(sample_ids))
+        return metadata_list, captions_list, sample_ids
 
     def clear(self) -> None:
         """Clear all stored data in the constructor."""

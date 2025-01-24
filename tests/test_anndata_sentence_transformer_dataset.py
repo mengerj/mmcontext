@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 # If your class is in a separate module, you'd import from there, e.g.:
-# from my_package.my_module import AnnDataDataSetConstructor
+# from my_package.my_module import AnnDataSetConstructor
 
 logger = logging.getLogger(__name__)
 
@@ -95,18 +95,42 @@ def ann_data_file_h5ad(tmp_path):
 
 
 @pytest.fixture
-def dataset_constructor(mock_caption_constructor):
+def ann_data_file_with_duplicates(tmp_path):
     """
-    Fixture to instantiate the AnnDataDataSetConstructor with a mocked caption constructor.
+    Create an anndata object with duplicate sample IDs and an alternative unique ID column.
 
     Returns
     -------
-    AnnDataDataSetConstructor
+    str
+        The path to the .zarr file containing the test anndata object with duplicates.
+    """
+    # Create data with duplicate indices
+    obs_data = pd.DataFrame(
+        {"unique_id": [f"unique_{i}" for i in range(4)], "batch": ["A", "A", "B", "B"]},
+        index=["S1", "S1", "S2", "S2"],  # Duplicate indices
+    )
+    var_data = pd.DataFrame(index=[f"G{i}" for i in range(5)])
+    X = np.random.rand(4, 5)
+    adata = anndata.AnnData(X=X, obs=obs_data, var=var_data)
+
+    file_path = str(tmp_path / "test_duplicates.zarr")
+    adata.write_zarr(file_path)
+    return file_path
+
+
+@pytest.fixture
+def dataset_constructor(mock_caption_constructor):
+    """
+    Fixture to instantiate the AnnDataSetConstructor with a mocked caption constructor.
+
+    Returns
+    -------
+    AnnDataSetConstructor
         A fresh instance for testing.
     """
-    from mmcontext.pp import AnnDataDataSetConstructor
+    from mmcontext.pp import AnnDataSetConstructor
 
-    return AnnDataDataSetConstructor(caption_constructor=mock_caption_constructor, negatives_per_sample=1)
+    return AnnDataSetConstructor(caption_constructor=mock_caption_constructor, negatives_per_sample=1)
 
 
 def test_add_anndata_success(dataset_constructor, ann_data_file_1, ann_data_file_2):
@@ -176,10 +200,10 @@ def test_no_caption_constructor(ann_data_file_1):
     """
     logger.info("Testing behavior with no caption constructor provided.")
 
-    from mmcontext.pp import AnnDataDataSetConstructor
+    from mmcontext.pp import AnnDataSetConstructor
 
     # Create constructor without a caption_constructor
-    constructor = AnnDataDataSetConstructor(caption_constructor=None, negatives_per_sample=1)
+    constructor = AnnDataSetConstructor(caption_constructor=None, negatives_per_sample=1)
     constructor.add_anndata(ann_data_file_1)
 
     # If your code does not handle 'None' and tries to call 'construct_captions', it should fail
@@ -299,3 +323,64 @@ def test_add_anndata_h5ad_file(dataset_constructor, ann_data_file_h5ad):
     # Optionally, you can inspect the exception message:
     err_msg = str(excinfo.value)
     assert ".zarr format" in err_msg.lower(), f"Unexpected error message: {err_msg}"
+
+
+def test_duplicate_sample_ids(dataset_constructor, ann_data_file_with_duplicates):
+    """
+    Test that adding an anndata file with duplicate sample IDs:
+    1. Raises an error when using default index
+    2. Works when using a unique sample_id_key
+    """
+    logger.info("Testing behavior with duplicate sample IDs.")
+
+    # Should raise error when using default index (which has duplicates)
+    with pytest.raises(ValueError) as excinfo:
+        dataset_constructor.add_anndata(ann_data_file_with_duplicates)
+
+    err_msg = str(excinfo.value)
+    assert "duplicate sample IDs" in err_msg
+    assert "Currently using adata.obs.index as sample IDs" in err_msg
+    assert "Example duplicates: ['S1', 'S2']" in err_msg
+
+    # Clear the constructor
+    dataset_constructor.clear()
+
+    # Should work when using the unique_id column
+    dataset_constructor.add_anndata(ann_data_file_with_duplicates, sample_id_key="unique_id")
+
+    # Verify that the file was added successfully
+    assert len(dataset_constructor.anndata_files) == 1
+    assert ann_data_file_with_duplicates in dataset_constructor.anndata_files
+
+    # Verify that we can build and get the dataset without errors
+    dataset = dataset_constructor.get_dataset()
+    assert len(dataset) > 0  # Should have both positive and negative examples
+
+
+def test_duplicate_sample_ids_in_custom_key(dataset_constructor, tmp_path):
+    """
+    Test that using a sample_id_key that contains duplicates also raises an error.
+    """
+    # Create data with duplicates in the custom key
+    obs_data = pd.DataFrame(
+        {
+            "custom_id": ["ID1", "ID1", "ID2", "ID2"],  # Duplicate IDs
+            "batch": ["A", "A", "B", "B"],
+        },
+        index=[f"S{i}" for i in range(4)],  # Unique indices
+    )
+    var_data = pd.DataFrame(index=[f"G{i}" for i in range(5)])
+    X = np.random.rand(4, 5)
+    adata = anndata.AnnData(X=X, obs=obs_data, var=var_data)
+
+    file_path = str(tmp_path / "test_duplicate_custom_ids.zarr")
+    adata.write_zarr(file_path)
+
+    # Should raise error when using custom_id which has duplicates
+    with pytest.raises(ValueError) as excinfo:
+        dataset_constructor.add_anndata(file_path, sample_id_key="custom_id")
+
+    err_msg = str(excinfo.value)
+    assert "duplicate sample IDs" in err_msg
+    assert "Currently using adata.obs['custom_id']" in err_msg
+    assert "Example duplicates: ['ID1', 'ID2']" in err_msg
