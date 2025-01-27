@@ -6,7 +6,7 @@ requires = [ "setuptools>=64", "wheel" ]
 [project]
 name = "mmcontext"
 version = "0.0.1"
-description = "Align embeddings..."
+description = "This package allows to use the sentence-transfomers package to build multimodal embedding models for data in anndata format."
 readme = "README.md"
 license = { file = "LICENSE" }
 maintainers = [
@@ -50,6 +50,7 @@ dependencies = [
 optional-dependencies.dev = [
   "pre-commit",
   "twine",
+  # other dev dependencies...
 ]
 optional-dependencies.doc = [
   "docutils>=0.8,!=0.18.*,!=0.19.*",
@@ -71,7 +72,6 @@ optional-dependencies.test = [
   "pytest",
   "python-json-logger",
 ]
-
 urls.Documentation = "https://mmcontext.readthedocs.io/"
 urls.Homepage = "https://github.com/mengerj/mmcontext"
 urls.Source = "https://github.com/mengerj/mmcontext"
