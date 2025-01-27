@@ -6,6 +6,9 @@ import logging
 import anndata
 import numpy as np
 import pandas as pd
+import torch
+
+logger = logging.getLogger(__name__)
 
 
 def load_logging_config():
@@ -39,6 +42,81 @@ def setup_logging():
     logging.config.dictConfig(config_dict)
     logger = logging.getLogger(__name__)
     logger.info("mmcontext logging configured using the specified configuration file.")
+
+
+def sample_zinb(mu, theta, pi):
+    """
+    Samples from the Zero-Inflated Negative Binomial distribution.
+
+    Parameters
+    ----------
+    - mu (torch.Tensor): Mean of the NB distribution (batch_size, num_genes)
+    - theta (torch.Tensor): Dispersion parameter of the NB distribution (batch_size, num_genes)
+    - pi (torch.Tensor): Zero-inflation probability (batch_size, num_genes)
+
+    Returns
+    -------
+    - samples (torch.Tensor): Sampled counts (batch_size, num_genes)
+    """
+    # Ensure parameters are on the same device and have the same shape
+    assert mu.shape == theta.shape == pi.shape
+
+    # Sample zero-inflation indicator z
+    bernoulli_dist = torch.distributions.Bernoulli(probs=pi)
+    z = bernoulli_dist.sample()
+
+    # Sample from Negative Binomial distribution
+    # Compute probability p from mu and theta
+    p = theta / (theta + mu)
+    # Convert to total_count (r) and probability (1 - p)
+    nb_dist = torch.distributions.NegativeBinomial(total_count=theta, probs=1 - p)
+    nb_sample = nb_dist.sample()
+
+    # Combine zero-inflation and NB samples
+    samples = z * 0 + (1 - z) * nb_sample
+
+    return samples
+
+
+def compute_cosine_similarity(sample_embeddings, query_embeddings, device="cpu"):
+    """
+    Compute pairwise cosine similarity between samples and queries using PyTorch.
+
+    Parameters
+    ----------
+    sample_embeddings : np.ndarray
+        2D array of shape (num_samples, embedding_dim) containing
+        the sample (omics) embeddings. Source: adata.obsm["omics_emb"].
+    query_embeddings : np.ndarray
+        2D array of shape (num_queries, embedding_dim) containing
+        the query embeddings. Typically from model.encode(...).
+    device : str, optional
+        The device on which to run the computation. One of ["cpu", "cuda","mps"].
+
+    Returns
+    -------
+    np.ndarray
+        A matrix of shape (num_queries, num_samples), containing
+        the cosine similarity scores for each query against each sample.
+    """
+    logger.info("Converting numpy arrays to torch Tensors.")
+    # Convert to torch Tensors
+    sample_t = torch.from_numpy(sample_embeddings).float().to(device)
+    query_t = torch.from_numpy(query_embeddings).float().to(device)
+
+    logger.info("L2-normalizing embeddings for cosine similarity.")
+    # L2 normalize if we want to treat dot product as cosine
+    sample_t = sample_t / (sample_t.norm(dim=1, keepdim=True) + 1e-9)
+    query_t = query_t / (query_t.norm(dim=1, keepdim=True) + 1e-9)
+
+    logger.info("Performing matrix multiplication on device=%s", device)
+    # matrix shape: (num_queries, embedding_dim) x (embedding_dim, num_samples)
+    # result -> (num_queries, num_samples)
+    sim_t = query_t.mm(sample_t.transpose(0, 1))
+
+    # Move back to CPU, convert to numpy
+    sim = sim_t.cpu().numpy()
+    return sim
 
 
 def create_test_anndata(n_samples=20, n_features=100, cell_types=None, tissues=None, batch_categories=None):
