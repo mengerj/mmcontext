@@ -184,10 +184,8 @@ def test_add_anndata_nonexistent_file(dataset_constructor):
     logger.info("Testing adding a non-existent anndata file path.")
 
     fake_path = "some/non_existent_file.zarr"
-    dataset_constructor.add_anndata(fake_path)
     with pytest.raises(PathNotFoundError):
-        # Attempting to get the dataset should fail when it tries to read a non-existent file
-        dataset_constructor.get_dataset()
+        dataset_constructor.add_anndata(fake_path)
 
 
 def test_no_caption_constructor(ann_data_file_1):
