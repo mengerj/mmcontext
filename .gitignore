@@ -81,3 +81,6 @@ docs/notebooks/*zarr*
 #local dirs
 exploratory/
 old_stuff/
+
+#build
+build/
