@@ -15,7 +15,7 @@ from mmcontext.utils import compute_cosine_similarity
 
 # Check if faiss is available
 try:
-    import faiss  # noqa: F401
+    import faiss
 
     FAISS_AVAILABLE = True
 except Exception:
