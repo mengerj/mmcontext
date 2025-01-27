@@ -118,6 +118,7 @@ lint.ignore = [
   "E501",   # line too long
   "E731",   # lambdas are allowed
   "E741",   # allow I, O, l as variable names
+  "F401",   # dont remove unused imports, because of fiass flag
 ]
 
 lint.per-file-ignores."*/__init__.py" = [ "F401" ]
