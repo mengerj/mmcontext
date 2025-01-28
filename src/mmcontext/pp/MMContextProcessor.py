@@ -62,11 +62,14 @@ class AnnDataRetrievalProcessor:
             raise ValueError("Data must be a list of dictionaries")
 
         batch_size = len(data)
-        self.clear_cache()
+        # self.clear_cache()
         # Load first file to get feature dimension
         first_file = data[0]["file_path"]
         if first_file not in self._adata_cache:
-            adata = anndata.read_zarr(first_file)
+            if first_file.endswith(".h5ad"):
+                adata = anndata.read_h5ad(first_file)
+            elif first_file.endswith(".zarr"):
+                adata = anndata.read_zarr(first_file)
             # Convert to tensor once during caching
             # adata.obsm[self.obsm_key] = self._convert_to_tensor(adata.obsm[self.obsm_key])
             self._adata_cache[first_file] = adata
@@ -83,7 +86,10 @@ class AnnDataRetrievalProcessor:
 
             # Use cached AnnData if available, otherwise load and convert
             if file_path not in self._adata_cache:
-                adata = anndata.read_zarr(file_path)
+                if file_path.endswith(".h5ad"):
+                    adata = anndata.read_h5ad(file_path)
+                if file_path.endswith(".zarr"):
+                    adata = anndata.read_zarr(file_path)
                 # adata.obsm[self.obsm_key] = self._convert_to_tensor(adata.obsm[self.obsm_key])
                 self._adata_cache[file_path] = adata
 
