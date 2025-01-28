@@ -2,6 +2,7 @@ import logging
 import random
 
 import anndata
+from datasets import Dataset
 from sentence_transformers.readers.InputExample import InputExample
 
 logger = logging.getLogger(__name__)
@@ -146,6 +147,103 @@ class AnnDataSetConstructor:
 
     def _create_negative_example(
         self, current_file: str, current_sample: str, current_caption: str, all_captions: dict[str, dict[str, str]]
+    ) -> tuple[str, str, float]:
+        """
+        Create a negative example by finding a caption that doesn't match the current sample.
+
+        Parameters
+        ----------
+        current_file : str
+            Path to the current file
+        current_sample : str
+            ID of the current sample
+        current_caption : str
+            Caption of the current sample
+        all_captions : dict
+            Nested dict mapping file paths to {sample_id: caption} dicts
+
+        Returns
+        -------
+        sentence_1 : str
+            JSON string containing file_path and sample_id
+        sentence_2 : str
+            The negative caption
+        label : float
+            0.0 for negative
+        """
+        while True:
+            # Randomly choose a file
+            neg_file = random.choice(self.anndata_files)
+            # Randomly choose a sample from that file
+            neg_sample = random.choice(list(all_captions[neg_file].keys()))
+            neg_caption = all_captions[neg_file][neg_sample]
+
+            # Check if this is actually a negative example
+            if neg_caption != current_caption:
+                # store metadata in JSON so we keep a single string
+                # sentence_1 = json.dumps({"file_path": current_file, "sample_id": current_sample})
+                sentence_1 = {"file_path": current_file, "sample_id": current_sample}
+                sentence_2 = neg_caption
+                label = 0.0
+                return (sentence_1, sentence_2, label)
+
+    def get_dataset(self) -> Dataset:
+        """
+        Create and return a Hugging Face Dataset containing pairs of sentences and a label.
+
+        The resulting dataset has these columns:
+        - sentence_1: JSON-serialized string with file_path and sample_id
+        - sentence_2: caption string
+        - label: float (1.0 or 0.0)
+
+        Returns
+        -------
+        datasets.Dataset
+            A Hugging Face Dataset with columns [sentence_1, sentence_2, label].
+
+        Notes
+        -----
+        1. This method automatically calls `buildCaption(...)` on each file
+           and ensures the 'caption' column is present.
+        2. The data is sourced from .zarr files previously added via `add_anndata`.
+        3. The dataset is not tokenized; you can apply tokenization separately.
+        """
+        # import json
+
+        # Prepare a list of dicts suitable for HF Dataset
+        hf_data = []
+        all_captions = {}  # Nested dict: {file_path: {sample_id: caption}}
+
+        # Build & retrieve captions for each file
+        for file_path in self.anndata_files:
+            self.buildCaption(file_path)
+            all_captions[file_path] = self.getCaption(file_path)
+
+        # Create positive and negative examples
+        for file_path in self.anndata_files:
+            caption_dict = all_captions[file_path]
+
+            for sample_id, caption in caption_dict.items():
+                # Positive example
+                # sentence_1 = json.dumps({"file_path": file_path, "sample_id": sample_id})
+                sentence_1 = {"file_path": file_path, "sample_id": sample_id}
+                sentence_2 = caption
+                label = 1.0
+
+                hf_data.append({"anndata_ref": sentence_1, "caption": sentence_2, "label": label})
+
+                # Negative examples
+                for _ in range(self.negatives_per_sample):
+                    neg_sentence_1, neg_sentence_2, neg_label = self._create_negative_example(
+                        file_path, sample_id, caption, all_captions
+                    )
+                    hf_data.append({"anndata_ref": neg_sentence_1, "caption": neg_sentence_2, "label": neg_label})
+
+        logger.info("Created %d examples for Hugging Face dataset.", len(hf_data))
+        return Dataset.from_list(hf_data)
+
+    def _create_negative_example_InputExample(
+        self, current_file: str, current_sample: str, current_caption: str, all_captions: dict[str, dict[str, str]]
     ) -> InputExample:
         """
         Create a negative example by finding a caption that doesn't match the current sample.
@@ -176,7 +274,7 @@ class AnnDataSetConstructor:
                     guid=f"{current_file}_{current_sample}_neg", texts=[metadata, neg_caption], label=0.0
                 )
 
-    def get_dataset(self) -> list[InputExample]:
+    def get_dataset_InputExample(self) -> list[InputExample]:
         """
         Create and return the dataset containing InputExample instances for all added anndata files.
 
