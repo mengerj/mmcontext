@@ -76,13 +76,16 @@ class AnnDataSetConstructor:
         sample_id_key
             Optional key in adata.obs to use for sample IDs. If None, uses adata.obs.index
         """
+        self.is_zarr = False
+        self.is_h5ad = False
         # 1. Check extension
-        if not (file_path.endswith(".zarr") or file_path.endswith(".zarr/")):
+        if file_path.endswith(".zarr") or file_path.endswith(".zarr/"):
+            self.is_zarr = True
+        elif file_path.endswith(".h5ad"):
+            self.is_h5ad = True
+        else:
             logger.error("Unsupported anndata format for file: %s", file_path)
-            raise ValueError(
-                f"File {file_path} does not appear to be .zarr format."
-                "You can convert it to .zarr using anndata.write_zarr(adata, 'filename.zarr')."
-            )
+            raise ValueError(f"File {file_path} does not appear to be .zarr or .h5ad format.")
 
         # 2. Check for duplicates
         if file_path in self.anndata_files:
@@ -90,7 +93,10 @@ class AnnDataSetConstructor:
             raise ValueError(f"File {file_path} has already been added.")
 
         # 3. Check sample ID uniqueness
-        adata = anndata.read_zarr(file_path)
+        if self.is_zarr:
+            adata = anndata.read_zarr(file_path)
+        if self.is_h5ad:
+            adata = anndata.read_h5ad(file_path)
         self._check_sample_id_uniqueness(adata, file_path, sample_id_key)
 
         self.anndata_files.append(file_path)
@@ -105,9 +111,15 @@ class AnnDataSetConstructor:
             file_path: Path to the anndata file
             caption_constructor: Instance of a caption constructor class
         """
-        adata = anndata.read_zarr(file_path)
+        if self.is_zarr:
+            adata = anndata.read_zarr(file_path)
+        if self.is_h5ad:
+            adata = anndata.read_h5ad(file_path)
         self.caption_constructor.construct_captions(adata)
-        adata.write_zarr(file_path)  # Overwrite the original file
+        if self.is_zarr:
+            adata.write_zarr(file_path)
+        if self.is_h5ad:
+            adata.write_h5ad(file_path)
 
     def getCaption(self, file_path: str) -> dict[str, str]:
         """
@@ -120,7 +132,10 @@ class AnnDataSetConstructor:
         -------
             Dict mapping sample IDs to captions
         """
-        adata = anndata.read_zarr(file_path)
+        if self.is_zarr:
+            adata = anndata.read_zarr(file_path)
+        if self.is_h5ad:
+            adata = anndata.read_h5ad(file_path)
         if "caption" not in adata.obs.columns:
             raise ValueError(f"No 'caption' column found in {file_path}")
 
