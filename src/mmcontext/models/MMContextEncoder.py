@@ -70,10 +70,14 @@ class MMContextEncoder(nn.Module):
         text_embeds = []
 
         if "omics_representation" in features:
-            feature_dim = features["omics_representation"].size(1)
-            device = next(self.parameters()).device
-            self.model.omics_projection = nn.Linear(feature_dim, self.model.omics_encoder.embedding_dim, device=device)
-            features["omics_representation"] = self.model.omics_projection(features["omics_representation"])
+            # feature_dim = features["omics_representation"].size(1)
+            # device = next(self.parameters()).device
+
+            # Update omics_projection if feature_dim changes
+            # if feature_dim != self.model.omics_projection.in_features:
+            #    self.model.omics_projection = nn.Linear(feature_dim, self.model.omics_encoder.embedding_dim, device=device)
+
+            # features["omics_representation"] = self.model.omics_projection(features["omics_representation"])
             omics_embeds = self.model.omics_encoder(features)
 
         if "input_ids" in features:
@@ -82,7 +86,6 @@ class MMContextEncoder(nn.Module):
                 token_type_ids=features["token_type_ids"],
                 attention_mask=features["attention_mask"],
             )
-            # get the pooled output and project it to the embedding dimension
             text_embeds = self.model.text_projection(text_output[1])
 
         sentence_embedding = []
@@ -181,7 +184,7 @@ class MMContextModel(nn.Module):
     as an MLP only model, or with attention heads.
     """
 
-    def __init__(self, text_encoder_name, omics_encoder_cfg, freeze_text_encoder=False, unfreeze_last_n_layers=1):
+    def __init__(self, text_encoder_name, omics_encoder_cfg, freeze_text_encoder=False, unfreeze_last_n_layers=0):
         super().__init__()
         self.text_encoder_name = text_encoder_name
         self.omics_encoder_cfg = omics_encoder_cfg
