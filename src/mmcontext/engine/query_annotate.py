@@ -234,7 +234,7 @@ class OmicsQueryAnnotator:
         self.faiss_index = faiss.IndexFlatIP(dim)
         self.faiss_index.add(self.embeddings)
 
-    def query_with_text(self, adata, queries, use_faiss=False, device="cpu", n_top=5):
+    def query_with_text(self, adata, queries, use_faiss=False, device="cpu", n_top=None):
         """Query omics data with textual queries.
 
         Compare text query embeddings with omics index and store similarities
@@ -247,8 +247,7 @@ class OmicsQueryAnnotator:
         queries : List[str]
             A list of textual queries.
         n_top : int, optional
-            Number of top matches to store for each sample (used if you
-            want to store or interpret top matches).
+            Number of top matches to store for each sample (Only used with fiass, otherwise all pairwise comparisons are made).
         use_faiss : bool, optional
             Whether to use the Faiss index for efficient retrieval. Default is False, and matrix multiplication is performed.
             Only needed for very large datasets.
