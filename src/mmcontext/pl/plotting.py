@@ -10,11 +10,14 @@ import seaborn as sns
 from matplotlib.patches import Patch
 from scipy.sparse import issparse
 
+logger = logging.getLogger(__name__)
+
 
 def plot_umap(
     adata: anndata.AnnData,
     embedding_key: str | None = None,
     color_key: str | list[str] | None = None,
+    title: str = None,
     sample_size: int = None,
     save_plot: bool = False,
     save_dir: str = None,
@@ -96,8 +99,9 @@ def plot_umap(
     ...     save_plot=False,
     ... )
     """
-    logger = logging.getLogger(__name__)
     logger.info("Starting UMAP computation and plotting.")
+    if title is None:
+        title = f"UMAP of {embedding_key if embedding_key else 'default'}"
 
     # If subset sampling is desired
     if sample_size is not None and sample_size < adata.n_obs:
@@ -135,7 +139,7 @@ def plot_umap(
         sc.pl.umap(
             adata,
             color=color_key,
-            title=f"UMAP of {embedding_key if embedding_key else 'default'}",
+            title=title,
             show=False,
             save=None,
             s=point_size,
@@ -169,6 +173,114 @@ def plot_umap(
     except Exception as e:
         logger.error(f"An error occurred while generating UMAP plot: {e}", exc_info=True)
         raise e
+
+
+def plot_query_scores_umap(
+    adata: anndata.AnnData,
+    embedding_key: str | None = None,
+    save_plot: bool = False,
+    save_dir: str | None = None,
+    nametag: str | None = None,
+    **plot_kwargs,
+):
+    """
+    Plot UMAPs colored by each query's similarity scores from `adata.obs["query_scores"]`.
+
+    For each query in `queries`, this function:
+      1) Copies the original AnnData object (so the original isn't modified),
+      2) Extracts that query's similarity scores from `adata.obs["query_scores"]`,
+      3) Stores them in a temporary column in the copy's .obs,
+      4) Calls `plot_umap` using that temporary column as the color key,
+      5) Optionally saves or shows the plot, inserting the query name in the nametag.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        An AnnData object that must contain `obs["query_scores"]`, where each
+        element is a dictionary mapping {query_string: similarity_score}.
+    queries : list of str or str
+        One or more query names to plot. Must be keys in each entry of
+        `adata.obs["query_scores"]`.
+    embedding_key : str or None, optional
+        Key in ``.obsm`` to use for the embedding. If None, uses default neighbors.
+    save_plot : bool, optional
+        Whether to save the plot instead of displaying it. Defaults to False.
+    save_dir : str or None, optional
+        Directory in which to save plots (used only if `save_plot=True`). Defaults to None.
+    nametag : str or None, optional
+        A base tag to include in the saved plot's file name. The query name is
+        also appended automatically.
+    **plot_kwargs : dict
+        Additional keyword arguments passed to `plot_umap`. For example:
+        - point_size : int
+        - frameon : bool
+        - legend_fontsize : int
+        - device : str (if your `plot_umap` or neighbors step needs it)
+        etc.
+
+    Returns
+    -------
+    None
+        Generates one UMAP per query, either shown interactively or saved to file.
+
+    Notes
+    -----
+    - The function checks for `adata.obs["query_scores"]`. If it's absent or not
+      structured as expected, raises a ValueError.
+    - Each query produces one plot. The temporary column is named `_temp_query_score`
+      (overwritten each iteration), so only one color is plotted at a time.
+    - Because we copy `adata` internally, no permanent column is added to the original object.
+
+    Examples
+    --------
+    >>> # Suppose adata.obs["query_scores"] exists, with keys: ["t-cell", "b-cell"]
+    >>> plot_query_scores_umap(
+    ...     adata,
+    ...     queries=["t-cell", "b-cell"],
+    ...     embedding_key="X_umap",
+    ...     save_plot=True,
+    ...     save_dir="plots",
+    ...     point_size=30,
+    ... )
+    # This generates two UMAP plots: one colored by "t-cell" scores, the other by "b-cell".
+    """
+    # Validate presence of query_scores in adata.obs
+    if "query_scores" not in adata.obs:
+        raise ValueError("`adata.obs['query_scores']` not found. Cannot plot query-based scores.")
+    # 1) Make a copy so we don't modify the original
+    adata_copy = adata.copy()
+    queries = adata.obs["query_scores"].iloc[0].keys()
+    # We'll loop over each query and generate a separate UMAP
+    for query in queries:
+        # 2) Build a list of scores for the current query
+        query_vals = []
+        for score_dict in adata.obs["query_scores"]:
+            if not isinstance(score_dict, dict):
+                raise ValueError("Each entry in `adata.obs['query_scores']` must be a dict of {query: score}.")
+            if query not in score_dict.keys():
+                raise ValueError(f"Query '{query}' not found in one of the 'query_scores' dicts.")
+            query_vals.append(score_dict[query])
+
+        # 3) Store them in a temporary obs column
+        adata_copy.obs["_temp_query_score"] = query_vals
+
+        # 4) Build a combined nametag that includes the query
+        combined_tag = f"{nametag}_{query}" if nametag else f"{query}"
+
+        # 5) Call the existing plot_umap function, color by our temporary column
+        plot_umap(
+            adata_copy,
+            embedding_key=embedding_key,
+            color_key="_temp_query_score",
+            save_plot=save_plot,
+            save_dir=save_dir,
+            title=query,
+            nametag=combined_tag,
+            **plot_kwargs,
+        )
+
+        # The function internally shows or saves the plot, then returns.
+        # We discard `adata_copy` so no changes persist on the original.
 
 
 def plot_clustered_heatmap(
