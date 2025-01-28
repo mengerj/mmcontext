@@ -246,3 +246,119 @@ def test_compute_cosine_similarity_torch_mps():
     sim_mps = compute_cosine_similarity(samples, queries, device="mps")
 
     np.testing.assert_allclose(sim_cpu, sim_mps, atol=1e-5)
+
+
+def test_best_label_annotation():
+    """
+    Test that annotate_omics_data adds a 'best_label' column in adata.obs,
+    and that the best_label actually matches the highest-scoring label in
+    adata.obs["inferred_labels"].
+    """
+
+    import anndata
+    import numpy as np
+
+    from mmcontext.engine import OmicsQueryAnnotator
+
+    # ------------------------------------------------
+    # 1. Create a deterministic mock model
+    # ------------------------------------------------
+    class DeterministicMockModel:
+        def encode(self, list_of_strings):
+            """
+            We'll encode sample embeddings and label embeddings in a way that
+            ensures a specific label is guaranteed to be the highest-scoring.
+
+            Strategy:
+              - If the input strings look like "sample_0", "sample_1", etc.,
+                we'll produce embeddings that favor label_0 or label_1.
+              - If the input strings look like "label_0", "label_1", etc.,
+                we'll produce specific distinct embeddings.
+            """
+            # For demonstration, let's say we have 2 samples and 3 labels
+            # We'll handle the shape dynamically based on len(list_of_strings).
+
+            embeddings = []
+            for s in list_of_strings:
+                if s.startswith("sample_"):
+                    # We can parse the sample index
+                    idx = int(s.split("_")[-1])
+                    # Example: sample_0 -> [1,0,0], sample_1 -> [0,1,0], etc.
+                    # Just be consistent so we can predict the best label.
+                    vec = np.zeros(3, dtype=np.float32)
+                    if idx < 3:
+                        vec[idx] = 1.0
+                    embeddings.append(vec)
+                elif s.startswith("label_"):
+                    # parse label index
+                    idx = int(s.split("_")[-1])
+                    # label_0 -> [1,0,0], label_1 -> [0,1,0], label_2 -> [0,0,1]
+                    vec = np.zeros(3, dtype=np.float32)
+                    vec[idx] = 1.0
+                    embeddings.append(vec)
+                else:
+                    # fallback for random or unrecognized strings
+                    # produce a zero vector of dim=3 for simplicity
+                    embeddings.append(np.zeros(3, dtype=np.float32))
+
+            return np.array(embeddings, dtype=np.float32)
+
+    # ------------------------------------------------
+    # 2. Construct an AnnData with 2 samples
+    # ------------------------------------------------
+    X = np.random.rand(2, 5).astype(np.float32)  # random dummy gene expression
+    adata = anndata.AnnData(X)
+    # We'll label the samples "sample_0" and "sample_1"
+    adata.obs_names = ["sample_0", "sample_1"]
+    # Store the sample embeddings in .obsm["omics_emb"] using the mock format
+    # We'll just reuse the model's logic by calling encode() on the sample names
+    mock_model = DeterministicMockModel()
+    sample_emb = mock_model.encode(adata.obs_names.to_list())  # shape: (2,3)
+    adata.obsm["omics_emb"] = sample_emb
+
+    # ------------------------------------------------
+    # 3. Create some label strings
+    # ------------------------------------------------
+    labels = ["label_0", "label_1", "label_2"]  # 3 labels
+
+    # ------------------------------------------------
+    # 4. Run annotate_omics_data
+    # ------------------------------------------------
+    oq = OmicsQueryAnnotator(model=mock_model, is_cosine=True)
+    # We'll do a short call, letting 'labels=...' define which label embeddings are used
+    # We'll do matrix multiplication (use_faiss=False).
+    oq.annotate_omics_data(adata, labels=labels, use_faiss=False, n_top=3)
+
+    # ------------------------------------------------
+    # 5. Test the results
+    # ------------------------------------------------
+    # Check the new columns in adata.obs
+    assert "inferred_labels" in adata.obs, "'inferred_labels' was not created."
+    assert "best_label" in adata.obs, "'best_label' was not created."
+
+    # We have 2 samples; each element in adata.obs["inferred_labels"] is a dict
+    inferred_labels = adata.obs["inferred_labels"]
+    best_labels = adata.obs["best_label"]
+
+    assert len(inferred_labels) == 2
+    assert len(best_labels) == 2
+
+    # For each sample, check that best_label is the label with the highest score
+    for i in range(2):
+        label_scores = inferred_labels[i]  # dictionary {label_str: score}
+        found_best = best_labels[i]
+        # Make sure found_best is actually one of the dictionary keys
+        assert found_best in label_scores, f"best_label='{found_best}' not among keys {list(label_scores.keys())}"
+        # Verify it has the maximum score in the dict
+        max_label = max(label_scores, key=label_scores.get)  # label with highest value
+        assert found_best == max_label, f"Expected best_label='{max_label}' but got '{found_best}'."
+
+    # If we want to confirm the logic matches our encoding logic:
+    # - sample_0's embedding = [1,0,0]
+    #   so it should have highest dot product with label_0 => best_label = 'label_0'
+    # - sample_1's embedding = [0,1,0]
+    #   so it should match label_1 => best_label = 'label_1'
+    assert best_labels[0] == "label_0"
+    assert best_labels[1] == "label_1"
+
+    print("Test passed: best_label is correctly identified for each sample.")

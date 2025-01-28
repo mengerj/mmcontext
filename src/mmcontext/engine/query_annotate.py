@@ -90,9 +90,11 @@ class OmicsQueryAnnotator:
         self.faiss_index.add(self.embeddings)
 
     def annotate_omics_data(self, adata, labels=None, use_faiss=False, device="cpu", n_top=5):
-        """Annotate omics data by finding top-matching labels for each sample
+        """
+        Annotate omics data by finding top-matching labels for each sample.
 
         The scores and the labels are stored in `adata.obs["inferred_labels"]`.
+        The single best label per sample is stored in `adata.obs["best_label"]`.
 
         Parameters
         ----------
@@ -102,10 +104,10 @@ class OmicsQueryAnnotator:
         n_top : int, optional
             Number of top matching labels to retrieve per sample.
         labels : List[str], optional
-            A list of text labels to use for annotation. If None, the faiss index has to be build first.
+            A list of text labels to use for annotation. If None, the faiss index has to be built first.
         use_faiss : bool, optional
-            Whether to use the Faiss index for efficient retrieval. Default is False, and matrix multiplication is performed.
-            Only needed for very large datasets.
+            Whether to use the Faiss index for efficient retrieval. Default is False,
+            and matrix multiplication is performed. Only needed for very large datasets.
         device : str, optional
             The device on which to run the computation. One of ["cpu", "cuda", "mps"].
 
@@ -115,42 +117,82 @@ class OmicsQueryAnnotator:
         some upstream pipeline.
         """
         if "omics_emb" not in adata.obsm:
-            raise ValueError("""`adata.obsm['omics_emb']` not found. Use MMContextInference first. Make sure you use the same,
-                             pre-trained model as you provide to this class.""")
+            raise ValueError(
+                "`adata.obsm['omics_emb']` not found. Use MMContextInference first. "
+                "Make sure you use the same, pre-trained model as you provide to this class."
+            )
         if not use_faiss and labels is None:
             raise ValueError("Labels must be provided if not using Faiss index.")
         if use_faiss and self.faiss_index is None:
-            self._build_label_index(labels)
+            self.build_label_index(labels)
 
         data_emb = adata.obsm["omics_emb"]
         if self.is_cosine:
             data_emb = self._l2_normalize(data_emb)
-
         data_emb = data_emb.astype(np.float32)
 
+        # We will store dictionaries of all label scores AND the single best label.
+        label_dicts = []
+        best_label_list = []
+
         if use_faiss:
-            logger.info("Querying label index for each sample.")
+            logger.info("Querying label index for each sample using Faiss.")
             # Retrieve top-n labels for each sample
             distances, indices = self.faiss_index.search(data_emb, n_top)
 
-            label_dicts = []
             for dist_row, idx_row in zip(distances, indices, strict=False):
-                # Build a dict from label to distance (or similarity)
+                # Build a dict from label -> similarity
                 sample_label_scores = {
                     self.labels_[idx]: float(dist) for idx, dist in zip(idx_row, dist_row, strict=False)
                 }
                 label_dicts.append(sample_label_scores)
-        else:
-            # use matrix multiplication to compute cosine similarity
-            label_emb = self.model.encode(labels)
-            label_emb = self._l2_normalize(label_emb)
-            similarity_matrix = compute_cosine_similarity(data_emb, label_emb, device=device)
-            label_dicts = []
-            for col in similarity_matrix.T:
-                sample_label_scores = {labels[i]: float(score) for i, score in enumerate(col)}
-                label_dicts.append(sample_label_scores)
 
+                # Identify the single best label from the top-n
+                best_label = None
+                best_score = float("-inf")
+                for lbl, score in sample_label_scores.items():
+                    if score > best_score:
+                        best_score = score
+                        best_label = lbl
+                best_label_list.append(best_label)
+
+        else:
+            # use matrix multiplication to compute similarity
+            logger.info("Using matrix multiplication to compute label similarities.")
+            label_emb = self.model.encode(labels)
+            if self.is_cosine:
+                label_emb = self._l2_normalize(label_emb)
+            label_emb = label_emb.astype(np.float32)
+
+            # check that second dimension of data_emb and label_emb are the same
+            if data_emb.shape[1] != label_emb.shape[1]:
+                raise ValueError(
+                    f"Dimensions of omics embeddings ({data_emb.shape[1]}) and label embeddings ({label_emb.shape[1]}) do not match."
+                )
+            # shape: (n_labels, n_samples)
+            similarity_matrix = compute_cosine_similarity(data_emb, label_emb, device=device)
+
+            # For each sample row
+            for col in similarity_matrix.T:
+                # Build dict from label -> similarity
+                sample_label_scores = {}
+                best_label = None
+                best_score = float("-inf")
+                for lbl_idx, score in enumerate(col):
+                    lbl_name = labels[lbl_idx]
+                    float_score = float(score)
+                    sample_label_scores[lbl_name] = float_score
+
+                    if float_score > best_score:
+                        best_score = float_score
+                        best_label = lbl_name
+
+                label_dicts.append(sample_label_scores)
+                best_label_list.append(best_label)
+
+        # Store the dictionary of inferred labels in obs
         adata.obs["inferred_labels"] = label_dicts
+        adata.obs["best_label"] = best_label_list
 
     def build_omics_index(self, adata, sample_ids=None):
         """
