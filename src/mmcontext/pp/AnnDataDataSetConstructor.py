@@ -1,3 +1,4 @@
+import json
 import logging
 import random
 
@@ -181,8 +182,8 @@ class AnnDataSetConstructor:
             # Check if this is actually a negative example
             if neg_caption != current_caption:
                 # store metadata in JSON so we keep a single string
-                # sentence_1 = json.dumps({"file_path": current_file, "sample_id": current_sample})
-                sentence_1 = {"file_path": current_file, "sample_id": current_sample}
+                sentence_1 = json.dumps({"file_path": current_file, "sample_id": current_sample})
+                # sentence_1 = {"file_path": current_file, "sample_id": current_sample}
                 sentence_2 = neg_caption
                 label = 0.0
                 return (sentence_1, sentence_2, label)
@@ -225,8 +226,8 @@ class AnnDataSetConstructor:
 
             for sample_id, caption in caption_dict.items():
                 # Positive example
-                # sentence_1 = json.dumps({"file_path": file_path, "sample_id": sample_id})
-                sentence_1 = {"file_path": file_path, "sample_id": sample_id}
+                sentence_1 = json.dumps({"file_path": file_path, "sample_id": sample_id})
+                # sentence_1 = {"file_path": file_path, "sample_id": sample_id}
                 sentence_2 = caption
                 label = 1.0
 
@@ -268,7 +269,7 @@ class AnnDataSetConstructor:
 
             # Check if this is actually a negative example
             if neg_caption != current_caption:
-                metadata = {"file_path": current_file, "sample_id": current_sample}
+                metadata = json.dumps({"file_path": current_file, "sample_id": current_sample})
 
                 return InputExample(
                     guid=f"{current_file}_{current_sample}_neg", texts=[metadata, neg_caption], label=0.0
@@ -296,7 +297,7 @@ class AnnDataSetConstructor:
 
             for sample_id, caption in caption_dict.items():
                 # Create positive example
-                metadata = {"file_path": file_path, "sample_id": sample_id}
+                metadata = json.dumps({"file_path": file_path, "sample_id": sample_id})
 
                 positive_example = InputExample(
                     guid=f"{file_path}_{sample_id}_pos", texts=[metadata, caption], label=1.0
@@ -352,7 +353,7 @@ class AnnDataSetConstructor:
 
             # Gather data into parallel lists
             for sid, caption in caption_dict.items():
-                metadata_list.append({"file_path": file_path, "sample_id": sid})
+                metadata_list.append(json.dumps({"file_path": file_path, "sample_id": sid}))
                 captions_list.append(caption)
                 sample_ids.append(sid)
 
