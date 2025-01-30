@@ -31,8 +31,6 @@ class Embedder:
     def create_embeddings(
         self,
         adata: anndata.AnnData,
-        data_embeddings: np.ndarray | None = None,
-        context_embeddings: np.ndarray | None = None,
     ):
         """
         Creates or stores embeddings and adds them to adata.obsm.
@@ -41,34 +39,23 @@ class Embedder:
         ----------
         adata
             The AnnData object containing the dataset.
-        data_embeddings
-            External data embeddings to store.
-            Shape should be (n_samples, data_embedding_dim).
-        context_embeddings
-            External context embeddings to store.
-            Shape should be (n_samples, context_embedding_dim).
 
         Raises
         ------
         ValueError
             If embeddings are missing and no embedder is provided to create them.
         """
-        # Store external data embeddings if provided
-        if data_embeddings is not None:
-            self.logger.info("Using external data embeddings provided.")
-            self.store_embeddings(adata, data_embeddings, key="d_emb")
-        elif self.data_embedder is not None:
+        if self.data_embedder is None and self.context_embedder is None:
+            self.logger.error("Both data and context embedders are missing.")
+            raise ValueError("Both data and context embedders are missing.")
+        if self.data_embedder is not None:
             self.logger.info("Creating data embeddings...")
             data_embeddings = self.data_embedder.embed(adata)
             self.store_embeddings(adata, data_embeddings, key="d_emb")
         else:
             self.logger.info("Data embeddings are missing, and no data embedder is provided.")
 
-        # Store external context embeddings if provided
-        if context_embeddings is not None:
-            self.logger.info("Using external context embeddings provided.")
-            self.store_embeddings(adata, context_embeddings, key="c_emb")
-        elif self.context_embedder is not None:
+        if self.context_embedder is not None:
             self.logger.info("Creating context embeddings...")
             context_embeddings = self.context_embedder.embed(adata)
             self.store_embeddings(adata, context_embeddings, key="c_emb")

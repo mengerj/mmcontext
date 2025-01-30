@@ -99,9 +99,9 @@ def test_reconstructed_data_compared_only_to_its_original_data():
     for original_id, recon_id in [("original1", "recon1"), ("original2", "recon2")]:
         df_subset = comparison_df[comparison_df["id"] == original_id]
         recon_ids = df_subset["recon_id"].unique()
-        assert set(recon_ids) == {
-            recon_id
-        }, f"Reconstructed data for {original_id} includes unexpected reconstructions: {recon_ids}"
+        assert set(recon_ids) == {recon_id}, (
+            f"Reconstructed data for {original_id} includes unexpected reconstructions: {recon_ids}"
+        )
 
 
 def test_compute_properties_with_different_data_types():
@@ -157,9 +157,9 @@ def test_compute_properties_handles_missing_methods():
     assert "nFeatures" in result, "Expected 'nFeatures' to be in result"
 
     # Check that 'nonExistentProperty' is not in the result (or is NaN)
-    assert "nonExistentProperty" not in result or np.isnan(
-        result.get("nonExistentProperty", np.nan)
-    ), "Expected 'nonExistentProperty' to be missing or NaN in result"
+    assert "nonExistentProperty" not in result or np.isnan(result.get("nonExistentProperty", np.nan)), (
+        "Expected 'nonExistentProperty' to be missing or NaN in result"
+    )
 
 
 def test_compute_properties_handles_exceptions_in_methods():
@@ -206,9 +206,9 @@ def test_add_reconstructed_data_without_original_data():
     with pytest.raises(ValueError) as exc_info:
         data_properties.add_reconstructed_data(reconstructed_data)
 
-    assert "Please add an original dataset before adding reconstructed datasets." in str(
-        exc_info.value
-    ), "Expected ValueError when adding reconstructed data without original data"
+    assert "Please add an original dataset before adding reconstructed datasets." in str(exc_info.value), (
+        "Expected ValueError when adding reconstructed data without original data"
+    )
 
 
 def test_plot_metrics_runs_without_errors(tmp_path):

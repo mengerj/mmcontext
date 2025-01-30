@@ -34,7 +34,52 @@ hm.ipynb
 outputs/*
 out/*
 docs/notebooks/*zarr
+*.zarr
+*.h5ad
 #venv
 venv*/
 
 docs/notebooks/*zarr*
+
+#env variables
+.env
+
+#egg-info
+*.egg-info
+
+#vs-code
+.vscode/
+
+#ds store
+.DS_Store
+
+#env keys
+*.env
+
+#vscode
+.vscode/
+
+#DS Store
+*.DS_Store
+
+#package info
+*.egg-info/
+
+#env variables
+.env
+
+#egg-info
+*.egg-info
+
+#vs-code
+.vscode/
+
+#ds store
+.DS_Store
+
+#local dirs
+exploratory/
+old_stuff/
+
+#build
+build/

@@ -1,11 +1,12 @@
 [build-system]
-build-backend = "hatchling.build"
-requires = [ "hatchling" ]
+build-backend = "setuptools.build_meta"
+
+requires = [ "setuptools>=64", "wheel" ]
 
 [project]
 name = "mmcontext"
 version = "0.0.1"
-description = "Align embeddings of multiple modalities through context embeddings on a sample level"
+description = "This package allows to use the sentence-transfomers package to build multimodal embedding models for data in anndata format."
 readme = "README.md"
 license = { file = "LICENSE" }
 maintainers = [
@@ -22,26 +23,34 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+  "accelerate>=1.3",
   "anndata",
   "dask",
+  "datasets>=3.2",
   "ipykernel",
   "matplotlib",
-  "numba==0.60",        # was needed due to issues with scanpy and scib automatic load
+  "numba==0.60",           # was needed due to issues with scanpy and scib automatic load
   "numpy",
   "omegaconf",
   "openai",
+  "python-dotenv>=1.0.1",
   "python-json-logger",
+  "requests",
   "scanpy",
   "scib",
   "scikit-learn",
+  "scvi-tools",
   "seaborn",
+  "sentence-transformers",
   "session-info",
   "torch",
   "zarr<=2.18.4",
 ]
+
 optional-dependencies.dev = [
   "pre-commit",
   "twine",
+  # other dev dependencies...
 ]
 optional-dependencies.doc = [
   "docutils>=0.8,!=0.18.*,!=0.19.*",
@@ -49,7 +58,6 @@ optional-dependencies.doc = [
   "ipython",
   "myst-nb>=1.1",
   "pandas",
-  # Until pybtex >0.23.0 releases: https://bitbucket.org/pybtex-devs/pybtex/issues/169/
   "setuptools",
   "sphinx>=4",
   "sphinx-autodoc-typehints",
@@ -64,28 +72,17 @@ optional-dependencies.test = [
   "pytest",
   "python-json-logger",
 ]
-# https://docs.pypi.org/project_metadata/#project-urls
 urls.Documentation = "https://mmcontext.readthedocs.io/"
 urls.Homepage = "https://github.com/mengerj/mmcontext"
 urls.Source = "https://github.com/mengerj/mmcontext"
 
-packages = [ { include = "mmcontext", from = "src" } ]
-
-[tool.hatch.envs.default]
-installer = "uv"
-features = [ "dev" ]
-#post-install-commands = [
-#    "python -m ipykernel install --user --name mmcontext --display-name 'Python (mmcontext)'"
-#]
-
-[tool.hatch.envs.docs]
-features = [ "doc" ]
-scripts.build = "sphinx-build -M html docs docs/_build {args}"
-scripts.open = "python -c \"import webbrowser; from pathlib import Path; webbrowser.open(Path('docs/_build/html/index.html').resolve().as_uri())\""
-scripts.clean = "git clean -fdX -- {args:docs}"
-
-[tool.hatch.envs.hatch-test]
-features = [ "test" ]
+[tool.setuptools]
+include-package-data = true
+[tool.setuptools.packages.find]
+where = [ "src" ]
+include = [ "mmcontext*" ]
+[tool.setuptools.package-data]
+"mmcontext.conf" = [ "*.json" ]
 
 [tool.ruff]
 line-length = 120
@@ -106,21 +103,22 @@ lint.select = [
   "UP",     # pyupgrade
   "W",      # Warning detected by Pycodestyle
 ]
+
 lint.ignore = [
-  "B008",   # Errors from function calls in argument defaults. These are fine when the result is immutable.
-  "BLE001", # Allow blind expections
+  "B008",   # function calls in argument defaults
+  "BLE001", # allow blind expections
   "D100",   # Missing docstring in public module
   "D104",   # Missing docstring in public package
-  "D105",   # __magic__ methods are often self-explanatory, allow missing docstrings
+  "D105",   # allow missing docstrings for __magic__ methods
   "D107",   # Missing docstring in __init__
-  # Disable one in each pair of mutually incompatible rules
-  "D203", # We don’t want a blank line before a class docstring
-  "D213", # <> We want docstrings to start immediately after the opening triple quote
-  "D400", # first line should end with a period [Bug: doesn’t work with single-line docstrings]
-  "D401", # First line should be in imperative mood; try rephrasing
-  "E501", # line too long -> we accept long comment lines; formatter gets rid of long code lines
-  "E731", # Do not assign a lambda expression, use a def -> lambda expression assignments are convenient
-  "E741", # allow I, O, l as variable names -> I is the identity matrix
+  "D203",   # We don’t want a blank line before a class docstring
+  "D213",   # We want docstrings to start immediately after triple quote
+  "D400",   # first line should end with a period
+  "D401",   # first line should be in imperative mood
+  "E501",   # line too long
+  "E731",   # lambdas are allowed
+  "E741",   # allow I, O, l as variable names
+  "F401",   # dont remove unused imports, because of fiass flag
 ]
 
 lint.per-file-ignores."*/__init__.py" = [ "F401" ]
@@ -132,7 +130,7 @@ lint.pydocstyle.convention = "numpy"
 testpaths = [ "tests" ]
 xfail_strict = true
 addopts = [
-  "--import-mode=importlib", # allow using test files with same name
+  "--import-mode=importlib",
 ]
 
 [tool.coverage.run]
@@ -152,3 +150,6 @@ skip = [
   "docs/references.md",
   "docs/notebooks/example.ipynb",
 ]
+
+[tool.uv.sources]
+sentence-transformers = { git = "https://github.com/mengerj/sentence-transformers.git", rev = "master" }
