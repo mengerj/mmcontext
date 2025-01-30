@@ -1,3 +1,4 @@
+import json
 import logging
 from unittest.mock import MagicMock
 
@@ -232,61 +233,95 @@ def test_caption_constructor_fail(dataset_constructor, ann_data_file_1):
     assert "Caption constructor error" in str(excinfo.value)
 
 
+def separate_pos_neg_examples(ds_list):
+    """
+    Convert the ds_list dictionary into a list of row dictionaries,
+    then split them into positives (label=1.0) and negatives (label=0.0).
+
+    ds_list structure:
+    {
+       "anndata_ref": [str, str, ...],  # JSON-encoded metadata
+       "caption": [str, str, ...],
+       "label": [float, float, ...]
+    }
+
+    Returns
+    -------
+    pos_examples : list of dict
+    neg_examples : list of dict
+
+    where each dict has keys "anndata_ref", "caption", "label"
+    and "metadata" (the parsed JSON from anndata_ref).
+    """
+    # Convert column-based ds_list to row-based
+    num_rows = len(ds_list["label"])
+    row_list = []
+    for i in range(num_rows):
+        row_list.append(
+            {
+                # We can keep the raw JSON string in "anndata_ref",
+                # or parse it right away
+                "anndata_ref": ds_list["anndata_ref"][i],
+                "caption": ds_list["caption"][i],
+                "label": ds_list["label"][i],
+            }
+        )
+
+    # Now separate positives & negatives
+    pos_examples = []
+    neg_examples = []
+    for row in row_list:
+        if row["label"] == 1.0:
+            pos_examples.append(row)
+        else:
+            neg_examples.append(row)
+
+    return pos_examples, neg_examples
+
+
 def test_get_dataset_positive_and_negative(dataset_constructor, ann_data_file_1, ann_data_file_2):
     """
-    Test that the final dataset includes the correct positive and negative examples.
-
-    Specifically:
-    - Positive samples have label=1.0, with matching caption and sample_id
-    - Negative samples have label=0.0, with different caption content
-
-    References
-    ----------
-    Simulated anndata from the 'ann_data_file_1' and 'ann_data_file_2' fixtures.
+    Demonstration of using the separation logic in a typical test scenario.
     """
     logger.info("Testing construction of positive and negative examples in the dataset.")
 
-    # Add two files
     dataset_constructor.add_anndata(ann_data_file_1)
     dataset_constructor.add_anndata(ann_data_file_2)
 
-    # Build dataset
+    # ds is your huggingface Dataset
     ds = dataset_constructor.get_dataset()
 
-    # The number of samples in the first file is 3, second file is 2
-    # Each sample gets 1 positive and 1 negative => total 3+2 = 5 samples => 10 InputExample entries
-    assert len(ds) == 10
+    # ds_list is a dict of columns -> lists
+    ds_list = ds[:]
 
-    # Check that each positive example has label=1.0 and correct text matches the caption
-    pos_examples = [ex for ex in ds if ex.label == 1.0]
-    neg_examples = [ex for ex in ds if ex.label == 0.0]
+    # Separate pos/neg
+    pos_examples, neg_examples = separate_pos_neg_examples(ds_list)
 
-    assert len(pos_examples) == 5
-    assert len(neg_examples) == 5
+    # Basic checks
+    assert len(pos_examples) == 5, f"Expected 5 positives, got {len(pos_examples)}"
+    assert len(neg_examples) == 5, f"Expected 5 negatives, got {len(neg_examples)}"
 
-    # Positive example check
+    # Now parse each row and verify
     for ex in pos_examples:
-        # ex.texts[0] is metadata, ex.texts[1] is the caption
-        metadata, caption = ex.texts
+        # parse the JSON string
+        metadata = json.loads(ex["anndata_ref"])
+        caption = ex["caption"]
         file_path = metadata["file_path"]
         sample_id = metadata["sample_id"]
 
-        # Re-read adata to ensure the caption is correct
-        adata = anndata.read_zarr(file_path)
-        assert "caption" in adata.obs.columns
-        # Ensure the sample's caption matches the example's caption
-        assert adata.obs.loc[sample_id, "caption"] == caption
-
-    # Negative example check
-    for ex in neg_examples:
-        metadata, caption = ex.texts
-        file_path = metadata["file_path"]
-        sample_id = metadata["sample_id"]
-
-        # Re-read adata to ensure the sample's caption is different
         adata = anndata.read_zarr(file_path)
         original_caption = adata.obs.loc[sample_id, "caption"]
-        assert original_caption != caption, f"Negative example has the same caption as the original sample {sample_id}."
+        assert caption == original_caption
+
+    for ex in neg_examples:
+        metadata = json.loads(ex["anndata_ref"])
+        caption = ex["caption"]
+        file_path = metadata["file_path"]
+        sample_id = metadata["sample_id"]
+
+        adata = anndata.read_zarr(file_path)
+        original_caption = adata.obs.loc[sample_id, "caption"]
+        assert caption != original_caption
 
 
 def test_clear_method(dataset_constructor, ann_data_file_1):
@@ -305,22 +340,6 @@ def test_clear_method(dataset_constructor, ann_data_file_1):
     assert len(dataset_constructor.anndata_files) == 0
     assert len(dataset_constructor.sample_id_keys) == 0
     assert len(dataset_constructor.dataset) == 0
-
-
-def test_add_anndata_h5ad_file(dataset_constructor, ann_data_file_h5ad):
-    """
-    Test behavior when an .h5ad file is provided instead of a .zarr file.
-    If the constructor strictly uses anndata.read_zarr(...),
-    we expect it to fail with an error related to file format or path.
-    """
-    logger.info("Testing behavior when an .h5ad file is passed (but code uses read_zarr).")
-
-    with pytest.raises(ValueError) as excinfo:
-        dataset_constructor.add_anndata(ann_data_file_h5ad)
-
-    # Optionally, you can inspect the exception message:
-    err_msg = str(excinfo.value)
-    assert ".zarr format" in err_msg.lower(), f"Unexpected error message: {err_msg}"
 
 
 def test_duplicate_sample_ids(dataset_constructor, ann_data_file_with_duplicates):

@@ -143,7 +143,8 @@ class MMContextEncoder(nn.Module):
     def save(self, output_path: str, safe_serialization: bool = True) -> None:
         """Saves the model configuration and state."""
         os.makedirs(output_path, exist_ok=True)
-
+        # clear the cache of omics processor
+        self.processor.omics_processor.clear_cache()
         # Save config
         with open(os.path.join(output_path, "config.json"), "w") as fOut:
             json.dump(self._get_config_dict(), fOut, indent=2)

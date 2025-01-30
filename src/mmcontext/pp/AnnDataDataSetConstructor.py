@@ -1,7 +1,9 @@
+import json
 import logging
 import random
 
 import anndata
+from datasets import Dataset
 from sentence_transformers.readers.InputExample import InputExample
 
 logger = logging.getLogger(__name__)
@@ -76,13 +78,16 @@ class AnnDataSetConstructor:
         sample_id_key
             Optional key in adata.obs to use for sample IDs. If None, uses adata.obs.index
         """
+        self.is_zarr = False
+        self.is_h5ad = False
         # 1. Check extension
-        if not (file_path.endswith(".zarr") or file_path.endswith(".zarr/")):
+        if file_path.endswith(".zarr") or file_path.endswith(".zarr/"):
+            self.is_zarr = True
+        elif file_path.endswith(".h5ad"):
+            self.is_h5ad = True
+        else:
             logger.error("Unsupported anndata format for file: %s", file_path)
-            raise ValueError(
-                f"File {file_path} does not appear to be .zarr format."
-                "You can convert it to .zarr using anndata.write_zarr(adata, 'filename.zarr')."
-            )
+            raise ValueError(f"File {file_path} does not appear to be .zarr or .h5ad format.")
 
         # 2. Check for duplicates
         if file_path in self.anndata_files:
@@ -90,7 +95,10 @@ class AnnDataSetConstructor:
             raise ValueError(f"File {file_path} has already been added.")
 
         # 3. Check sample ID uniqueness
-        adata = anndata.read_zarr(file_path)
+        if self.is_zarr:
+            adata = anndata.read_zarr(file_path)
+        if self.is_h5ad:
+            adata = anndata.read_h5ad(file_path)
         self._check_sample_id_uniqueness(adata, file_path, sample_id_key)
 
         self.anndata_files.append(file_path)
@@ -105,9 +113,15 @@ class AnnDataSetConstructor:
             file_path: Path to the anndata file
             caption_constructor: Instance of a caption constructor class
         """
-        adata = anndata.read_zarr(file_path)
+        if self.is_zarr:
+            adata = anndata.read_zarr(file_path)
+        if self.is_h5ad:
+            adata = anndata.read_h5ad(file_path)
         self.caption_constructor.construct_captions(adata)
-        adata.write_zarr(file_path)  # Overwrite the original file
+        if self.is_zarr:
+            adata.write_zarr(file_path)
+        if self.is_h5ad:
+            adata.write_h5ad(file_path)
 
     def getCaption(self, file_path: str) -> dict[str, str]:
         """
@@ -120,7 +134,10 @@ class AnnDataSetConstructor:
         -------
             Dict mapping sample IDs to captions
         """
-        adata = anndata.read_zarr(file_path)
+        if self.is_zarr:
+            adata = anndata.read_zarr(file_path)
+        if self.is_h5ad:
+            adata = anndata.read_h5ad(file_path)
         if "caption" not in adata.obs.columns:
             raise ValueError(f"No 'caption' column found in {file_path}")
 
@@ -130,6 +147,103 @@ class AnnDataSetConstructor:
         return dict(zip(sample_ids, adata.obs["caption"], strict=False))
 
     def _create_negative_example(
+        self, current_file: str, current_sample: str, current_caption: str, all_captions: dict[str, dict[str, str]]
+    ) -> tuple[str, str, float]:
+        """
+        Create a negative example by finding a caption that doesn't match the current sample.
+
+        Parameters
+        ----------
+        current_file : str
+            Path to the current file
+        current_sample : str
+            ID of the current sample
+        current_caption : str
+            Caption of the current sample
+        all_captions : dict
+            Nested dict mapping file paths to {sample_id: caption} dicts
+
+        Returns
+        -------
+        sentence_1 : str
+            JSON string containing file_path and sample_id
+        sentence_2 : str
+            The negative caption
+        label : float
+            0.0 for negative
+        """
+        while True:
+            # Randomly choose a file
+            neg_file = random.choice(self.anndata_files)
+            # Randomly choose a sample from that file
+            neg_sample = random.choice(list(all_captions[neg_file].keys()))
+            neg_caption = all_captions[neg_file][neg_sample]
+
+            # Check if this is actually a negative example
+            if neg_caption != current_caption:
+                # store metadata in JSON so we keep a single string
+                sentence_1 = json.dumps({"file_path": current_file, "sample_id": current_sample})
+                # sentence_1 = {"file_path": current_file, "sample_id": current_sample}
+                sentence_2 = neg_caption
+                label = 0.0
+                return (sentence_1, sentence_2, label)
+
+    def get_dataset(self) -> Dataset:
+        """
+        Create and return a Hugging Face Dataset containing pairs of sentences and a label.
+
+        The resulting dataset has these columns:
+        - sentence_1: JSON-serialized string with file_path and sample_id
+        - sentence_2: caption string
+        - label: float (1.0 or 0.0)
+
+        Returns
+        -------
+        datasets.Dataset
+            A Hugging Face Dataset with columns [sentence_1, sentence_2, label].
+
+        Notes
+        -----
+        1. This method automatically calls `buildCaption(...)` on each file
+           and ensures the 'caption' column is present.
+        2. The data is sourced from .zarr files previously added via `add_anndata`.
+        3. The dataset is not tokenized; you can apply tokenization separately.
+        """
+        # import json
+
+        # Prepare a list of dicts suitable for HF Dataset
+        hf_data = []
+        all_captions = {}  # Nested dict: {file_path: {sample_id: caption}}
+
+        # Build & retrieve captions for each file
+        for file_path in self.anndata_files:
+            self.buildCaption(file_path)
+            all_captions[file_path] = self.getCaption(file_path)
+
+        # Create positive and negative examples
+        for file_path in self.anndata_files:
+            caption_dict = all_captions[file_path]
+
+            for sample_id, caption in caption_dict.items():
+                # Positive example
+                sentence_1 = json.dumps({"file_path": file_path, "sample_id": sample_id})
+                # sentence_1 = {"file_path": file_path, "sample_id": sample_id}
+                sentence_2 = caption
+                label = 1.0
+
+                hf_data.append({"anndata_ref": sentence_1, "caption": sentence_2, "label": label})
+
+                # Negative examples
+                for _ in range(self.negatives_per_sample):
+                    neg_sentence_1, neg_sentence_2, neg_label = self._create_negative_example(
+                        file_path, sample_id, caption, all_captions
+                    )
+                    hf_data.append({"anndata_ref": neg_sentence_1, "caption": neg_sentence_2, "label": neg_label})
+
+        logger.info("Created %d examples for Hugging Face dataset.", len(hf_data))
+        return Dataset.from_list(hf_data)
+
+    def _create_negative_example_InputExample(
         self, current_file: str, current_sample: str, current_caption: str, all_captions: dict[str, dict[str, str]]
     ) -> InputExample:
         """
@@ -155,13 +269,13 @@ class AnnDataSetConstructor:
 
             # Check if this is actually a negative example
             if neg_caption != current_caption:
-                metadata = {"file_path": current_file, "sample_id": current_sample}
+                metadata = json.dumps({"file_path": current_file, "sample_id": current_sample})
 
                 return InputExample(
                     guid=f"{current_file}_{current_sample}_neg", texts=[metadata, neg_caption], label=0.0
                 )
 
-    def get_dataset(self) -> list[InputExample]:
+    def get_dataset_InputExample(self) -> list[InputExample]:
         """
         Create and return the dataset containing InputExample instances for all added anndata files.
 
@@ -183,7 +297,7 @@ class AnnDataSetConstructor:
 
             for sample_id, caption in caption_dict.items():
                 # Create positive example
-                metadata = {"file_path": file_path, "sample_id": sample_id}
+                metadata = json.dumps({"file_path": file_path, "sample_id": sample_id})
 
                 positive_example = InputExample(
                     guid=f"{file_path}_{sample_id}_pos", texts=[metadata, caption], label=1.0
@@ -239,7 +353,7 @@ class AnnDataSetConstructor:
 
             # Gather data into parallel lists
             for sid, caption in caption_dict.items():
-                metadata_list.append({"file_path": file_path, "sample_id": sid})
+                metadata_list.append(json.dumps({"file_path": file_path, "sample_id": sid}))
                 captions_list.append(caption)
                 sample_ids.append(sid)
 
