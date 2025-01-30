@@ -41,8 +41,15 @@ class MMContextInference:
         self.metadata_list, self.captions_list, self.sample_ids = constructor.get_inference_dataset()
 
         # Load AnnData and verify sample order
-        self.adata = anndata.read_zarr(file_path)
+        self.adata = self._load_anndata(file_path)
         self._verify_sample_order()
+
+    def _load_anndata(self, file_path) -> anndata.AnnData:
+        if file_path.endswith(".zarr"):
+            adata = anndata.read_zarr(file_path)
+        if file_path.endswith(".h5ad"):
+            adata = anndata.read_h5ad(file_path)
+        return adata
 
     def _verify_sample_order(self) -> None:
         """
