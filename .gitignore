@@ -78,7 +78,8 @@ docs/notebooks/*zarr*
 .DS_Store
 
 #local dirs
-exploratory/
+*checkpoints
+*.sqlite*
 old_stuff/
 
 #build
