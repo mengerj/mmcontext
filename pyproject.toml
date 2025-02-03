@@ -32,7 +32,6 @@ dependencies = [
   "numba==0.60",           # was needed due to issues with scanpy and scib automatic load
   "numpy",
   "omegaconf",
-  "openai",
   "python-dotenv>=1.0.1",
   "python-json-logger",
   "requests",
@@ -46,7 +45,6 @@ dependencies = [
   "torch",
   "zarr<=2.18.4",
 ]
-
 optional-dependencies.dev = [
   "pre-commit",
   "twine",
