@@ -83,3 +83,7 @@ old_stuff/
 
 #build
 build/
+
+#slurm output
+*.err
+*.out

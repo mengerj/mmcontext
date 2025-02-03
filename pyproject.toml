@@ -45,6 +45,8 @@ dependencies = [
   "session-info",
   "torch",
   "zarr<=2.18.4",
+  "pynvml",
+  "psutil",
 ]
 
 optional-dependencies.dev = [

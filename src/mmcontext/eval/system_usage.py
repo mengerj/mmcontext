@@ -6,6 +6,10 @@ import time
 
 import numpy as np
 import psutil
+import torch
+import matplotlib.pyplot as plt
+from pathlib import Path
+import pynvml
 
 
 class SystemMonitor:
@@ -19,9 +23,9 @@ class SystemMonitor:
         The index of the GPU to monitor. Default is 2. Because of IMBI GPU setup.
     """
 
-    def __init__(self, interval=1, gpu_idx=2):
+    def __init__(self, interval=1, gpu_idx=None, logger=None):
         self.interval = interval
-        self.gpu_idx = gpu_idx
+        self.gpu_indices = [gpu_idx] if isinstance(gpu_idx, int) else gpu_idx
         self.num_cpus = psutil.cpu_count(logical=True)
         self.cpu_usage = []
         self.cpu_per_core = []
@@ -31,9 +35,9 @@ class SystemMonitor:
         self.baseline_memory = psutil.virtual_memory().used / (1024**3)  # GB
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._monitor)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger or logging.getLogger(__name__)
         self.num_threads = []
-        # self.cpu_affinity = []
+        self.cpu_affinity = []
 
         # GPU Monitoring Initialization
         self.gpu_available = False
@@ -47,18 +51,56 @@ class SystemMonitor:
         # Try NVIDIA GPU
         try:
             import pynvml
-
             pynvml.nvmlInit()
-            self.gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(self.gpu_idx)
-            self.gpu_total_memory = pynvml.nvmlDeviceGetMemoryInfo(self.gpu_handle).total / (1024**3)  # GB
-            self.gpu_name = pynvml.nvmlDeviceGetName(self.gpu_handle).encode()
+            self.gpu_handles = []
+            self.gpu_names = []
+
+            # First check CUDA_VISIBLE_DEVICES
+            assigned_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", None)
+            if assigned_gpus:
+                # Check if the entries are UUIDs or indices
+                gpu_entries = assigned_gpus.split(",")
+                for entry in gpu_entries:
+                    entry = entry.strip()
+                    try:
+                        # Check if it's a numeric index
+                        gpu_idx = int(entry)
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
+                        self.gpu_handles.append(handle)
+                    except ValueError:
+                        # Assume it's a UUID and fetch the handle
+                        handle = pynvml.nvmlDeviceGetHandleByUUID(entry)
+            else:
+                # If no CUDA_VISIBLE_DEVICES, use gpu_indices or detect all available GPUs
+                if self.gpu_indices is not None:
+                    # Use specified GPU indices
+                    for idx in self.gpu_indices:
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
+                        self.gpu_handles.append(handle)
+                else:
+                    # Detect all available GPUs
+                    device_count = pynvml.nvmlDeviceGetCount()
+                    for idx in range(device_count):
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
+                        self.gpu_handles.append(handle)
+
+            # Get names and memory info for all detected GPUs
+            for handle in self.gpu_handles:
+                name = pynvml.nvmlDeviceGetName(handle)
+                self.gpu_names.append(name.decode() if isinstance(name, bytes) else name)
+
+            self.gpu_total_memory = [
+                pynvml.nvmlDeviceGetMemoryInfo(handle).total / (1024**3) 
+                for handle in self.gpu_handles
+            ]
             self.gpu_available = True
             self.gpu_type = "NVIDIA"
-            self.logger.info(f"Detected NVIDIA GPU: {self.gpu_name}")
-        except Exception:
-            self.logger.info("No NVIDIA GPU detected or pynvml not installed.")
+            self.logger.info(f"Detected NVIDIA GPUs: {self.gpu_names}")
+            
+        except Exception as e:
+            self.logger.info(f"No NVIDIA GPU detected or pynvml not installed: {str(e)}")
             # Try detecting Apple GPU
-            if platform.system() == "Darwin" and "Apple" in platform.platform():
+            if platform.system() == "Darwin" and "macOS" in platform.platform():
                 self.gpu_available = True
                 self.gpu_type = "Apple"
                 self.gpu_name = "Apple Integrated GPU"
@@ -103,7 +145,7 @@ class SystemMonitor:
 
             # Get number of threads and cpu core affinity
             self.num_threads.append((timestamp, process.num_threads()))
-            # self.cpu_affinity.append((timestamp, process.cpu_affinity()))
+            self.cpu_affinity.append((timestamp, process.cpu_affinity()))
 
             # GPU Monitoring
             if self.gpu_available:
@@ -118,12 +160,16 @@ class SystemMonitor:
         import pynvml
 
         try:
-            util = pynvml.nvmlDeviceGetUtilizationRates(self.gpu_handle)
-            mem_info = pynvml.nvmlDeviceGetMemoryInfo(self.gpu_handle)
-            gpu_usage_percent = util.gpu
-            gpu_memory_used_gb = mem_info.used / (1024**3)
-            self.gpu_usage.append((timestamp, gpu_usage_percent))
-            self.gpu_memory_usage.append((timestamp, gpu_memory_used_gb))
+            for idx, handle in enumerate(self.gpu_handles):
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                gpu_usage_percent = util.gpu
+                gpu_memory_used_gb = mem_info.used / (1024**3)
+                if idx >= len(self.gpu_usage):
+                    self.gpu_usage.append([])
+                    self.gpu_memory_usage.append([])
+                self.gpu_usage[idx].append((timestamp, gpu_usage_percent))
+                self.gpu_memory_usage[idx].append((timestamp, gpu_memory_used_gb))
         except Exception as e:
             self.logger.error(f"Error monitoring NVIDIA GPU: {e}")
 
@@ -185,24 +231,43 @@ class SystemMonitor:
 
         # GPU Usage
         if self.gpu_available:
-            gpu_usages = [usage for _, usage in self.gpu_usage if usage is not None]
-            gpu_memory_usages = [usage for _, usage in self.gpu_memory_usage if usage is not None]
-            if gpu_usages:
-                summary["gpu_usage_mean"] = sum(gpu_usages) / len(gpu_usages)
-                summary["gpu_usage_max"] = max(gpu_usages)
-            if gpu_memory_usages:
-                summary["gpu_memory_usage_mean"] = sum(gpu_memory_usages) / len(gpu_memory_usages)
-                summary["gpu_memory_usage_max"] = max(gpu_memory_usages)
-                summary["gpu_total_memory"] = self.gpu_total_memory
-            summary["gpu_name"] = self.gpu_name
+            summary["total_gpu_memory"] = sum(self.gpu_total_memory)
+            if self.gpu_type == "NVIDIA":
+                summary["gpu_metrics"] = []
+                for idx, (usage_data, memory_data, name, total_memory) in enumerate(zip(
+                    self.gpu_usage, 
+                    self.gpu_memory_usage, 
+                    self.gpu_names,
+                    self.gpu_total_memory
+                )):
+                    gpu_summary = {}
+                    gpu_usages = [usage for _, usage in usage_data if usage is not None]
+                    gpu_memory_usages = [usage for _, usage in memory_data if usage is not None]
+                    
+                    if gpu_usages:
+                        gpu_summary["usage_mean"] = sum(gpu_usages) / len(gpu_usages)
+                        gpu_summary["usage_max"] = max(gpu_usages)
+                    if gpu_memory_usages:
+                        gpu_summary["memory_usage_mean"] = sum(gpu_memory_usages) / len(gpu_memory_usages)
+                        gpu_summary["memory_usage_max"] = max(gpu_memory_usages)
+                    
+                    gpu_summary["name"] = name.decode() if isinstance(name, bytes) else name
+                    gpu_summary["total_memory"] = total_memory
+                    gpu_summary["gpu_id"] = idx
+                    
+                    summary["gpu_metrics"].append(gpu_summary)
+            else:
+                # Handle Apple GPU or other types
+                summary["gpu_metrics"] = [{
+                    "name": self.gpu_name,
+                    "usage_mean": None,
+                    "usage_max": None,
+                    "memory_usage_mean": None,
+                    "memory_usage_max": None,
+                    "gpu_id": 0
+                }]
         else:
-            summary["gpu_usage_mean"] = None
-            summary["gpu_usage_max"] = None
-
-        # Number of Threads
-        num_threads = [threads for _, threads in self.num_threads]
-        summary["num_threads_mean"] = sum(num_threads) / len(num_threads)
-        summary["num_threads_max"] = max(num_threads)
+            summary["gpu_metrics"] = []
 
         return summary
 
@@ -223,17 +288,17 @@ class SystemMonitor:
             f"Disk Write Rate (mean/max MB/s): {summary['disk_write_mb_s_mean']:.2f}/{summary['disk_write_mb_s_max']:.2f} MB/s"
         )
         if self.gpu_available:
-            print(f"GPU Name: {summary['gpu_name']}")
-            if summary["gpu_usage_mean"] is not None:
-                print(f"GPU Usage (mean/max %): {summary['gpu_usage_mean']:.2f}/{summary['gpu_usage_max']:.2f}%")
-            if summary["gpu_memory_usage_mean"] is not None:
-                print(
-                    f"GPU Memory Usage (mean/max GB): {summary['gpu_memory_usage_mean']:.2f}/{summary['gpu_memory_usage_max']:.2f} GB"
-                )
-                print(f"GPU Total Memory: {summary['gpu_total_memory']:.2f} GB")
+            print("\nGPU Metrics:")
+            print("Total GPU Memory: {:.2f} GB".format(summary["total_gpu_memory"]))
+            for gpu in summary["gpu_metrics"]:
+                print(f"\nGPU {gpu['gpu_id']}: {gpu['name']}")
+                if gpu.get("usage_mean") is not None:
+                    print(f"  Usage (mean/max %): {gpu['usage_mean']:.2f}/{gpu['usage_max']:.2f}%")
+                if gpu.get("memory_usage_mean") is not None:
+                    print(f"  Memory Usage (mean/max GB): {gpu['memory_usage_mean']:.2f}/{gpu['memory_usage_max']:.2f} GB")
+                    print(f"  Total Memory: {gpu['total_memory']:.2f} GB")
         else:
-            print("No supported GPU detected.")
-        print(f"Number of Threads (mean/max): {summary['num_threads_mean']:.2f}/{summary['num_threads_max']}")
+            print("\nNo supported GPU detected.")
 
     def save(self, save_dir):
         """Save the metrics as a csv file."""
@@ -323,42 +388,67 @@ class SystemMonitor:
         else:
             plt.show()
 
-        # GPU Usage Plot
-        if self.gpu_available and any(usage is not None for _, usage in self.gpu_usage):
-            timestamps, gpu_usages = zip(*self.gpu_usage, strict=False)
-            gpu_usages = [usage if usage is not None else 0 for usage in gpu_usages]
-            tick_positions, tick_labels = format_time_ticks(timestamps)
-            plt.figure()
-            plt.plot(gpu_usages)
-            plt.xlabel("Time")
+        # GPU Usage Plot - All GPUs on one plot
+        if self.gpu_available and any(usage_data for usage_data in self.gpu_usage):
+            plt.figure(figsize=(12, 6))
+            max_rel_time = 0
+            for idx, usage_data in enumerate(self.gpu_usage):
+                if usage_data:
+                    timestamps, gpu_usages = zip(*usage_data, strict=False)
+                    rel_times = [t - timestamps[0] for t in timestamps]
+                    max_rel_time = max(max_rel_time, rel_times[-1])
+                    plt.plot(rel_times, gpu_usages, label=f'{self.gpu_names[idx]}')
+            
+            # Create evenly spaced tick marks (maximum 10)
+            num_ticks = min(10, len(rel_times))
+            tick_positions = np.linspace(0, max_rel_time, num_ticks)
+            tick_labels = [f'{t:.0f}s' for t in tick_positions]
+            
+            plt.xlabel("Time (seconds)")
             plt.ylabel("GPU Usage (%)")
-            plt.ylim(0, 100)  # Set the y-axis limits from 0 to 100
+            plt.ylim(0, 101)
             plt.title("GPU Usage Over Time")
-            plt.xticks(tick_positions, tick_labels, rotation=45)
+            plt.grid(True)
+            plt.legend()
+            plt.xticks(tick_positions, tick_labels)
             plt.tight_layout()
+            
             if save_dir:
                 plt.savefig(os.path.join(save_dir, "gpu_usage.png"))
                 plt.close()
             else:
                 plt.show()
 
-        # GPU Memory Usage Plot
-        if self.gpu_available and any(usage is not None for _, usage in self.gpu_memory_usage):
-            timestamps, gpu_mem_usages = zip(*self.gpu_memory_usage, strict=False)
-            gpu_mem_usages = [usage if usage is not None else 0 for usage in gpu_mem_usages]
-            tick_positions, tick_labels = format_time_ticks(timestamps)
-            plt.figure()
-            plt.plot(gpu_mem_usages)
-            plt.xlabel("Time")
+        # GPU Memory Usage Plot - All GPUs on one plot
+        if self.gpu_available and any(memory_data for memory_data in self.gpu_memory_usage):
+            plt.figure(figsize=(12, 6))
+            max_rel_time = 0
+            for idx, memory_data in enumerate(self.gpu_memory_usage):
+                if memory_data:
+                    timestamps, gpu_mem_usages = zip(*memory_data, strict=False)
+                    rel_times = [t - timestamps[0] for t in timestamps]
+                    max_rel_time = max(max_rel_time, rel_times[-1])
+                    plt.plot(rel_times, gpu_mem_usages, label=f'{self.gpu_names[idx]}')
+            
+            # Create evenly spaced tick marks (maximum 10)
+            num_ticks = min(10, len(rel_times))
+            tick_positions = np.linspace(0, max_rel_time, num_ticks)
+            tick_labels = [f'{t:.0f}s' for t in tick_positions]
+            
+            plt.xlabel("Time (seconds)")
             plt.ylabel("GPU Memory Usage (GB)")
             plt.title("GPU Memory Usage Over Time")
-            plt.xticks(tick_positions, tick_labels, rotation=45)
+            plt.grid(True)
+            plt.legend()
+            plt.xticks(tick_positions, tick_labels)
             plt.tight_layout()
+            
             if save_dir:
                 plt.savefig(os.path.join(save_dir, "gpu_memory_usage.png"))
                 plt.close()
             else:
                 plt.show()
+
         # Save or Show Plots
         if save_dir:
             self.logger.info(f"Plots saved to {save_dir}")
