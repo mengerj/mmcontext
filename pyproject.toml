@@ -15,23 +15,26 @@ maintainers = [
 authors = [
   { name = "Jonatan Menger" },
 ]
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10,<3.12"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-  "accelerate>=1.3",
+  "accelerate>=0.33",
   "anndata",
   "dask",
-  "datasets>=3.2",
+  "datasets<2.20",
   "ipykernel",
   "matplotlib",
   "numba==0.60",           # was needed due to issues with scanpy and scib automatic load
   "numpy",
   "omegaconf",
+  "psutil",
+  "pybiomart>=0.2",
+  "pynvml",
+  "pytdc>=1.1.12",
   "python-dotenv>=1.0.1",
   "python-json-logger",
   "requests",
@@ -44,8 +47,6 @@ dependencies = [
   "session-info",
   "torch",
   "zarr<=2.18.4",
-  "pynvml",
-  "psutil",
 ]
 optional-dependencies.dev = [
   "pre-commit",
