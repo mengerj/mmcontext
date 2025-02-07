@@ -24,8 +24,7 @@ classifiers = [
 dependencies = [
   "accelerate>=0.33",
   "anndata",
-  "dask",
-  "datasets<2.20",
+  "datasets",
   "ipykernel",
   "matplotlib",
   "numba==0.60",           # was needed due to issues with scanpy and scib automatic load
@@ -34,7 +33,6 @@ dependencies = [
   "psutil",
   "pybiomart>=0.2",
   "pynvml",
-  "pytdc>=1.1.12",
   "python-dotenv>=1.0.1",
   "python-json-logger",
   "requests",
