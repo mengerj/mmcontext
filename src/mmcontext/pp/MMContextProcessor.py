@@ -1,3 +1,8 @@
+import logging
+
+# from mmcontext.models.geneformer_model import GeneformerModel
+import os
+
 import anndata
 import numpy as np
 import torch
@@ -5,6 +10,8 @@ import transformers
 from scipy import sparse as sp
 from sklearn.decomposition import PCA
 from torch import Tensor
+
+logger = logging.getLogger(__name__)
 
 
 class MMContextProcessor:
@@ -14,21 +21,31 @@ class MMContextProcessor:
     The latter can be chosen from several apporaches
     """
 
-    def __init__(self, obsm_key="X_pp", text_encoder_name="sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(
+        self,
+        processor_name="precomputed",
+        text_encoder_name="sentence-transformers/all-MiniLM-L6-v2",
+        **processor_kwargs,
+    ):
         super().__init__()
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(text_encoder_name)
-        self.omics_processor = self._load_omics_processor(obsm_key=obsm_key)
+        self.omics_processor = self._load_omics_processor(processor_name=processor_name, **processor_kwargs)
 
-    def _load_omics_processor(self, obsm_key):
-        processor = AnnDataRetrievalProcessor(obsm_key=obsm_key)
-        return processor
+    def _load_omics_processor(self, processor_name, **processor_kwargs):
+        if processor_name == "precomputed":
+            return AnnDataRetrievalProcessor(**processor_kwargs)
+        else:
+            raise ValueError(f"Invalid omics processor class: {processor_name}. Only 'precomputed' is supported.")
 
 
 class AnnDataRetrievalProcessor:
     """Processor that retrieves the raw data without any processing."""
 
-    def __init__(self, obsm_key):
+    def __init__(self, obsm_key, **kwargs):
         self.obsm_key = obsm_key
+        logger.info(
+            f"Initialized AnnDataRetrievalProcessor. Will get use embeddings from obsm_key: {obsm_key} as initial embeddings."
+        )
         # Add a cache for loaded AnnData files
         self._adata_cache = {}
 
