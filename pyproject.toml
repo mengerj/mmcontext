@@ -15,11 +15,12 @@ maintainers = [
 authors = [
   { name = "Jonatan Menger" },
 ]
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
   "accelerate>=0.33",
