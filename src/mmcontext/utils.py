@@ -1,7 +1,7 @@
 # tests/utils.py
-import importlib
-import json
 import logging
+import os
+from datetime import datetime
 
 import anndata
 import numpy as np
@@ -10,7 +10,7 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-
+'''
 def load_logging_config():
     """
     Load the logging configuration from `logging_config.json` in the `mmcontext.conf` module.
@@ -34,14 +34,42 @@ def load_logging_config():
     except json.JSONDecodeError as err:
         raise ValueError(f"Error decoding the JSON logging configuration: {err}") from err
 
+'''
+
 
 def setup_logging():
-    """Load the logging configuration from the logging_config.json file and configure the logging system."""
-    config_dict = load_logging_config()
-    # Configure logging
-    logging.config.dictConfig(config_dict)
-    logger = logging.getLogger(__name__)
-    logger.info("mmcontext logging configured using the specified configuration file.")
+    """Set up logging configuration for the module.
+
+    This function configures the root logger to display messages in the console and to write them to a file
+    named by the day. The log level is set to INFO.
+    """
+    # Create the logs directory
+    os.makedirs("logs", exist_ok=True)
+
+    # Get the root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # Avoid duplicate handlers (important if function is called multiple times)
+    if not logger.hasHandlers():
+        # Create a file handler
+        log_file = logging.FileHandler(f"logs/{datetime.now().strftime('%Y-%m-%d')}.log")
+        log_file.setLevel(logging.INFO)
+
+        # Create a console handler
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+
+        # Create a formatter and set it for the handlers
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        log_file.setFormatter(formatter)
+        console.setFormatter(formatter)
+
+        # Add the handlers to the root logger
+        logger.addHandler(log_file)
+        logger.addHandler(console)
+
+    return logger
 
 
 def sample_zinb(mu, theta, pi):

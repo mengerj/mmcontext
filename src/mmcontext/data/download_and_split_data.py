@@ -11,7 +11,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-def download_figshare_data(url: str, download_dir: str, file_name: str) -> str:
+def download_figshare_file(url: str, download_dir: str, file_name: str) -> str:
     """
     Download data from a Figshare link with a progress bar and save to the specified directory.
 
@@ -143,28 +143,32 @@ def save_splits(train_data: ad.AnnData, test_data: ad.AnnData, output_dir: str, 
     logger.info(f"Test data saved to {test_path}")
 
 
-def download_and_split(repo_dir: str = ".", figshare_id: str = "12420968", out_format: str = "zarr"):
+def download_figshare_data(
+    download_dir: str = ".",
+    figshare_id: str = "12420968",
+    base_url="https://api.figshare.com/v2",
+    out_format: str = "h5ad",
+):
     """Download the data from Figshare and split it into train and test sets.
 
     Parameters
     ----------
-    repo_dir : str, optional
-        The base directory where the data folder is located
+    download_dir : str, optional
+        The folder to where the data will be downloaded.
     figshare_id : str, optional
         The Figshare ID of the dataset.
+    base_url : str, optional
+        The base URL of the Figshare API.
     out_format : str, optional
         The format to save the data, either "h5ad" or "zarr".
     """
     # Configure the logger
     logging.basicConfig(level=logging.INFO)
-
-    base_dir = f"{repo_dir}/data/scib_data"
-    os.makedirs(base_dir, exist_ok=True)
-    original_dir = os.path.join(base_dir, "original")
+    os.makedirs(download_dir, exist_ok=True)
 
     # Step 1: Download the data
-    BASE_URL = "https://api.figshare.com/v2"
-    r = requests.get(BASE_URL + "/articles/" + figshare_id)
+
+    r = requests.get(base_url + "/articles/" + figshare_id)
     # Load the metadata as JSON
     if r.status_code != 200:
         raise ValueError("Request to figshare failed:", r.content)
@@ -179,15 +183,12 @@ def download_and_split(repo_dir: str = ".", figshare_id: str = "12420968", out_f
         file_name = file_meta["name"]
         # Format size in GB for readability
         file_size_gb = file_size / 1024**3
-        print(f"File: {file_meta['name']}, Size: {file_size_gb:.2f} GB")
-
+        logger.info(f"Downloading File: {file_name}, Size: {file_size_gb:.2f} GB")
         try:
-            data_paths[file_name] = download_figshare_data(download_url, original_dir, file_name=file_name)
+            data_paths[file_name] = download_figshare_file(download_url, download_dir, file_name=file_name)
         except ValueError as e:
             logger.error(e)
             return
-        if len(data_paths) == 2:
-            break
     for file_name in data_paths.keys():
         # Step 2: Load the data (assuming extracted files)
         data_path = data_paths[file_name]
@@ -203,12 +204,4 @@ def download_and_split(repo_dir: str = ".", figshare_id: str = "12420968", out_f
             return
 
         logger.info(f"Loaded AnnData object with {data.shape[0]} samples and {data.shape[1]} features.")
-
-        # Step 3: Split and save data
-        for split_by in ["random", "dataset_id"]:
-            output_dir = os.path.join(base_dir, f"split_{split_by}")
-            try:
-                train_data, test_data = split_train_test(data, split_by=split_by)
-                save_splits(train_data, test_data, output_dir, file_name=file_name, format=out_format)
-            except Exception as e:
-                logger.error(f"Failed to split and save data for split_by={split_by}: {e}")
+        return

@@ -23,15 +23,17 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-  "accelerate>=1.3",
+  "accelerate>=0.33",
   "anndata",
-  "dask",
-  "datasets>=3.2",
+  "datasets",
   "ipykernel",
   "matplotlib",
   "numba==0.60",           # was needed due to issues with scanpy and scib automatic load
   "numpy",
   "omegaconf",
+  "psutil",
+  "pybiomart>=0.2",
+  "pynvml",
   "python-dotenv>=1.0.1",
   "python-json-logger",
   "requests",
@@ -44,8 +46,6 @@ dependencies = [
   "session-info",
   "torch",
   "zarr<=2.18.4",
-  "pynvml",
-  "psutil",
 ]
 optional-dependencies.dev = [
   "pre-commit",

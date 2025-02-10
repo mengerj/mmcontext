@@ -1,10 +1,17 @@
+import hashlib
+import logging
+import os
+import tempfile
+
 import anndata
+import h5py
 import numpy as np
+import requests
+import scipy.sparse as sp
 import torch
 import transformers
-from scipy import sparse as sp
-from sklearn.decomposition import PCA
-from torch import Tensor
+
+logger = logging.getLogger(__name__)
 
 
 class MMContextProcessor:
@@ -14,26 +21,113 @@ class MMContextProcessor:
     The latter can be chosen from several apporaches
     """
 
-    def __init__(self, obsm_key="X_pp", text_encoder_name="sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(
+        self,
+        processor_name="precomputed",
+        text_encoder_name="sentence-transformers/all-MiniLM-L6-v2",
+        **processor_kwargs,
+    ):
         super().__init__()
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(text_encoder_name)
-        self.omics_processor = self._load_omics_processor(obsm_key=obsm_key)
+        self.omics_processor = self._load_omics_processor(processor_name=processor_name, **processor_kwargs)
 
-    def _load_omics_processor(self, obsm_key):
-        processor = AnnDataRetrievalProcessor(obsm_key=obsm_key)
-        return processor
+    def _load_omics_processor(self, processor_name, **processor_kwargs):
+        if processor_name == "precomputed":
+            return AnnDataRetrievalProcessor(**processor_kwargs)
+        else:
+            raise ValueError(f"Invalid omics processor class: {processor_name}. Only 'precomputed' is supported.")
+
+
+def download_file_from_share_link(share_link, save_path):
+    """
+    Downloads a file from a Nextcloud share link and checks if it's a valid .h5ad file.
+
+    Parameters
+    ----------
+    share_link : str
+        The full share link URL to the file.
+    save_path : str
+        The local path where the file should be saved.
+
+    Returns
+    -------
+    bool
+        True if the download was successful and the file is a valid .h5ad, False otherwise.
+
+    Example
+    -------
+    >>> success = download_file_from_share_link(
+    ...     "https://nxc-fredato.imbi.uni-freiburg.de/s/Zs6pAa8P5ynDTiP", "path/to/save/file.h5ad"
+    ... )
+    >>> print("Download successful:", success)
+    """
+    response = requests.get(share_link)
+    if response.status_code == 200:
+        with open(save_path, "wb") as file:
+            file.write(response.content)
+
+        try:
+            with h5py.File(save_path, "r") as h5_file:
+                if "X" in h5_file:
+                    logger.info("File is a valid .h5ad file.")
+                    return True
+                else:
+                    logger.error("File does not appear to be a valid .h5ad file.")
+        except Exception as e:
+            logger.error(f"Error while checking the file: {e}")
+
+        return False
+    else:
+        logger.error(f"Failed to download the file: {response.status_code} - {response.reason}")
+        return False
 
 
 class AnnDataRetrievalProcessor:
-    """Processor that retrieves the raw data without any processing."""
+    """
+    Processor that retrieves the raw data without any processing.
 
-    def __init__(self, obsm_key):
+    Attributes
+    ----------
+    obsm_key : str
+        The key to access the desired representation in adata.obsm.
+    _adata_cache : dict
+        Cache for loaded AnnData objects to avoid reloading from disk.
+    """
+
+    def __init__(self, obsm_key, **kwargs):
+        """
+        Initialize the AnnDataRetrievalProcessor.
+
+        Parameters
+        ----------
+        obsm_key : str
+            The key in adata.obsm to use for initial embeddings.
+        """
         self.obsm_key = obsm_key
-        # Add a cache for loaded AnnData files
+        logger.info(
+            f"Initialized AnnDataRetrievalProcessor. Will use embeddings from obsm_key: {obsm_key} as initial embeddings."
+        )
         self._adata_cache = {}
 
     def _convert_to_tensor(self, data):
-        """Convert data to torch tensor efficiently."""
+        """
+        Convert data to torch tensor efficiently.
+
+        Parameters
+        ----------
+        data : torch.Tensor, np.ndarray, or sp.spmatrix
+            The data to be converted.
+
+        Returns
+        -------
+        torch.Tensor
+            The converted tensor.
+
+        Raises
+        ------
+        ValueError
+            If the data type is unsupported.
+        """
         if isinstance(data, torch.Tensor):
             return data
         if isinstance(data, sp.spmatrix):
@@ -42,98 +136,96 @@ class AnnDataRetrievalProcessor:
             return torch.from_numpy(data)
         raise ValueError(f"Unsupported data type: {type(data)}")
 
-    def get_rep(self, data):
-        """Use the given file_path and sample ID as well as the obsm_key to retrieve the correct representation of the data.
+    @staticmethod
+    def _resolve_file_path(file_path):
+        """
+        Resolve the file path.
+
+        If the file_path is a share link (starts with 'https'), download the file locally and return the local file path.
 
         Parameters
         ----------
-        data : list
-            A list of dictionaries, each containing 'file_path' and 'sample_id' keys.
-        obsm_key : str
-            The key to access the desired representation in adata.obsm
+        file_path : str
+            The original file path or share link.
 
         Returns
         -------
-        features : torch.Tensor
-            The omics representation tensor with shape
-            (batch_size, feature_dim).
+        str
+            The resolved local file path.
+        """
+        if file_path.startswith("https"):
+            # Generate a unique local filename based on the MD5 hash of the share link.
+            hash_object = hashlib.md5(file_path.encode())
+            file_hash = hash_object.hexdigest()
+            local_file = os.path.join(tempfile.gettempdir(), f"{file_hash}.h5ad")
+            if not os.path.exists(local_file):
+                logger.info(f"Downloading file from share link: {file_path} to {local_file}")
+                success = download_file_from_share_link(file_path, local_file)
+                if not success:
+                    raise ValueError(f"Failed to download file from share link: {file_path}")
+            return local_file
+        return file_path
+
+    def get_rep(self, data):
+        """
+        Retrieve the omics representation of the data based on the provided file paths and sample IDs.
+
+        Parameters
+        ----------
+        data : list of dict
+            A list of dictionaries, each containing 'file_path' and 'sample_id' keys.
+            The 'file_path' can be a local file (h5ad or zarr) or a share link (starts with https).
+
+        Returns
+        -------
+        torch.Tensor
+            The omics representation tensor with shape (batch_size, feature_dim).
+
+        Raises
+        ------
+        ValueError
+            If data is not a list or if an unsupported file format is encountered.
         """
         if not isinstance(data, list):
             raise ValueError("Data must be a list of dictionaries")
 
         batch_size = len(data)
-        # self.clear_cache()
-        # Load first file to get feature dimension
-        first_file = data[0]["file_path"]
+        # Process the first file to determine the feature dimension.
+        first_file = self._resolve_file_path(data[0]["file_path"])
         if first_file not in self._adata_cache:
             if first_file.endswith(".h5ad"):
                 adata = anndata.read_h5ad(first_file)
             elif first_file.endswith(".zarr"):
                 adata = anndata.read_zarr(first_file)
-            # Convert to tensor once during caching
-            # adata.obsm[self.obsm_key] = self._convert_to_tensor(adata.obsm[self.obsm_key])
+            else:
+                raise ValueError(f"Unsupported file format for file: {first_file}")
             self._adata_cache[first_file] = adata
 
         first_adata = self._adata_cache[first_file]
         feature_dim = first_adata.obsm[self.obsm_key].shape[1]
 
-        # Pre-allocate the output tensor
+        # Pre-allocate the output tensor.
         features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)
 
         for i, sample_dict in enumerate(data):
-            file_path = sample_dict["file_path"]
+            file_path = self._resolve_file_path(sample_dict["file_path"])
             sample_id = sample_dict["sample_id"]
 
-            # Use cached AnnData if available, otherwise load and convert
             if file_path not in self._adata_cache:
                 if file_path.endswith(".h5ad"):
                     adata = anndata.read_h5ad(file_path)
-                if file_path.endswith(".zarr"):
+                elif file_path.endswith(".zarr"):
                     adata = anndata.read_zarr(file_path)
-                # adata.obsm[self.obsm_key] = self._convert_to_tensor(adata.obsm[self.obsm_key])
+                else:
+                    raise ValueError(f"Unsupported file format for file: {file_path}")
                 self._adata_cache[file_path] = adata
 
             adata = self._adata_cache[file_path]
-
-            # Get the specific sample's representation
+            # Retrieve the sample's representation using the provided sample_id.
             sample_idx = adata.obs.index == sample_id
             features[i] = self._convert_to_tensor(adata.obsm[self.obsm_key][sample_idx][0])
         return features
 
     def clear_cache(self):
-        """Clear the AnnData cache to free memory"""
+        """Clear the AnnData cache to free memory."""
         self._adata_cache.clear()
-
-
-class PCAOmicsProcessor:
-    """Processor to encode omics data"""
-
-    def __init__(self, n_components=50):
-        self.n_components = n_components
-        self.pca = None
-        self.mean_ = None
-
-    def fit(self, array: np.ndarray | Tensor | sp.spmatrix):
-        """Fits PCA on the input array."""
-        count_matrix = array
-        self.pca = PCA(n_components=self.n_components)
-        self.pca.fit(count_matrix)
-        self.mean_ = np.mean(count_matrix, axis=0)
-
-    def encode(self, count_vector):
-        """Encodes a single count vector using the fitted PCA."""
-        if self.pca is None or self.mean_ is None:
-            raise ValueError("PCA encoder must be fitted before encoding.")
-        standardized_vector = count_vector - self.mean_
-        return self.pca.transform(standardized_vector.reshape(1, -1))[0]
-
-    def save(self, filepath):
-        """Saves the PCA components and mean."""
-        np.savez(filepath, components=self.pca.components_, mean=self.mean_)
-
-    def load(self, filepath):
-        """Loads the PCA components and mean."""
-        data = np.load(filepath)
-        self.pca = PCA(n_components=self.n_components)
-        self.pca.components_ = data["components"]
-        self.mean_ = data["mean"]

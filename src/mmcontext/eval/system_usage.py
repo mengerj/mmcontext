@@ -3,13 +3,13 @@ import os
 import platform
 import threading
 import time
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import psutil
-import torch
-import matplotlib.pyplot as plt
-from pathlib import Path
 import pynvml
+import torch
 
 
 class SystemMonitor:
@@ -51,6 +51,7 @@ class SystemMonitor:
         # Try NVIDIA GPU
         try:
             import pynvml
+
             pynvml.nvmlInit()
             self.gpu_handles = []
             self.gpu_names = []
@@ -90,13 +91,12 @@ class SystemMonitor:
                 self.gpu_names.append(name.decode() if isinstance(name, bytes) else name)
 
             self.gpu_total_memory = [
-                pynvml.nvmlDeviceGetMemoryInfo(handle).total / (1024**3) 
-                for handle in self.gpu_handles
+                pynvml.nvmlDeviceGetMemoryInfo(handle).total / (1024**3) for handle in self.gpu_handles
             ]
             self.gpu_available = True
             self.gpu_type = "NVIDIA"
             self.logger.info(f"Detected NVIDIA GPUs: {self.gpu_names}")
-            
+
         except Exception as e:
             self.logger.info(f"No NVIDIA GPU detected or pynvml not installed: {str(e)}")
             # Try detecting Apple GPU
@@ -157,8 +157,6 @@ class SystemMonitor:
                     pass  # Unsupported GPU type
 
     def _monitor_nvidia_gpu(self, timestamp):
-        import pynvml
-
         try:
             for idx, handle in enumerate(self.gpu_handles):
                 util = pynvml.nvmlDeviceGetUtilizationRates(handle)
@@ -234,38 +232,37 @@ class SystemMonitor:
             summary["total_gpu_memory"] = sum(self.gpu_total_memory)
             if self.gpu_type == "NVIDIA":
                 summary["gpu_metrics"] = []
-                for idx, (usage_data, memory_data, name, total_memory) in enumerate(zip(
-                    self.gpu_usage, 
-                    self.gpu_memory_usage, 
-                    self.gpu_names,
-                    self.gpu_total_memory
-                )):
+                for idx, (usage_data, memory_data, name, total_memory) in enumerate(
+                    zip(self.gpu_usage, self.gpu_memory_usage, self.gpu_names, self.gpu_total_memory, strict=False)
+                ):
                     gpu_summary = {}
                     gpu_usages = [usage for _, usage in usage_data if usage is not None]
                     gpu_memory_usages = [usage for _, usage in memory_data if usage is not None]
-                    
+
                     if gpu_usages:
                         gpu_summary["usage_mean"] = sum(gpu_usages) / len(gpu_usages)
                         gpu_summary["usage_max"] = max(gpu_usages)
                     if gpu_memory_usages:
                         gpu_summary["memory_usage_mean"] = sum(gpu_memory_usages) / len(gpu_memory_usages)
                         gpu_summary["memory_usage_max"] = max(gpu_memory_usages)
-                    
+
                     gpu_summary["name"] = name.decode() if isinstance(name, bytes) else name
                     gpu_summary["total_memory"] = total_memory
                     gpu_summary["gpu_id"] = idx
-                    
+
                     summary["gpu_metrics"].append(gpu_summary)
             else:
                 # Handle Apple GPU or other types
-                summary["gpu_metrics"] = [{
-                    "name": self.gpu_name,
-                    "usage_mean": None,
-                    "usage_max": None,
-                    "memory_usage_mean": None,
-                    "memory_usage_max": None,
-                    "gpu_id": 0
-                }]
+                summary["gpu_metrics"] = [
+                    {
+                        "name": self.gpu_name,
+                        "usage_mean": None,
+                        "usage_max": None,
+                        "memory_usage_mean": None,
+                        "memory_usage_max": None,
+                        "gpu_id": 0,
+                    }
+                ]
         else:
             summary["gpu_metrics"] = []
 
@@ -295,7 +292,9 @@ class SystemMonitor:
                 if gpu.get("usage_mean") is not None:
                     print(f"  Usage (mean/max %): {gpu['usage_mean']:.2f}/{gpu['usage_max']:.2f}%")
                 if gpu.get("memory_usage_mean") is not None:
-                    print(f"  Memory Usage (mean/max GB): {gpu['memory_usage_mean']:.2f}/{gpu['memory_usage_max']:.2f} GB")
+                    print(
+                        f"  Memory Usage (mean/max GB): {gpu['memory_usage_mean']:.2f}/{gpu['memory_usage_max']:.2f} GB"
+                    )
                     print(f"  Total Memory: {gpu['total_memory']:.2f} GB")
         else:
             print("\nNo supported GPU detected.")
@@ -318,8 +317,6 @@ class SystemMonitor:
         If save_path is provided, saves the plots to the specified directory.
         """
         import os
-
-        import matplotlib.pyplot as plt
 
         time_format = "%H:%M:%S"
 
@@ -397,13 +394,13 @@ class SystemMonitor:
                     timestamps, gpu_usages = zip(*usage_data, strict=False)
                     rel_times = [t - timestamps[0] for t in timestamps]
                     max_rel_time = max(max_rel_time, rel_times[-1])
-                    plt.plot(rel_times, gpu_usages, label=f'{self.gpu_names[idx]}')
-            
+                    plt.plot(rel_times, gpu_usages, label=f"{self.gpu_names[idx]}")
+
             # Create evenly spaced tick marks (maximum 10)
             num_ticks = min(10, len(rel_times))
             tick_positions = np.linspace(0, max_rel_time, num_ticks)
-            tick_labels = [f'{t:.0f}s' for t in tick_positions]
-            
+            tick_labels = [f"{t:.0f}s" for t in tick_positions]
+
             plt.xlabel("Time (seconds)")
             plt.ylabel("GPU Usage (%)")
             plt.ylim(0, 101)
@@ -412,7 +409,7 @@ class SystemMonitor:
             plt.legend()
             plt.xticks(tick_positions, tick_labels)
             plt.tight_layout()
-            
+
             if save_dir:
                 plt.savefig(os.path.join(save_dir, "gpu_usage.png"))
                 plt.close()
@@ -428,13 +425,13 @@ class SystemMonitor:
                     timestamps, gpu_mem_usages = zip(*memory_data, strict=False)
                     rel_times = [t - timestamps[0] for t in timestamps]
                     max_rel_time = max(max_rel_time, rel_times[-1])
-                    plt.plot(rel_times, gpu_mem_usages, label=f'{self.gpu_names[idx]}')
-            
+                    plt.plot(rel_times, gpu_mem_usages, label=f"{self.gpu_names[idx]}")
+
             # Create evenly spaced tick marks (maximum 10)
             num_ticks = min(10, len(rel_times))
             tick_positions = np.linspace(0, max_rel_time, num_ticks)
-            tick_labels = [f'{t:.0f}s' for t in tick_positions]
-            
+            tick_labels = [f"{t:.0f}s" for t in tick_positions]
+
             plt.xlabel("Time (seconds)")
             plt.ylabel("GPU Memory Usage (GB)")
             plt.title("GPU Memory Usage Over Time")
@@ -442,7 +439,7 @@ class SystemMonitor:
             plt.legend()
             plt.xticks(tick_positions, tick_labels)
             plt.tight_layout()
-            
+
             if save_dir:
                 plt.savefig(os.path.join(save_dir, "gpu_memory_usage.png"))
                 plt.close()

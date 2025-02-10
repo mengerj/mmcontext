@@ -112,12 +112,15 @@ class MMContextEncoder(nn.Module):
         omics_text_info = []
 
         for _idx, data in enumerate(texts):
-            if isinstance(data, dict) and "file_path" in data.keys() and "sample_id" in data.keys():
+            if '{"file_path"' in data:
+                data = json.loads(data)  # convert string to dictionary
                 omics_representations.append(data)
                 omics_text_info.append(0)
-            else:
+            elif isinstance(data, str):
                 texts_values.append(data)
                 omics_text_info.append(1)
+            else:
+                raise ValueError(f"Unsupported data type: {type(data)}")
 
         encoding = {}
         if len(texts_values):
@@ -314,7 +317,7 @@ class OmicsEncoder(nn.Module):
         # Extract relevant inputs
         in_main = inputs.get("omics_representation", None)
         in_main_key_padding_mask = inputs.get("attention_mask", None)
-        if in_main_key_padding_mask:
+        if in_main_key_padding_mask is not None:
             in_main_key_padding_mask = in_main_key_padding_mask.bool()
 
         if in_main is None:
