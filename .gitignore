@@ -88,3 +88,6 @@ build/
 #slurm output
 *.err
 *.out
+
+#trained models
+models_trained/
