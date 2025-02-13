@@ -1,5 +1,7 @@
 import logging
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,7 +57,7 @@ def evaluate_annotation_accuracy(adata, true_key: str, inferred_key: str) -> flo
         raise ValueError("The length of true annotations differs from inferred annotations.")
 
     # Compare element-wise and calculate fraction of matches
-    matches = true_labels == inferred_labels
+    matches = np.array(true_labels.values) == np.array(inferred_labels.values)
     accuracy = matches.mean()
 
     # Optionally, log the result
