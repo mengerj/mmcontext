@@ -48,7 +48,7 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 1. Prepare directories and logging
     # -------------------------------------------------------------------------
-    setup_logging(logging_dir="../logs")
+    setup_logging(logging_dir=f"{hydra_run_dir}/logs")
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -165,7 +165,7 @@ def main(cfg: DictConfig):
     # save the configuration used for this run
     used_conf_path = Path(hydra_run_dir, "config.yaml")
     with open(used_conf_path, "w") as f:
-        yaml.dump(cfg, f, indent=4)
+        f.write(OmegaConf.to_yaml(cfg))
 
     # monitor.stop()
     # monitor.save(save_dir_date)
