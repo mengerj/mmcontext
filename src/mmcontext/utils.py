@@ -1,50 +1,132 @@
 # tests/utils.py
+import json
 import logging
 import os
+import random
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 import anndata
+import h5py
 import numpy as np
 import pandas as pd
+import requests
 import torch
+import torch.nn as nn
+from sentence_transformers import losses
 
 logger = logging.getLogger(__name__)
 
-'''
-def load_logging_config():
+
+def load_test_adata_from_hf_dataset(
+    test_dataset,
+    sample_size=10,
+):
     """
-    Load the logging configuration from `logging_config.json` in the `mmcontext.conf` module.
+    Load an AnnData object from a Hugging Face test dataset that contains a share link to an external `.h5ad` file.
+
+    This function downloads the file to a temporary directory
+    and reads it into memory.
+
+    Parameters
+    ----------
+    test_dataset : dict
+        A dictionary-like object representing the HF dataset split (e.g., `test_dataset["train"]`).
+        It must contain an 'anndata_ref' field, where each element is a JSON string with a "file_path" key.
+    sample_size : int, optional
+        Number of random rows to check for file path consistency before download, by default 10.
 
     Returns
     -------
-    dict
-        The parsed logging configuration as a dictionary.
+    anndata.AnnData
+        The AnnData object read from the downloaded `.h5ad` file.
+
+    Notes
+    -----
+    - Data is assumed to come from a Hugging Face dataset with a single unique `file_path` for all rows.
+    - The function downloads the file to a temporary directory, which is removed when this function returns.
+    - If multiple rows have different `file_path` values, the function raises an error.
     """
-    try:
-        # Get the path to the logging_config.json file
-        resource_path = importlib.resources.files("mmcontext.conf") / "logging_config.json"
+    # If the dataset split is large, reduce the sample size to the dataset size
+    size_of_dataset = len(test_dataset)
+    sample_size = min(sample_size, size_of_dataset)
 
-        # Open the resource file
-        with resource_path.open("r", encoding="utf-8") as config_file:
-            logging_config = json.load(config_file)
+    # Randomly sample rows to ensure all file paths match
+    indices_to_check = random.sample(range(size_of_dataset), sample_size)
+    paths = []
+    for idx in indices_to_check:
+        adata_ref_json = test_dataset[idx]["anndata_ref"]
+        adata_ref = json.loads(adata_ref_json)
+        paths.append(adata_ref["file_path"])
 
-        return logging_config
-    except FileNotFoundError as err:
-        raise RuntimeError("The logging configuration file could not be found.") from err
-    except json.JSONDecodeError as err:
-        raise ValueError(f"Error decoding the JSON logging configuration: {err}") from err
+    # Ensure that all random rows have the same file path
+    first_path = paths[0]
+    for p in paths[1:]:
+        if p != first_path:
+            raise ValueError("Not all sampled rows contain the same file path. Please verify the dataset consistency.")
 
-'''
+    # Download the file from the share link into a temporary directory
+    with tempfile.TemporaryDirectory() as tmpdir:
+        save_path = Path(tmpdir) / "test.h5ad"
+        download_file_from_share_link(first_path, str(save_path))
+        adata = anndata.read_h5ad(save_path)
+
+    return adata
 
 
-def setup_logging():
+def download_file_from_share_link(share_link, save_path):
+    """
+    Downloads a file from a Nextcloud share link and checks if it's a valid .h5ad file.
+
+    Parameters
+    ----------
+    share_link : str
+        The full share link URL to the file.
+    save_path : str
+        The local path where the file should be saved.
+
+    Returns
+    -------
+    bool
+        True if the download was successful and the file is a valid .h5ad, False otherwise.
+
+    Example
+    -------
+    >>> success = download_file_from_share_link(
+    ...     "https://nxc-fredato.imbi.uni-freiburg.de/s/Zs6pAa8P5ynDTiP", "path/to/save/file.h5ad"
+    ... )
+    >>> print("Download successful:", success)
+    """
+    response = requests.get(share_link)
+    if response.status_code == 200:
+        with open(save_path, "wb") as file:
+            file.write(response.content)
+
+        try:
+            with h5py.File(save_path, "r") as h5_file:
+                if "X" in h5_file:
+                    logger.info("File is a valid .h5ad file.")
+                    return True
+                else:
+                    logger.error("File does not appear to be a valid .h5ad file.")
+        except Exception as e:
+            logger.error(f"Error while checking the file: {e}")
+
+        return False
+    else:
+        logger.error(f"Failed to download the file: {response.status_code} - {response.reason}")
+        return False
+
+
+def setup_logging(logging_dir="logs"):
     """Set up logging configuration for the module.
 
     This function configures the root logger to display messages in the console and to write them to a file
     named by the day. The log level is set to INFO.
     """
     # Create the logs directory
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs(logging_dir, exist_ok=True)
 
     # Get the root logger
     logger = logging.getLogger()
@@ -251,3 +333,54 @@ def create_test_emb_anndata(n_samples, emb_dim, data_key="d_emb_aligned", contex
     if sample_ids is not None:
         adata.obs["sample_id"] = sample_ids
     return adata
+
+
+def get_loss(loss_name: str, model, dataset_type: str):
+    """
+    Return a suitable loss object based on the provided loss name and dataset type.
+
+    Parameters
+    ----------
+    loss_name : str
+        A string identifying the loss function to be used.
+    model : MMContextEncoder
+        The multimodal context encoder model.
+    dataset_type : str
+        The type of the dataset (e.g., 'pairs', 'triplets').
+
+    Returns
+    -------
+    losses.Loss
+        An instance of a SentenceTransformer loss object.
+
+    Notes
+    -----
+    This is a stub. You will add compatibility checks later (e.g., if dataset_type
+    is 'pairs', maybe only certain losses are supported).
+    """
+    pairs_losses = ["ContrastiveLoss", "OnlineContrastiveLoss"]
+    multiplets_losses = ["MultipleNegativesRankingLoss", "CachedMultipleNegativesRankingLoss", "CachedGISTEmbedLoss"]
+    if dataset_type == "pairs" and loss_name not in pairs_losses:
+        raise ValueError(f"Loss '{loss_name}' is not supported for pairs dataset. Choose from {pairs_losses}")
+    # Stub logic - expand as needed
+    if dataset_type == "multiplets" and loss_name not in multiplets_losses:
+        raise ValueError(f"Loss '{loss_name}' is not supported for multiplets dataset. Choose from {multiplets_losses}")
+
+    # Dynamically fetch the loss class from the sentence_transformers.losses module
+    try:
+        LossClass = getattr(losses, loss_name)
+    except AttributeError as e:
+        raise f"Loss class '{loss_name}' not found in sentence_transformers.losses" from e
+    # Instantiate the loss class with the given model
+    loss_obj = LossClass(model=model)
+    return loss_obj
+
+
+def get_device():
+    """Helper function to get the available device."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
