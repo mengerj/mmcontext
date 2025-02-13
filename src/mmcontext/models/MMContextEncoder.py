@@ -283,7 +283,7 @@ class OmicsEncoder(nn.Module):
                     activation: {activation},
                     dropout: {dropout},
                     learn_temperature: {learn_temperature}")
-                    '''
+                    ''')
 
         encoder_layer = CustomTransformerEncoderLayer(
             embedding_dim=embedding_dim,
