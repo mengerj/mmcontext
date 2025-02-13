@@ -89,7 +89,7 @@ class OmicsQueryAnnotator:
         self.faiss_index = faiss.IndexFlatIP(dim)
         self.faiss_index.add(self.embeddings)
 
-    def annotate_omics_data(self, adata, labels=None, use_faiss=False, device="cpu", n_top=5):
+    def annotate_omics_data(self, adata, labels=None, use_faiss=False, device="cpu", emb_key="mmcontext_emb", n_top=5):
         """
         Annotate omics data by finding top-matching labels for each sample.
 
@@ -116,7 +116,8 @@ class OmicsQueryAnnotator:
         The source of the omics data is adata.obsm["omics_emb"] as provided by
         some upstream pipeline.
         """
-        if "omics_emb" not in adata.obsm:
+        self.emb_key = emb_key
+        if self.emb_key not in adata.obsm:
             raise ValueError(
                 "`adata.obsm['omics_emb']` not found. Use MMContextInference first. "
                 "Make sure you use the same, pre-trained model as you provide to this class."
@@ -126,7 +127,7 @@ class OmicsQueryAnnotator:
         if use_faiss and self.faiss_index is None:
             self.build_label_index(labels)
 
-        data_emb = adata.obsm["omics_emb"]
+        data_emb = adata.obsm[self.emb_key]
         if self.is_cosine:
             data_emb = self._l2_normalize(data_emb)
         data_emb = data_emb.astype(np.float32)
@@ -196,28 +197,28 @@ class OmicsQueryAnnotator:
 
     def build_omics_index(self, adata, sample_ids=None):
         """
-        Build a Faiss index from the omics embeddings in `adata.obsm["omics_emb"]`.
+        Build a Faiss index from the omics embeddings in `adata.obsm[self.emb_key]`.
 
         Parameters
         ----------
         adata : anndata.AnnData
-            Anndata object containing omics data in `adata.obsm["omics_emb"]`.
+            Anndata object containing omics data in `adata.obsm[self.emb_key]`.
         sample_ids : List[str], optional
             A parallel list of sample identifiers. If None, we'll default
             to adata.obs_names (row names in AnnData).
 
         Notes
         -----
-        The source of the omics embeddings is `adata.obsm["omics_emb"]` which
+        The source of the omics embeddings is `adata.obsm[self.emb_key]` which
         should already exist by the time this method is called.
         """
         if not FAISS_AVAILABLE:
             raise ImportError("Faiss is not installed. Please install faiss-cpu or faiss-gpu depending on your system.")
-        if "omics_emb" not in adata.obsm:
+        if self.emb_key not in adata.obsm:
             raise ValueError("`adata.obsm['omics_emb']` not found.")
 
         logger.info("Building Faiss index for omics embeddings.")
-        data_emb = adata.obsm["omics_emb"]
+        data_emb = adata.obsm[self.emb_key]
 
         if self.is_cosine:
             data_emb = self._l2_normalize(data_emb)
@@ -290,9 +291,9 @@ class OmicsQueryAnnotator:
         else:
             logger.info("Computing cosine similarity between queries and omics data.")
             # Compute cosine similarity between queries and omics data
-            if "omics_emb" not in adata.obsm:
+            if self.emb_key not in adata.obsm:
                 raise ValueError("Omics embeddings not found in adata.obsm.")
-            data_emb = adata.obsm["omics_emb"]
+            data_emb = adata.obsm[self.emb_key]
             if self.is_cosine:
                 data_emb = self._l2_normalize(data_emb)
             similarity_matrix = compute_cosine_similarity(data_emb, query_emb, device=device)
