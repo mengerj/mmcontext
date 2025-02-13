@@ -7,9 +7,10 @@ import torch.nn.functional as F
 import transformers
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
-
+import logging
 from mmcontext.pp import MMContextProcessor
 
+logger = logging.getLogger(__name__)
 '''
 class BaseModel(nn.Module, metaclass=abc.ABCMeta):
     """BaseModel defines common methods for all models."""
@@ -272,6 +273,17 @@ class OmicsEncoder(nn.Module):
         self.activation = activation
         self.dropout = dropout
         self.learn_temperature = learn_temperature
+        logger.info(f'''Intialized OmicsEncoder with the following parameters:
+                    embedding_dim: {embedding_dim},
+                    hidden_dim: {hidden_dim},
+                    num_layers: {num_layers},
+                    num_heads: {num_heads},
+                    use_self_attention: {use_self_attention},
+                    use_cross_attention: {use_cross_attention},
+                    activation: {activation},
+                    dropout: {dropout},
+                    learn_temperature: {learn_temperature}")
+                    '''
 
         encoder_layer = CustomTransformerEncoderLayer(
             embedding_dim=embedding_dim,
