@@ -4,12 +4,12 @@ import os
 import tempfile
 
 import anndata
-import h5py
 import numpy as np
-import requests
 import scipy.sparse as sp
 import torch
 import transformers
+
+from mmcontext.utils import download_file_from_share_link
 
 logger = logging.getLogger(__name__)
 
@@ -36,50 +36,6 @@ class MMContextProcessor:
             return AnnDataRetrievalProcessor(**processor_kwargs)
         else:
             raise ValueError(f"Invalid omics processor class: {processor_name}. Only 'precomputed' is supported.")
-
-
-def download_file_from_share_link(share_link, save_path):
-    """
-    Downloads a file from a Nextcloud share link and checks if it's a valid .h5ad file.
-
-    Parameters
-    ----------
-    share_link : str
-        The full share link URL to the file.
-    save_path : str
-        The local path where the file should be saved.
-
-    Returns
-    -------
-    bool
-        True if the download was successful and the file is a valid .h5ad, False otherwise.
-
-    Example
-    -------
-    >>> success = download_file_from_share_link(
-    ...     "https://nxc-fredato.imbi.uni-freiburg.de/s/Zs6pAa8P5ynDTiP", "path/to/save/file.h5ad"
-    ... )
-    >>> print("Download successful:", success)
-    """
-    response = requests.get(share_link)
-    if response.status_code == 200:
-        with open(save_path, "wb") as file:
-            file.write(response.content)
-
-        try:
-            with h5py.File(save_path, "r") as h5_file:
-                if "X" in h5_file:
-                    logger.info("File is a valid .h5ad file.")
-                    return True
-                else:
-                    logger.error("File does not appear to be a valid .h5ad file.")
-        except Exception as e:
-            logger.error(f"Error while checking the file: {e}")
-
-        return False
-    else:
-        logger.error(f"Failed to download the file: {response.status_code} - {response.reason}")
-        return False
 
 
 class AnnDataRetrievalProcessor:
