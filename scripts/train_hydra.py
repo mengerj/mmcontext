@@ -48,7 +48,7 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 1. Prepare directories and logging
     # -------------------------------------------------------------------------
-    setup_logging(logging_dir=f"{hydra_run_dir}/logs")
+    #setup_logging(logging_dir=f"{hydra_run_dir}/logs")
     """
     logging.basicConfig(
         level=logging.INFO,
