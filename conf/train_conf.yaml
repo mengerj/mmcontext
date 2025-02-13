@@ -1,0 +1,59 @@
+# conf/config.yaml
+
+# The embedding_dim_map is used to derive embedding_dim based on embedding_method.
+# You can override embedding_method from the command line:
+#   python train.py embedding_method=hvg
+#
+# Or you can override any other parameter by specifying its full path, e.g.:
+#   python train.py dataset.basename=my_awesome_dataset
+
+# Here are some defaults:
+embedding_method: "scvi"
+
+embedding_dim_map:
+  hvg: 2000
+  pca: 64
+  scvi: 64
+  geneformer: 512
+
+dataset:
+  basename: "geo_0_2k_cellxgene_0_2K"
+  type: "pairs"
+  test_datasets:
+    - "jo-mengr/bowel_disease_single"
+
+text_encoder:
+  name: "sentence-transformers/all-MiniLM-L6-v2"
+
+loss: "ContrastiveLoss"
+
+model:
+  omics_model_cfg:
+    embedding_dim: 50 #this will be overwritten by the embedding_dim_map
+    hidden_dim: 128
+    num_layers: 1
+    num_heads: 0
+    use_self_attention: false
+    activation: "relu"
+    dropout: 0.1
+
+trainer:
+  output_dir: "../../models/trained"
+  num_train_epochs: 5
+  per_device_train_batch_size: 256
+  per_device_eval_batch_size: 256
+  learning_rate: 2e-5
+  warmup_ratio: 0.1
+  fp16: false
+  bf16: false
+  eval_strategy: "steps"
+  eval_steps: 100
+  save_strategy: "steps"
+  save_steps: 100
+  save_total_limit: 2
+  logging_steps: 100
+  run_name: "mmcontext"
+
+save_dir: "out"
+# You could also define logging via Hydra’s logging config if desired,
+# but here we do not override the default Hydra logging setup.
