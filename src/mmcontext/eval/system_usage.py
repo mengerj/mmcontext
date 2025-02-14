@@ -101,10 +101,10 @@ class SystemMonitor:
             self.logger.info(f"No NVIDIA GPU detected or pynvml not installed: {str(e)}")
             # Try detecting Apple GPU
             if platform.system() == "Darwin" and "macOS" in platform.platform():
-                self.gpu_available = True
+                self.gpu_available = False
                 self.gpu_type = "Apple"
                 self.gpu_name = "Apple Integrated GPU"
-                self.logger.info("Detected Apple GPU.")
+                self.logger.info("Detected Apple GPU. But not supported for detailed monitoring.")
             else:
                 self.logger.info("No supported GPU detected.")
                 self.gpu_available = False
