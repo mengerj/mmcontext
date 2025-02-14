@@ -37,7 +37,7 @@ def dummy_labels():
 @pytest.fixture
 def dummy_adata():
     """
-    Returns a small AnnData object with random embeddings in .obsm["omics_emb"].
+    Returns a small AnnData object with random embeddings in .obsm["mmcontext_emb"].
     """
     n_obs = 5
     n_dim = 4
@@ -46,7 +46,7 @@ def dummy_adata():
     adata = anndata.AnnData(X)
     # Create random embeddings
     emb = np.random.rand(n_obs, n_dim)
-    adata.obsm["omics_emb"] = emb
+    adata.obsm["mmcontext_emb"] = emb
     # Optionally set obs_names
     adata.obs_names = [f"sample_{i}" for i in range(n_obs)]
     return adata
@@ -158,7 +158,7 @@ def test_query_with_text_matmul(dummy_model, dummy_adata):
     oq = OmicsQueryAnnotator(model=dummy_model, is_cosine=True)
 
     queries = ["text query 1", "text query 2"]
-    oq.query_with_text(dummy_adata, queries, use_faiss=False, device="cpu", n_top=5)
+    oq.query_with_text(dummy_adata, queries, use_faiss=False, device="cpu", n_top=5, emb_key="mmcontext_emb")
 
     assert "query_scores" in dummy_adata.obs
     # shape: (n_obs,) of dictionaries
@@ -310,11 +310,11 @@ def test_best_label_annotation():
     adata = anndata.AnnData(X)
     # We'll label the samples "sample_0" and "sample_1"
     adata.obs_names = ["sample_0", "sample_1"]
-    # Store the sample embeddings in .obsm["omics_emb"] using the mock format
+    # Store the sample embeddings in .obsm["mmcontext_emb"] using the mock format
     # We'll just reuse the model's logic by calling encode() on the sample names
     mock_model = DeterministicMockModel()
     sample_emb = mock_model.encode(adata.obs_names.to_list())  # shape: (2,3)
-    adata.obsm["omics_emb"] = sample_emb
+    adata.obsm["mmcontext_emb"] = sample_emb
 
     # ------------------------------------------------
     # 3. Create some label strings
