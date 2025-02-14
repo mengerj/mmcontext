@@ -10,4 +10,4 @@
 source .venv/bin/activate
 
 # Now run your Python script
-python3 scripts/train_mmcontext.py
+python3 scripts/train_hydra.py
