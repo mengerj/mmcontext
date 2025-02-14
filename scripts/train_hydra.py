@@ -48,19 +48,7 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 1. Prepare directories and logging
     # -------------------------------------------------------------------------
-    #setup_logging(logging_dir=f"{hydra_run_dir}/logs")
-    """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(message)s",
-        handlers=[
-            logging.FileHandler(
-                f"logs/mmcontext_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-            ),
-            logging.StreamHandler(),
-        ],
-    )
-    """
+    # setup_logging(logging_dir="../logs")
     # -------------------------------------------------------------------------
     # 2. Build the dataset name and load data
     # -------------------------------------------------------------------------
@@ -71,28 +59,32 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 3. Compute the correct embedding dimension based on method
     # -------------------------------------------------------------------------
-    embedding_dim_map = cfg.embedding_dim_map
+    input_dim_map = cfg.input_dim_map
     chosen_method = cfg.embedding_method
-    if chosen_method not in embedding_dim_map:
-        raise ValueError(f"Unknown embedding_method '{chosen_method}'. Allowed: {list(embedding_dim_map.keys())}")
+    if chosen_method not in input_dim_map:
+        raise ValueError(f"Unknown embedding_method '{chosen_method}'. Allowed: {list(input_dim_map.keys())}")
     # Overwrite the model's embedding_dim with the mapped value
-    cfg.model.omics_model_cfg.embedding_dim = embedding_dim_map[chosen_method]
+    cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
     precomputed_key = f"X_{chosen_method}"
 
     # -------------------------------------------------------------------------
     # 4. Set up System Monitor
     # -------------------------------------------------------------------------
-    # monitor = SystemMonitor(logger=logging)
-    # monitor.start()
+    monitor = SystemMonitor(logger=logging)
+    monitor.start()
 
     # -------------------------------------------------------------------------
     # 5. Create the model (MMContextEncoder => SentenceTransformer modules)
     # -------------------------------------------------------------------------
-    text_encoder_name = cfg.text_encoder.name
+
     bimodal_model = MMContextEncoder(
-        text_encoder_name=text_encoder_name,
+        text_encoder_name=cfg.text_encoder.name,
+        omics_input_dim=cfg.adapter.omics_input_dim,
         processor_obsm_key=precomputed_key,
-        omics_encoder_cfg=cfg.model.omics_model_cfg,
+        freeze_text_encoder=cfg.text_encoder.freeze_text_encoder,
+        unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
+        adapter_hidden_dim=cfg.adapter.hidden_dim,
+        adapter_output_dim=cfg.adapter.output_dim,
     )
     modules = [bimodal_model]
     model = SentenceTransformer(modules=modules)
@@ -152,6 +144,7 @@ def main(cfg: DictConfig):
         eval_dataset=val_dataset,
         loss=loss_obj,
         evaluator=dev_evaluator,
+        extra_feature_keys=["omics_representation"],
     )
     trainer.train()
 
@@ -162,14 +155,10 @@ def main(cfg: DictConfig):
     model_dir = Path(hydra_run_dir, "model")
     os.makedirs(model_dir, exist_ok=True)
     model.save(model_dir)
-    # save the configuration used for this run
-    used_conf_path = Path(hydra_run_dir, "config.yaml")
-    with open(used_conf_path, "w") as f:
-        f.write(OmegaConf.to_yaml(cfg))
 
-    # monitor.stop()
-    # monitor.save(save_dir_date)
-    # monitor.plot_metrics(save_dir_date)
+    monitor.stop()
+    monitor.save(hydra_run_dir)
+    monitor.plot_metrics(hydra_run_dir)
 
     # -------------------------------------------------------------------------
     # 12. Test on additional datasets & produce plots
