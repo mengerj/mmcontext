@@ -8,9 +8,9 @@
 #   python train.py dataset.basename=my_awesome_dataset
 
 # Here are some defaults:
-embedding_method: "scvi"
+embedding_method: "scvi" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
-embedding_dim_map:
+input_dim_map:
   hvg: 2000
   pca: 64
   scvi: 64
@@ -24,18 +24,15 @@ dataset:
 
 text_encoder:
   name: "sentence-transformers/all-MiniLM-L6-v2"
+  freeze_text_encoder: True
+  unfreeze_last_n_layers: 0
 
 loss: "ContrastiveLoss"
 
-model:
-  omics_model_cfg:
-    embedding_dim: 50 #this will be overwritten by the embedding_dim_map
-    hidden_dim: 128
-    num_layers: 1
-    num_heads: 0
-    use_self_attention: false
-    activation: "relu"
-    dropout: 0.1
+adapter:
+  omics_input_dim: None #this will be overwritten by the embedding_dim_map
+  hidden_dim: 512
+  output_dim: 2048
 
 trainer:
   output_dir: "../../models/trained"
