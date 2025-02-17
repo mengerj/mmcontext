@@ -7,8 +7,11 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import seaborn as sns
+import trimap
+import umap
 from matplotlib.patches import Patch
 from scipy.sparse import issparse
+from sklearn.metrics.pairwise import cosine_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -603,3 +606,127 @@ def plot_grouped_bar_chart(
     else:
         plt.show()
         logger.info("Displayed grouped bar chart interactively.")
+
+
+def visualize_embedding_clusters(
+    df,
+    method="umap",
+    metric="euclidean",
+    n_neighbors=15,
+    min_dist=0.1,
+    random_state=42,
+):
+    """
+    Visualize embeddings using UMAP or TriMap
+
+    With different shapes for embedding types and different colors for each sample ID.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing 'embedding', 'embedding_type', and 'sample_id' columns.
+    method : str, optional
+        Dimensionality reduction method ('umap' or 'trimap'). Default is 'umap'.
+    metric : str, optional
+        Distance metric for clustering ('euclidean' or 'cosine'). Default is 'euclidean'.
+    n_neighbors : int, optional
+        Number of neighbors for UMAP. Default is 15.
+    min_dist : float, optional
+        Minimum distance between points in UMAP. Default is 0.1.
+    random_state : int, optional
+        Random seed for reproducibility. Default is 42.
+
+    Returns
+    -------
+    None
+    """
+    # Extract embeddings
+    embeddings = np.vstack(df["embedding"].values)
+
+    # Apply dimensionality reduction
+    if method == "umap":
+        reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, metric=metric, random_state=random_state)
+    elif method == "trimap":
+        reducer = trimap.TRIMAP()
+    else:
+        raise ValueError("Method must be 'umap' or 'trimap'")
+
+    embedding_2d = reducer.fit_transform(embeddings)
+
+    # Map sample_id to colors
+    unique_samples = df["sample_id"].unique()
+    color_palette = sns.color_palette("husl", len(unique_samples))
+    sample_color_map = {sample_id: color_palette[i] for i, sample_id in enumerate(unique_samples)}
+
+    # Map embedding_type to marker shapes
+    marker_map = {"omics": "o", "text": "s"}  # Circle for omics, square for text
+
+    # Create plot
+    plt.figure(figsize=(10, 8))
+
+    for sample_id in unique_samples:
+        for emb_type in df["embedding_type"].unique():
+            subset = df[(df["sample_id"] == sample_id) & (df["embedding_type"] == emb_type)]
+            indices = subset.index.values
+            plt.scatter(
+                embedding_2d[indices, 0],
+                embedding_2d[indices, 1],
+                c=[sample_color_map[sample_id]],
+                marker=marker_map[emb_type],
+                label=f"{emb_type}" if sample_id == unique_samples[0] else "",  # Only label first instance
+                alpha=0.7,
+                edgecolors="k",
+            )
+
+    plt.legend()
+    plt.title(f"Embedding Visualization using {method.upper()} ({metric} distance)")
+    plt.xlabel("Component 1")
+    plt.ylabel("Component 2")
+    plt.show()
+
+
+def plot_embedding_similarity(df, emb1_type="omics", emb2_type="text", subset: int = 10):
+    """
+    Plot the pairwise cosine similarity matrix between two embedding types.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing 'embedding', 'embedding_type', and 'sample_id' columns.
+    emb1_type : str, optional
+        The embedding type for the rows. Default is 'omics'.
+    emb2_type : str, optional
+        The embedding type for the columns. Default is 'text'.
+
+    Returns
+    -------
+    None
+    """
+    if subset > 0:
+        # Randomly sample subset of samples
+        sample_ids = df["sample_id"].unique()
+        sample_ids = np.random.choice(sample_ids, size=subset, replace=False)
+        df = df[df["sample_id"].isin(sample_ids)]
+    # Extract embeddings by type
+    emb1_df = df[df["embedding_type"] == emb1_type].set_index("sample_id")
+    emb2_df = df[df["embedding_type"] == emb2_type].set_index("sample_id")
+
+    # Ensure both have the same sample_id ordering
+    common_ids = emb1_df.index.intersection(emb2_df.index)
+    emb1_values = np.vstack(emb1_df.loc[common_ids, "embedding"].values)
+    emb2_values = np.vstack(emb2_df.loc[common_ids, "embedding"].values)
+
+    # Compute cosine similarity
+    similarity_matrix = cosine_similarity(emb1_values, emb2_values)
+
+    # Plot the heatmap
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(
+        similarity_matrix, annot=True, fmt=".2f", cmap="coolwarm", xticklabels=common_ids, yticklabels=common_ids
+    )
+    plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
+    plt.xlabel(emb2_type)
+    plt.ylabel(emb1_type)
+    plt.xticks(rotation=45, ha="right")
+    plt.yticks(rotation=0)
+    plt.show()
