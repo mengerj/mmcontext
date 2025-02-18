@@ -8,7 +8,7 @@
 #   python train.py dataset.basename=my_awesome_dataset
 
 # Here are some defaults:
-embedding_method: "scvi" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
+embedding_method: "geneformer" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
 input_dim_map:
   hvg: 2000
@@ -17,13 +17,13 @@ input_dim_map:
   geneformer: 512
 
 dataset:
-  basename: "geo_0_2k_cellxgene_0_2K"
+  basename: "geo_70k_cellxgene_35K"
   type: "pairs"
   test_datasets:
     - "jo-mengr/bowel_disease_single"
 
 text_encoder:
-  name: "sentence-transformers/all-MiniLM-L6-v2"
+  name: "pritamdeka/S-BioBert-snli-multinli-stsb"
   freeze_text_encoder: True
   unfreeze_last_n_layers: 0
 
@@ -36,19 +36,19 @@ adapter:
 
 trainer:
   output_dir: "../../models/trained"
-  num_train_epochs: 5
+  num_train_epochs: 10
   per_device_train_batch_size: 256
   per_device_eval_batch_size: 256
   learning_rate: 2e-5
   warmup_ratio: 0.1
-  fp16: false
+  fp16: true
   bf16: false
   eval_strategy: "steps"
-  eval_steps: 100
+  eval_steps: 1000
   save_strategy: "steps"
-  save_steps: 100
+  save_steps: 1000
   save_total_limit: 2
-  logging_steps: 100
+  logging_steps: 1000
   run_name: "mmcontext"
 
 save_dir: "out"
