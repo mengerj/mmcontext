@@ -31,6 +31,9 @@ pip install mmcontext
 
 ```bash
 pip install git+https://github.com/mengerj/mmcontext.git@main
+
+In case the sentence-transformer package install is not updated to the current version of the fork:
+pip install git+https://github.com/mengerj/sentence-transformers.git@master
 ```
 
 ## Release notes

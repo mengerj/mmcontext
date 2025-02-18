@@ -18,6 +18,7 @@ from sentence_transformers import (
 )
 from sentence_transformers.evaluation import BinaryClassificationEvaluator
 
+from mmcontext.engine.callback import UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor, zero_shot_classification_roc
 from mmcontext.models import MMContextEncoder
 from mmcontext.pl import plot_umap
@@ -106,6 +107,8 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 8. Set up training arguments
     # -------------------------------------------------------------------------
+
+    unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
     args = SentenceTransformerTrainingArguments(
         output_dir=hydra_run_dir,
         num_train_epochs=cfg.trainer.num_train_epochs,
@@ -122,6 +125,7 @@ def main(cfg: DictConfig):
         save_total_limit=cfg.trainer.save_total_limit,
         logging_steps=cfg.trainer.logging_steps,
         run_name=cfg.trainer.run_name,
+        callbacks=[unfreeze_callback],
     )
 
     # -------------------------------------------------------------------------
@@ -159,11 +163,12 @@ def main(cfg: DictConfig):
     monitor.stop()
     monitor.save(hydra_run_dir)
     monitor.plot_metrics(hydra_run_dir)
+    logger.info(f"Training completed successfully. Model saved to {model_dir}")
 
     # -------------------------------------------------------------------------
     # 12. Test on additional datasets & produce plots
     # -------------------------------------------------------------------------
-
+    """
     for t_dataset in cfg.dataset.test_datasets:
         # extract the name from the dataset (after the /)
         dataset_name = t_dataset.split("/")[-1]
@@ -191,6 +196,8 @@ def main(cfg: DictConfig):
                 save_dir=hydra_run_dir,
                 save_plot=True,
             )
+        logger.info(f"Plots saved successfully to the output directory: {hydra_run_dir}")
+    """
 
 
 if __name__ == "__main__":

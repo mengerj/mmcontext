@@ -33,37 +33,36 @@ class MMContextProcessor:
 
     def _load_omics_processor(self, processor_name, **processor_kwargs):
         if processor_name == "precomputed":
-            return AnnDataRetrievalProcessor(**processor_kwargs)
+            # obsm_key and retrieval mode should be passed as kwargs
+            return PrecomputedProcessor(**processor_kwargs)
         else:
             raise ValueError(f"Invalid omics processor class: {processor_name}. Only 'precomputed' is supported.")
 
 
-class AnnDataRetrievalProcessor:
-    """
-    Processor that retrieves the raw data without any processing.
+class PrecomputedProcessor:
+    """Unified processor for retrieving precomputed embeddings, supporting AnnData and NumPy formats."""
 
-    Attributes
-    ----------
-    obsm_key : str
-        The key to access the desired representation in adata.obsm.
-    _adata_cache : dict
-        Cache for loaded AnnData objects to avoid reloading from disk.
-    """
-
-    def __init__(self, obsm_key, **kwargs):
+    def __init__(self, obsm_key, retrieval_mode="numpy", **kwargs):
         """
-        Initialize the AnnDataRetrievalProcessor.
+        Initialize the PrecomputedProcessor.
 
         Parameters
         ----------
         obsm_key : str
-            The key in adata.obsm to use for initial embeddings.
+            The key in adata.obsm to use for retrieving metadata. Either to get from adata.obsm or from a numpy file with a share_link accociated with the key.
+        retrieval_mode : str, optional
+            The retrieval mode, either "adata" or "numpy". Defaults to "adata".
+        obsm_key : str, optional
+            The key of the embedding within the 'embeddings' dict of file_record in numpy mode.
         """
+        self.retrieval_mode = retrieval_mode
         self.obsm_key = obsm_key
         logger.info(
-            f"Initialized AnnDataRetrievalProcessor. Will use embeddings from obsm_key: {obsm_key} as initial embeddings."
+            f"Initialized PrecomputedProcessor. Retrieval mode: {retrieval_mode}. Metadata from AnnData obsm_key: {obsm_key}."
         )
-        self._adata_cache = {}
+        if retrieval_mode == "numpy" and obsm_key is None:
+            raise ValueError("In numpy mode, 'obsm_key' must be provided.")
+        self._data_cache = {}
 
     def _convert_to_tensor(self, data):
         """
@@ -123,65 +122,64 @@ class AnnDataRetrievalProcessor:
         return file_path
 
     def get_rep(self, data):
-        """
-        Retrieve the omics representation of the data based on the provided file paths and sample IDs.
-
-        Parameters
-        ----------
-        data : list of dict
-            A list of dictionaries, each containing 'file_path' and 'sample_id' keys.
-            The 'file_path' can be a local file (h5ad or zarr) or a share link (starts with https).
-
-        Returns
-        -------
-        torch.Tensor
-            The omics representation tensor with shape (batch_size, feature_dim).
-
-        Raises
-        ------
-        ValueError
-            If data is not a list or if an unsupported file format is encountered.
-        """
+        """Retrieve the omics representation."""
         if not isinstance(data, list):
             raise ValueError("Data must be a list of dictionaries")
 
         batch_size = len(data)
-        # Process the first file to determine the feature dimension.
-        first_file = self._resolve_file_path(data[0]["file_path"])
-        if first_file not in self._adata_cache:
-            if first_file.endswith(".h5ad"):
-                adata = anndata.read_h5ad(first_file)
-            elif first_file.endswith(".zarr"):
-                adata = anndata.read_zarr(first_file)
-            else:
-                raise ValueError(f"Unsupported file format for file: {first_file}")
-            self._adata_cache[first_file] = adata
+        features = None  # Initialize features outside the loops
 
-        first_adata = self._adata_cache[first_file]
-        feature_dim = first_adata.obsm[self.obsm_key].shape[1]
+        for i, data_item in enumerate(data):
+            if self.retrieval_mode == "adata":
+                # ... (adata retrieval logic remains unchanged)
+                file_path = self._resolve_file_path(data_item["file_path"])
+                sample_id = data_item["sample_id"]
 
-        # Pre-allocate the output tensor.
-        features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)
+                if file_path not in self._data_cache:
+                    adata = (
+                        anndata.read_h5ad(file_path) if file_path.endswith(".h5ad") else anndata.read_zarr(file_path)
+                    )
+                    self._data_cache[file_path] = adata
+                adata = self._data_cache[file_path]
+                if features is None:
+                    feature_dim = adata.obsm[self.obsm_key].shape[1]
+                    features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)
 
-        for i, sample_dict in enumerate(data):
-            file_path = self._resolve_file_path(sample_dict["file_path"])
-            sample_id = sample_dict["sample_id"]
+                sample_idx = adata.obs.index == sample_id
+                features[i] = self._convert_to_tensor(adata.obsm[self.obsm_key][sample_idx][0])
 
-            if file_path not in self._adata_cache:
-                if file_path.endswith(".h5ad"):
-                    adata = anndata.read_h5ad(file_path)
-                elif file_path.endswith(".zarr"):
-                    adata = anndata.read_zarr(file_path)
-                else:
-                    raise ValueError(f"Unsupported file format for file: {file_path}")
-                self._adata_cache[file_path] = adata
+            elif self.retrieval_mode == "numpy":
+                file_record = data_item["file_record"]
+                sample_id = data_item["sample_id"]
+                adata_path = self._resolve_file_path(file_record["dataset_path"])
+                embedding_path = self._resolve_file_path(file_record["embeddings"][self.obsm_key])
 
-            adata = self._adata_cache[file_path]
-            # Retrieve the sample's representation using the provided sample_id.
-            sample_idx = adata.obs.index == sample_id
-            features[i] = self._convert_to_tensor(adata.obsm[self.obsm_key][sample_idx][0])
+                if embedding_path not in self._data_cache:
+                    npzfile = np.load(embedding_path, allow_pickle=True)
+                    emb_matrix = npzfile["data"]
+                    self._data_cache[embedding_path] = emb_matrix
+
+                emb_matrix = self._data_cache[embedding_path]
+
+                if adata_path not in self._data_cache:
+                    adata = (
+                        anndata.read_h5ad(adata_path) if adata_path.endswith(".h5ad") else anndata.read_zarr(adata_path)
+                    )
+                    self._data_cache[adata_path] = adata
+
+                adata = self._data_cache[adata_path]
+
+                if features is None:
+                    feature_dim = emb_matrix.shape[1]
+                    features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)
+
+                sample_ids = npzfile.get("sample_ids", adata.obs.index.values)
+                sample_idx = np.isin(sample_ids, sample_id)
+                sample_embedding = emb_matrix[sample_idx]
+                features[i] = self._convert_to_tensor(sample_embedding[0])
+
         return features
 
     def clear_cache(self):
         """Clear the AnnData cache to free memory."""
-        self._adata_cache.clear()
+        self._data_cache.clear()

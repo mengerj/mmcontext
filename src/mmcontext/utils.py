@@ -58,7 +58,7 @@ def load_test_adata_from_hf_dataset(
     for idx in indices_to_check:
         adata_ref_json = test_dataset[idx]["anndata_ref"]
         adata_ref = json.loads(adata_ref_json)
-        paths.append(adata_ref["file_path"])
+        paths.append(adata_ref["file_record"]["dataset_path"])
 
     # Ensure that all random rows have the same file path
     first_path = paths[0]
