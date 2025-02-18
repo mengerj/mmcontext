@@ -159,6 +159,7 @@ def main(cfg: DictConfig):
     monitor.stop()
     monitor.save(hydra_run_dir)
     monitor.plot_metrics(hydra_run_dir)
+    logger.info(f"Training completed successfully. Model saved to {model_dir}")
 
     # -------------------------------------------------------------------------
     # 12. Test on additional datasets & produce plots
@@ -191,6 +192,7 @@ def main(cfg: DictConfig):
                 save_dir=hydra_run_dir,
                 save_plot=True,
             )
+        logger.info(f"Plots saved successfully to the output directory: {hydra_run_dir}")
 
 
 if __name__ == "__main__":
