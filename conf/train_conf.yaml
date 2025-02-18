@@ -35,6 +35,7 @@ adapter:
   output_dim: 2048
 
 trainer:
+  unfreeze_epoch: 0.03
   output_dir: "../../models/trained"
   num_train_epochs: 10
   per_device_train_batch_size: 256
