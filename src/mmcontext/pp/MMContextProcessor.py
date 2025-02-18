@@ -42,7 +42,7 @@ class MMContextProcessor:
 class PrecomputedProcessor:
     """Unified processor for retrieving precomputed embeddings, supporting AnnData and NumPy formats."""
 
-    def __init__(self, obsm_key, retrieval_mode="numpy", embedding_key=None, **kwargs):  # Added embedding_key
+    def __init__(self, obsm_key, retrieval_mode="numpy", **kwargs):
         """
         Initialize the PrecomputedProcessor.
 
@@ -52,17 +52,16 @@ class PrecomputedProcessor:
             The key in adata.obsm to use for retrieving metadata. Either to get from adata.obsm or from a numpy file with a share_link accociated with the key.
         retrieval_mode : str, optional
             The retrieval mode, either "adata" or "numpy". Defaults to "adata".
-        embedding_key : str, optional
+        obsm_key : str, optional
             The key of the embedding within the 'embeddings' dict of file_record in numpy mode.
         """
         self.retrieval_mode = retrieval_mode
         self.obsm_key = obsm_key
-        self.embedding_key = embedding_key  # Store the embedding key
         logger.info(
             f"Initialized PrecomputedProcessor. Retrieval mode: {retrieval_mode}. Metadata from AnnData obsm_key: {obsm_key}."
         )
-        if retrieval_mode == "numpy" and embedding_key is None:
-            raise ValueError("In numpy mode, 'embedding_key' must be provided.")
+        if retrieval_mode == "numpy" and obsm_key is None:
+            raise ValueError("In numpy mode, 'obsm_key' must be provided.")
         self._data_cache = {}
 
     def _convert_to_tensor(self, data):
@@ -153,9 +152,7 @@ class PrecomputedProcessor:
                 file_record = data_item["file_record"]
                 sample_id = data_item["sample_id"]
                 adata_path = self._resolve_file_path(file_record["dataset_path"])
-                embedding_path = self._resolve_file_path(
-                    file_record["embeddings"][self.embedding_key]
-                )  # Access with embedding_key
+                embedding_path = self._resolve_file_path(file_record["embeddings"][self.obsm_key])
 
                 if embedding_path not in self._data_cache:
                     npzfile = np.load(embedding_path, allow_pickle=True)
@@ -185,4 +182,4 @@ class PrecomputedProcessor:
 
     def clear_cache(self):
         """Clear the AnnData cache to free memory."""
-        self._adata_cache.clear()
+        self._data_cache.clear()
