@@ -18,7 +18,7 @@ input_dim_map:
 
 dataset:
   basename: "geo_7k_cellxgene_3_5K"
-  type: "multiplets"
+  type: "pairs"
   test_datasets:
     - "jo-mengr/bowel_disease_single"
 
@@ -27,7 +27,7 @@ text_encoder:
   freeze_text_encoder: True
   unfreeze_last_n_layers: 0
 
-loss: "MultipleNegativesRankingLoss"
+#loss: "MultipleNegativesRankingLoss"
 #loss: "ContrastiveLoss"
 #evaluator: "TripletEvaluator" # If not provided, the default evaluator is used
 
@@ -40,8 +40,8 @@ trainer:
   unfreeze_epoch: 0.03
   output_dir: "../../models/trained"
   num_train_epochs: 32
-  per_device_train_batch_size: 64
-  per_device_eval_batch_size: 54
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 16
   learning_rate: 2e-5
   warmup_ratio: 0.1
   fp16: false

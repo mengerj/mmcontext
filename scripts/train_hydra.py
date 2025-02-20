@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from mmcontext.models import MMContextEncoder
 from mmcontext.pl import plot_umap
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
-from mmcontext.utils import get_evaluator, get_loss
+from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,8 @@ def main(cfg: DictConfig):
     # For example, you could define a 'loss_name' field in your config
     # or just hardcode "contrastive" for now.
     # e.g. "cfg.loss.name"
-    loss_obj = get_loss(cfg.loss, model=model, dataset_type=cfg.dataset.type)
+    loss_obj = get_loss(dataset_type=cfg.dataset.type)
+    loss = loss_obj(model)
 
     # -------------------------------------------------------------------------
     # 8. Set up training arguments
@@ -141,7 +143,7 @@ def main(cfg: DictConfig):
         args=args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        loss=loss_obj,
+        loss=loss,
         evaluator=dev_evaluator,
         extra_feature_keys=["omics_representation"],
         callbacks=[unfreeze_callback, WandbCallback()],
@@ -197,4 +199,8 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.exception(e)
+        sys.exit(1)
