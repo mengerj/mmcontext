@@ -14,7 +14,7 @@ import pandas as pd
 import requests
 import torch
 import torch.nn as nn
-from sentence_transformers import losses
+from sentence_transformers import evaluation, losses
 
 logger = logging.getLogger(__name__)
 
@@ -374,6 +374,94 @@ def get_loss(loss_name: str, model, dataset_type: str):
     # Instantiate the loss class with the given model
     loss_obj = LossClass(model=model)
     return loss_obj
+
+
+def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None):
+    """
+    Return a suitable evaluator object
+
+    It is obtained based on the provided evaluator name, dataset type, and dataset. Has to be one of the evalutors supported
+    from the sentence_transformers.evaluation module. Also has to be explicitly defined for the dataset type in this function.
+
+    Parameters
+    ----------
+    dataset_type : str
+        The type of the dataset (e.g., 'pairs', 'multiplets').
+    dataset: dict
+        The dataset dictionary containing the necessary data for the evaluator.
+    evaluator_name : str
+        A string identifying the evaluator to be used. If none is given a default will be used depending on the dataset type.
+
+    Returns
+    -------
+    Evaluator
+        An instance of a SentenceTransformer evaluator object.
+
+    Raises
+    ------
+    ValueError
+        If the provided evaluator name is not supported for the given dataset type
+        or if the required data keys are missing in the dataset.
+    AttributeError
+        If the evaluator class is not found in the sentence_transformers.evaluation module.
+    """
+    pairs_evaluators = ["BinaryClassificationEvaluator"]
+    pairs_evaluator_default = "BinaryClassificationEvaluator"
+    multiplets_evaluators = ["TripletEvaluator"]
+    multiplets_evaluator_default = "TripletEvaluator"
+
+    if dataset_type == "pairs":
+        if evaluator_name is None:
+            evaluator_name = pairs_evaluator_default
+        if evaluator_name not in pairs_evaluators:
+            raise ValueError(
+                f"Evaluator '{evaluator_name}' is not supported for pairs dataset. Choose from {pairs_evaluators}"
+            )
+
+        required_keys = {"anndata_ref", "caption", "label"}
+        if not required_keys.issubset(dataset.column_names):
+            raise ValueError(f"Dataset for 'pairs' evaluator must contain keys: {required_keys}")
+        try:
+            EvaluatorClass = getattr(evaluation, evaluator_name)
+            evaluator_obj = EvaluatorClass(
+                sentences1=dataset["anndata_ref"],
+                sentences2=dataset["caption"],
+                labels=dataset["label"],
+            )
+        except AttributeError as e:
+            raise f"Evaluator class '{evaluator_name}' not found in sentence_transformers.evaluation" from e
+        except TypeError as e:  # Catch potential errors due to missing or incorrect arguments
+            raise ValueError(f"Error instantiating {evaluator_name}: {e}") from e
+
+    elif dataset_type == "multiplets":
+        if evaluator_name is None:
+            evaluator_name = multiplets_evaluator_default
+        if evaluator_name not in multiplets_evaluators:
+            raise ValueError(
+                f"Evaluator '{evaluator_name}' is not supported for multiplets dataset. "
+                f"Choose from {multiplets_evaluators}"
+            )
+
+        required_keys = {"anndata_ref", "positive", "negative_1"}  # Updated to match TripletEvaluator
+        if not required_keys.issubset(dataset.column_names):
+            raise ValueError(f"Dataset for 'multiplets' evaluator must contain keys: {required_keys}")
+        try:
+            EvaluatorClass = getattr(evaluation, evaluator_name)
+
+            evaluator_obj = EvaluatorClass(
+                anchors=dataset["anndata_ref"],
+                positives=dataset["positive"],
+                negatives=dataset["negative_1"],
+            )
+        except AttributeError as e:
+            raise f"Evaluator class '{evaluator_name}' not found in sentence_transformers.evaluation" from e
+        except TypeError as e:  # Catch potential errors due to missing or incorrect arguments
+            raise ValueError(f"Error instantiating {evaluator_name}: {e}") from e
+
+    else:
+        raise ValueError(f"Unsupported dataset type: {dataset_type}")
+
+    return evaluator_obj
 
 
 def get_device():

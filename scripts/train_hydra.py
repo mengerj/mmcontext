@@ -24,7 +24,7 @@ from mmcontext.models import MMContextEncoder
 from mmcontext.pl import plot_umap
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
-from mmcontext.utils import get_device, get_loss, load_test_adata_from_hf_dataset, setup_logging
+from mmcontext.utils import get_evaluator, get_loss
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,6 @@ def main(cfg: DictConfig):
     # 8. Set up training arguments
     # -------------------------------------------------------------------------
 
-    unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
     args = SentenceTransformerTrainingArguments(
         output_dir=hydra_run_dir,
         num_train_epochs=cfg.trainer.num_train_epochs,
@@ -125,22 +124,18 @@ def main(cfg: DictConfig):
         save_total_limit=cfg.trainer.save_total_limit,
         logging_steps=cfg.trainer.logging_steps,
         run_name=cfg.trainer.run_name,
-        callbacks=[unfreeze_callback],
     )
 
     # -------------------------------------------------------------------------
     # 9. (Optional) Create an evaluator & evaluate the base model
     # -------------------------------------------------------------------------
-    dev_evaluator = BinaryClassificationEvaluator(
-        sentences1=val_dataset["anndata_ref"],
-        sentences2=val_dataset["caption"],
-        labels=val_dataset["label"],
-    )
+    dev_evaluator = get_evaluator(dataset_type=cfg.dataset.type, dataset=val_dataset)
     dev_evaluator(model)
 
     # -------------------------------------------------------------------------
     # 10. Create a trainer & train
     # -------------------------------------------------------------------------
+    unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
     trainer = SentenceTransformerTrainer(
         model=model,
         args=args,
@@ -149,6 +144,7 @@ def main(cfg: DictConfig):
         loss=loss_obj,
         evaluator=dev_evaluator,
         extra_feature_keys=["omics_representation"],
+        callbacks=[unfreeze_callback],
     )
     trainer.train()
 
