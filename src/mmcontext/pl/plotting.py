@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 
 import anndata
 import matplotlib.pyplot as plt
@@ -123,10 +124,10 @@ def plot_umap(
         # Compute neighbors
         if embedding_key is not None:
             logger.info(f"Computing neighbors with use_rep='{embedding_key}'.")
-            sc.pp.neighbors(adata, use_rep=embedding_key, **kwargs)
+            sc.pp.neighbors(adata, use_rep=embedding_key, metric="cosine", **kwargs)
         else:
             logger.info("Embedding key is None; using default neighbors.")
-            sc.pp.neighbors(adata, **kwargs)
+            sc.pp.neighbors(adata, metric="cosine", **kwargs)
 
         # Compute UMAP if not already present
         # if "X_umap" not in adata.obsm:
@@ -685,18 +686,113 @@ def visualize_embedding_clusters(
     plt.show()
 
 
+def plot_embedding_similarity(
+    df,
+    emb1_type="omics",
+    emb2_type="text",
+    subset: int = 10,
+    seed: int = 42,
+    label_key=None,  # New parameter for label key
+):
+    """
+    Plot the pairwise cosine similarity matrix between two embedding types.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        DataFrame containing 'embedding', 'embedding_type', 'sample_id', and
+        optionally label columns.
+    emb1_type: str, optional
+        The embedding type for the rows. Default is 'omics'.
+    emb2_type: str, optional
+        The embedding type for the columns. Default is 'text'.
+    subset: int, optional
+        Number of samples to randomly select for plotting. If 0, use all samples.
+        If >10, labels and annotations are excluded. Default is 10.
+    label_key: str, optional
+        Column name in `df` to use for labels if subset <= 10. If None, use
+        'sample_id'. Default is None.
+
+    Returns
+    -------
+    None
+    """
+    np.random.seed(seed)
+    if subset > 0:
+        # Randomly sample subset of samples
+        sample_ids = df["sample_id"].unique()
+        sample_ids = np.random.choice(sample_ids, size=subset, replace=False)
+        df = df[df["sample_id"].isin(sample_ids)]
+
+    df = df.set_index("sample_id")
+    # Extract embeddings by type
+    emb1_df = df[df["embedding_type"] == emb1_type]
+    emb2_df = df[df["embedding_type"] == emb2_type]
+
+    # Ensure both have the same sample_id ordering
+    common_ids = emb1_df.index.intersection(emb2_df.index)
+    emb1_values = np.vstack(emb1_df.loc[common_ids, "embedding"].values)
+    emb2_values = np.vstack(emb2_df.loc[common_ids, "embedding"].values)
+
+    # Compute cosine similarity
+    similarity_matrix = cosine_similarity(emb1_values, emb2_values)
+
+    # Plot the heatmap
+    plt.figure(figsize=(10, 8))
+
+    if subset > 10:
+        # Exclude labels and annotations if subset > 10
+        sns.heatmap(
+            similarity_matrix,
+            annot=False,
+            fmt=".2f",
+            cmap="coolwarm",
+            xticklabels=False,
+            yticklabels=False,
+        )
+        plt.xlabel("")  # Remove x-axis label
+        plt.ylabel("")  # Remove y-axis label
+    else:
+        # Use label_key for labels if provided, otherwise use sample_id
+        if label_key is not None:
+            # Filter by emb1_type to get unique labels
+            labels = df[df["embedding_type"] == emb1_type].loc[common_ids, label_key]
+        else:
+            labels = common_ids
+
+        sns.heatmap(
+            similarity_matrix,
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            xticklabels=labels,
+            yticklabels=labels,
+        )
+        plt.xlabel(emb2_type)
+        plt.ylabel(emb1_type)
+        plt.xticks(rotation=45, ha="right")
+        plt.yticks(rotation=0)
+
+    plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
+    plt.show()
+
+
+'''
 def plot_embedding_similarity(df, emb1_type="omics", emb2_type="text", subset: int = 10):
     """
     Plot the pairwise cosine similarity matrix between two embedding types.
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df: pd.DataFrame
         DataFrame containing 'embedding', 'embedding_type', and 'sample_id' columns.
-    emb1_type : str, optional
+    emb1_type: str, optional
         The embedding type for the rows. Default is 'omics'.
-    emb2_type : str, optional
+    emb2_type: str, optional
         The embedding type for the columns. Default is 'text'.
+    subset: int, optional
+        Number of samples to randomly select for plotting. If 0, use all samples.
+        If >10, labels and annotations are excluded. Default is 10.
 
     Returns
     -------
@@ -707,6 +803,7 @@ def plot_embedding_similarity(df, emb1_type="omics", emb2_type="text", subset: i
         sample_ids = df["sample_id"].unique()
         sample_ids = np.random.choice(sample_ids, size=subset, replace=False)
         df = df[df["sample_id"].isin(sample_ids)]
+
     # Extract embeddings by type
     emb1_df = df[df["embedding_type"] == emb1_type].set_index("sample_id")
     emb2_df = df[df["embedding_type"] == emb2_type].set_index("sample_id")
@@ -721,12 +818,21 @@ def plot_embedding_similarity(df, emb1_type="omics", emb2_type="text", subset: i
 
     # Plot the heatmap
     plt.figure(figsize=(10, 8))
-    sns.heatmap(
-        similarity_matrix, annot=True, fmt=".2f", cmap="coolwarm", xticklabels=common_ids, yticklabels=common_ids
-    )
+
+    # Exclude labels and annotations if subset > 10
+    if subset > 10:
+        sns.heatmap(similarity_matrix, annot=False, fmt=".2f", cmap="coolwarm", xticklabels=False, yticklabels=False)
+        plt.xlabel("")  # Remove x-axis label
+        plt.ylabel("")  # Remove y-axis label
+    else:
+        sns.heatmap(
+            similarity_matrix, annot=True, fmt=".2f", cmap="coolwarm", xticklabels=common_ids, yticklabels=common_ids
+        )
+        plt.xlabel(emb2_type)
+        plt.ylabel(emb1_type)
+        plt.xticks(rotation=45, ha="right")
+        plt.yticks(rotation=0)
+
     plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
-    plt.xlabel(emb2_type)
-    plt.ylabel(emb1_type)
-    plt.xticks(rotation=45, ha="right")
-    plt.yticks(rotation=0)
     plt.show()
+'''
