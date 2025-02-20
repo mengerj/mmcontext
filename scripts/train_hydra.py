@@ -17,6 +17,7 @@ from sentence_transformers import (
     SentenceTransformerTrainingArguments,
 )
 from sentence_transformers.evaluation import BinaryClassificationEvaluator
+from transformers.integrations import WandbCallback
 
 from mmcontext.engine.callback import UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor, zero_shot_classification_roc
@@ -123,7 +124,7 @@ def main(cfg: DictConfig):
         save_steps=cfg.trainer.save_steps,
         save_total_limit=cfg.trainer.save_total_limit,
         logging_steps=cfg.trainer.logging_steps,
-        run_name=cfg.trainer.run_name,
+        run_name=str(hydra_run_dir),
     )
 
     # -------------------------------------------------------------------------
@@ -144,7 +145,7 @@ def main(cfg: DictConfig):
         loss=loss_obj,
         evaluator=dev_evaluator,
         extra_feature_keys=["omics_representation"],
-        callbacks=[unfreeze_callback],
+        callbacks=[unfreeze_callback, WandbCallback()],
     )
     trainer.train()
 

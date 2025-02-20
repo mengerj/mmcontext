@@ -11,7 +11,7 @@ tests/__pycache__/
 *.log
 *.log.*
 *.log.*
-
+wandb
 # anndata files
 # only track data files in data/demo
 data/*
