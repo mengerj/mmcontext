@@ -8,7 +8,7 @@
 #   python train.py dataset.basename=my_awesome_dataset
 
 # Here are some defaults:
-embedding_method: "geneformer" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
+embedding_method: "scvi" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
 input_dim_map:
   hvg: 2000
@@ -18,7 +18,7 @@ input_dim_map:
 
 dataset:
   basename: "geo_7k_cellxgene_3_5K"
-  type: "pairs"
+  type: "multiplets"
   test_datasets:
     - "jo-mengr/bowel_disease_single"
 
@@ -27,32 +27,31 @@ text_encoder:
   freeze_text_encoder: True
   unfreeze_last_n_layers: 0
 
-#loss: "MultipleNegativesRankingLoss"
-loss: "ContrastiveLoss"
+loss: "MultipleNegativesRankingLoss"
+#loss: "ContrastiveLoss"
 #evaluator: "TripletEvaluator" # If not provided, the default evaluator is used
 
 adapter:
   omics_input_dim: None #this will be overwritten by the embedding_dim_map
   hidden_dim: 512
-  output_dim: 2048
+  output_dim: 1024
 
 trainer:
   unfreeze_epoch: 0.03
   output_dir: "../../models/trained"
-  num_train_epochs: 64
-  per_device_train_batch_size: 128
-  per_device_eval_batch_size: 128
+  num_train_epochs: 32
+  per_device_train_batch_size: 64
+  per_device_eval_batch_size: 54
   learning_rate: 2e-5
   warmup_ratio: 0.1
-  fp16: true
+  fp16: false
   bf16: false
   eval_strategy: "steps"
-  eval_steps: 500
+  eval_steps: 100
   save_strategy: "steps"
-  save_steps: 2000
+  save_steps: 500
   save_total_limit: 2
-  logging_steps: 500
-  run_name: "mmcontext"
+  logging_steps: 100
 
 save_dir: "out"
 # You could also define logging via Hydra’s logging config if desired,

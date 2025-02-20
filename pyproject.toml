@@ -46,6 +46,7 @@ dependencies = [
   "sentence-transformers",
   "session-info",
   "torch",
+  "wandb>=0.19.6",
   "zarr<=2.18.4",
 ]
 optional-dependencies.dev = [
