@@ -1,5 +1,6 @@
 import logging
 import random
+from typing import Union
 
 import pandas as pd
 
@@ -10,6 +11,7 @@ def create_emb_pair_dataframe(
     adata,
     emb1_key,
     emb2_key,
+    label_keys: str | list = None,  # New parameter for label keys
     subset_size=100,
     seed=42,
     emb1_type="omics",
@@ -29,6 +31,10 @@ def create_emb_pair_dataframe(
         The key in `.obsm` for the first embedding (e.g., omics embeddings).
     emb2_key : str
         The key in `.obsm` for the second embedding (e.g., text embeddings).
+    label_keys: str or list, optional
+        Column name(s) in `adata.obs` to add as labels in the output DataFrame.
+        If a string is provided, it is treated as a list of length 1.
+        Default is None (no labels added).
     subset_size : int, optional
         Number of samples to select. If the dataset has fewer than `subset_size` samples,
         all available samples are used. Default is 100.
@@ -50,6 +56,7 @@ def create_emb_pair_dataframe(
         - 'sample_id': The index of the sample in `adata.obs`
         - 'embedding': The embedding vector as a list of floats
         - 'embedding_type': The type of embedding (either `emb1_type` or `emb2_type`)
+        - Additional columns for each label specified in `label_keys`
 
     Notes
     -----
@@ -83,24 +90,37 @@ def create_emb_pair_dataframe(
 
     data_rows = []
 
+    # Convert label_keys to a list if it's a string
+    if isinstance(label_keys, str):
+        label_keys = [label_keys]
+
     for idx, sample_id in enumerate(sample_ids):
+        base_row = {"sample_id": sample_id}
+
+        # Add labels to the base row
+        if label_keys is not None:
+            for label_key in label_keys:
+                base_row[label_key] = adata.obs[label_key][sampled_indices[idx]]
+
         # omics row
-        data_rows.append(
+        omics_row = base_row.copy()
+        omics_row.update(
             {
-                "sample_id": sample_id,
                 "embedding": emb1_values[idx].tolist(),
                 "embedding_type": emb1_type,
             }
         )
+        data_rows.append(omics_row)
 
         # text row
-        data_rows.append(
+        text_row = base_row.copy()
+        text_row.update(
             {
-                "sample_id": sample_id,
                 "embedding": emb2_values[idx].tolist(),
                 "embedding_type": emb2_type,
             }
         )
+        data_rows.append(text_row)
 
     df = pd.DataFrame(data_rows)
     logger.info("Created a DataFrame with %d rows (2 per pair).", len(df))
