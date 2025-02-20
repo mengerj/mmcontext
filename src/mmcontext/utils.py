@@ -335,13 +335,13 @@ def create_test_emb_anndata(n_samples, emb_dim, data_key="d_emb_aligned", contex
     return adata
 
 
-def get_loss(loss_name: str, model, dataset_type: str):
+def get_loss(dataset_type: str, loss_name: str = None):
     """
     Return a suitable loss object based on the provided loss name and dataset type.
 
     Parameters
     ----------
-    loss_name : str
+    loss_name : str | None
         A string identifying the loss function to be used.
     model : MMContextEncoder
         The multimodal context encoder model.
@@ -359,12 +359,20 @@ def get_loss(loss_name: str, model, dataset_type: str):
     is 'pairs', maybe only certain losses are supported).
     """
     pairs_losses = ["ContrastiveLoss", "OnlineContrastiveLoss"]
+    pairs_losses_default = "ContrastiveLoss"
     multiplets_losses = ["MultipleNegativesRankingLoss", "CachedMultipleNegativesRankingLoss", "CachedGISTEmbedLoss"]
-    if dataset_type == "pairs" and loss_name not in pairs_losses:
+    multiplets_losses_default = "MultipleNegativesRankingLoss"
+    if dataset_type == "pairs" and loss_name is None:
+        loss_name = pairs_losses_default
+    elif dataset_type == "pairs" and loss_name not in pairs_losses:
         raise ValueError(f"Loss '{loss_name}' is not supported for pairs dataset. Choose from {pairs_losses}")
-    # Stub logic - expand as needed
-    if dataset_type == "multiplets" and loss_name not in multiplets_losses:
-        raise ValueError(f"Loss '{loss_name}' is not supported for multiplets dataset. Choose from {multiplets_losses}")
+    if dataset_type == "multiplets":
+        if loss_name is None:
+            loss_name = multiplets_losses_default
+        elif loss_name not in multiplets_losses:
+            raise ValueError(
+                f"Loss '{loss_name}' is not supported for multiplets dataset. Choose from {multiplets_losses}"
+            )
 
     # Dynamically fetch the loss class from the sentence_transformers.losses module
     try:
@@ -372,8 +380,7 @@ def get_loss(loss_name: str, model, dataset_type: str):
     except AttributeError as e:
         raise f"Loss class '{loss_name}' not found in sentence_transformers.losses" from e
     # Instantiate the loss class with the given model
-    loss_obj = LossClass(model=model)
-    return loss_obj
+    return LossClass
 
 
 def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None):
