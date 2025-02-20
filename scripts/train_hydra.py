@@ -132,7 +132,6 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     dev_evaluator = get_evaluator(dataset_type=cfg.dataset.type, dataset=val_dataset)
     dev_evaluator(model)
-
     # -------------------------------------------------------------------------
     # 10. Create a trainer & train
     # -------------------------------------------------------------------------
