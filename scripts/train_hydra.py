@@ -55,7 +55,7 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 2. Build the dataset name and load data
     # -------------------------------------------------------------------------
-    dataset_name = f"{cfg.dataset.basename}_{cfg.dataset.type}"
+    dataset_name = f"{cfg.dataset.basename}_{cfg.dataset.type}_{cfg.dataset.caption}"
     logger.info(f"Starting training with dataset: {dataset_name}")
     dataset = load_dataset(f"jo-mengr/{dataset_name}")
 

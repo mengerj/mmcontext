@@ -15,12 +15,10 @@ input_dim_map:
   pca: 64
   scvi: 64
   geneformer: 512
-
 dataset:
-  basename: "geo_7k_cellxgene_3_5K"
-  type: "pairs"
-  test_datasets:
-    - "jo-mengr/bowel_disease_single"
+  basename: "cellxgene_pseudo_bulk_35k"
+  type: "multiplets"
+  caption: "natural_language_annotation"
 
 text_encoder:
   name: "pritamdeka/S-BioBert-snli-multinli-stsb"
@@ -40,19 +38,16 @@ trainer:
   unfreeze_epoch: 0.03
   output_dir: "../../models/trained"
   num_train_epochs: 32
-  per_device_train_batch_size: 16
-  per_device_eval_batch_size: 16
+  per_device_train_batch_size: 128
+  per_device_eval_batch_size: 128
   learning_rate: 2e-5
   warmup_ratio: 0.1
   fp16: false
   bf16: false
   eval_strategy: "steps"
-  eval_steps: 100
+  eval_steps: 200
   save_strategy: "steps"
   save_steps: 500
   save_total_limit: 2
-  logging_steps: 100
-
-save_dir: "out"
-# You could also define logging via Hydra’s logging config if desired,
-# but here we do not override the default Hydra logging setup.
+  logging_steps: 200
+  run_name: "mmcontext"
