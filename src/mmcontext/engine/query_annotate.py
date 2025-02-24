@@ -89,7 +89,16 @@ class OmicsQueryAnnotator:
         self.faiss_index = faiss.IndexFlatIP(dim)
         self.faiss_index.add(self.embeddings)
 
-    def annotate_omics_data(self, adata, labels=None, use_faiss=False, device="cpu", emb_key="mmcontext_emb", n_top=5):
+    def annotate_omics_data(
+        self,
+        adata,
+        labels=None,
+        use_faiss=False,
+        device="cpu",
+        emb_key="mmcontext_emb",
+        n_top=5,
+        text_template: str = "A sample of {} from a healthy individual",
+    ):
         """
         Annotate omics data by finding top-matching labels for each sample.
 
@@ -117,15 +126,17 @@ class OmicsQueryAnnotator:
         some upstream pipeline.
         """
         emb_key = emb_key
+        # include the labels into the text template to make it more usable for the LLM
+        labels_to_encode = [text_template.format(lbl) for lbl in labels]
         if emb_key not in adata.obsm:
             raise ValueError(
-                "`adata.obsm['omics_emb']` not found. Use MMContextInference first. "
+                "`adata.obsm['mmcontext_emb']` not found. Provide the correct key to the embedding creating with an mmcontext model. "
                 "Make sure you use the same, pre-trained model as you provide to this class."
             )
         if not use_faiss and labels is None:
             raise ValueError("Labels must be provided if not using Faiss index.")
         if use_faiss and self.faiss_index is None:
-            self.build_label_index(labels)
+            self.build_label_index(labels_to_encode)
 
         data_emb = adata.obsm[emb_key]
         if self.is_cosine:
@@ -160,7 +171,7 @@ class OmicsQueryAnnotator:
         else:
             # use matrix multiplication to compute similarity
             logger.info("Using matrix multiplication to compute label similarities.")
-            label_emb = self.model.encode(labels)
+            label_emb = self.model.encode(labels_to_encode)
             if self.is_cosine:
                 label_emb = self._l2_normalize(label_emb)
             label_emb = label_emb.astype(np.float32)
