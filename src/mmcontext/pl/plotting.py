@@ -610,87 +610,211 @@ def plot_grouped_bar_chart(
 
 
 def visualize_embedding_clusters(
-    df,
-    method="umap",
-    metric="euclidean",
-    n_neighbors=15,
-    min_dist=0.1,
-    random_state=42,
+    df: pd.DataFrame,
+    method: str = "umap",
+    metric: str = "euclidean",
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    random_state: int = 42,
+    n_samples: int = 50,
+    # Plot appearance & saving
+    nametag: str | None = None,
+    figsize: tuple = (10, 8),
+    dpi: int = 300,
+    point_size: float = 50.0,
+    frameon: bool = False,
+    legend_fontsize: int = 10,
+    font_weight: str = "bold",
+    legend_loc: str = "best",
+    save_format: str = "png",
+    save_plot: bool = False,
+    save_path: str | None = None,
 ):
     """
-    Visualize embeddings using UMAP or TriMap
+    Visualize embeddings using UMAP or TRIMAP, with custom plot appearance and saving options.
 
-    With different shapes for embedding types and different colors for each sample ID.
+    With different shapes for embedding types ('omics' or 'text') and different colors for each sample ID.
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame containing 'embedding', 'embedding_type', and 'sample_id' columns.
+        DataFrame containing:
+            - 'embedding': The actual embedding vectors (np.array or list of floats).
+            - 'embedding_type': A categorical field (e.g., 'omics' or 'text').
+            - 'sample_id': A unique identifier for each sample.
     method : str, optional
         Dimensionality reduction method ('umap' or 'trimap'). Default is 'umap'.
     metric : str, optional
-        Distance metric for clustering ('euclidean' or 'cosine'). Default is 'euclidean'.
+        Distance metric for dimensionality reduction (e.g., 'euclidean' or 'cosine').
+        For UMAP, it sets the 'metric' parameter. For TRIMAP, it sets 'distance'.
+        Default is 'euclidean'.
     n_neighbors : int, optional
-        Number of neighbors for UMAP. Default is 15.
+        Number of neighbors for UMAP or TRIMAP. Default is 15.
     min_dist : float, optional
-        Minimum distance between points in UMAP. Default is 0.1.
+        Minimum distance between points in UMAP. Ignored by TRIMAP. Default is 0.1.
     random_state : int, optional
         Random seed for reproducibility. Default is 42.
+    n_samples : int, optional
+        Number of unique sample IDs to randomly select for plotting. Default is 50.
+    nametag : str or None, optional
+        A tag to add to the saved plot name if save_plot=True. Default is None.
+    figsize : tuple, optional
+        The size of the figure (width, height). Default is (10, 8).
+    dpi : int, optional
+        Dots per inch for the figure. Default is 300.
+    point_size : float, optional
+        Marker size for the scatter plot. Default is 50.0.
+    frameon : bool, optional
+        Whether to draw a frame around the plot. Default is False.
+    legend_fontsize : int, optional
+        Font size for the legend. Default is 10.
+    font_weight : str, optional
+        Weight for the font used in the plot. Default is "bold".
+    legend_loc : str, optional
+        Location of the legend (e.g., 'best', 'upper right'). Default is "best".
+    save_format : str, optional
+        File format if the plot is saved, e.g. "png" or "pdf". Default is "png".
+    save_plot : bool, optional
+        Whether to save the plot to disk instead of showing it interactively. Default is False.
+    save_path : str or None, optional
+        Path to save the figure. If save_plot=True, this must be provided.
+        The final saved filename will be appended with nametag and `save_format` if needed.
 
     Returns
     -------
     None
+        Displays or saves the plot.
+
+    Notes
+    -----
+    - This function randomly samples 'n_samples' unique sample_ids from 'df'.
+      The dimensionality reduction is applied only on this subset.
+    - Marker shapes are currently mapped as {'omics': 'o', 'text': 's'}.
+    - A minimal legend is created to illustrate the shape (embedding_type)
+      and color (sample_id). Additional legend modifications can be done as needed.
     """
+    # Check and prepare save parameters
+    if save_plot and (not save_path):
+        raise ValueError("`save_path` must be provided when `save_plot=True`.")
+
+    # Randomly select unique sample IDs
+    all_sample_ids = df["sample_id"].unique()
+    if n_samples > len(all_sample_ids):
+        logger.warning(
+            f"Requested n_samples ({n_samples}) is greater than total unique sample_ids ({len(all_sample_ids)}). "
+            "Using all sample_ids instead."
+        )
+        n_samples = len(all_sample_ids)
+    selected_sample_ids = np.random.choice(all_sample_ids, size=n_samples, replace=False)
+    df_sub = df[df["sample_id"].isin(selected_sample_ids)].reset_index(drop=True)
+
     # Extract embeddings
-    embeddings = np.vstack(df["embedding"].values)
+    embeddings = np.vstack(df_sub["embedding"].values)
 
-    # Apply dimensionality reduction
-    if method == "umap":
+    # Initialize reducer
+    if method.lower() == "umap":
         reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, metric=metric, random_state=random_state)
-    elif method == "trimap":
-        reducer = trimap.TRIMAP()
+    elif method.lower() == "trimap":
+        reducer = trimap.TRIMAP(
+            n_inliers=n_neighbors,  # approx. analogous to neighbors in UMAP
+            n_random=n_neighbors,
+            distance=metric,
+            random_state=random_state,
+        )
     else:
-        raise ValueError("Method must be 'umap' or 'trimap'")
+        raise ValueError("Method must be 'umap' or 'trimap'.")
 
+    # Fit and transform
+    logger.info(f"Applying {method.upper()} to subset of size={len(df_sub)} with metric={metric}...")
     embedding_2d = reducer.fit_transform(embeddings)
 
-    # Map sample_id to colors
-    unique_samples = df["sample_id"].unique()
+    # Prepare color palette for sample IDs
+    unique_samples = df_sub["sample_id"].unique()
     color_palette = sns.color_palette("husl", len(unique_samples))
-    sample_color_map = {sample_id: color_palette[i] for i, sample_id in enumerate(unique_samples)}
+    sample_color_map = {sid: color_palette[i] for i, sid in enumerate(unique_samples)}
 
-    # Map embedding_type to marker shapes
-    marker_map = {"omics": "o", "text": "s"}  # Circle for omics, square for text
+    # Prepare marker shapes
+    marker_map = {"omics": "o", "text": "s"}
 
-    # Create plot
-    plt.figure(figsize=(10, 8))
+    # Create the plot
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    ax = plt.gca()
 
-    for sample_id in unique_samples:
-        for emb_type in df["embedding_type"].unique():
-            subset = df[(df["sample_id"] == sample_id) & (df["embedding_type"] == emb_type)]
+    # Adjust frame, font, etc.
+    plt.rc("font", size=legend_fontsize, weight=font_weight)
+    if not frameon:
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+    # Plot each combination of sample_id and embedding_type
+    for s_id in unique_samples:
+        for emb_type in df_sub["embedding_type"].unique():
+            subset = df_sub[(df_sub["sample_id"] == s_id) & (df_sub["embedding_type"] == emb_type)]
+            if subset.empty:
+                continue
             indices = subset.index.values
-            plt.scatter(
+            ax.scatter(
                 embedding_2d[indices, 0],
                 embedding_2d[indices, 1],
-                c=[sample_color_map[sample_id]],
-                marker=marker_map[emb_type],
-                label=f"{emb_type}" if sample_id == unique_samples[0] else "",  # Only label first instance
+                c=[sample_color_map[s_id]],
+                marker=marker_map.get(emb_type, "o"),
+                s=point_size,
                 alpha=0.7,
                 edgecolors="k",
             )
 
-    plt.legend()
-    plt.title(f"Embedding Visualization using {method.upper()} ({metric} distance)")
-    plt.xlabel("Component 1")
-    plt.ylabel("Component 2")
-    plt.show()
+    ax.set_title(f"Embedding Visualization using {method.upper()} ({metric} distance)")
+    ax.set_xlabel("Component 1")
+    ax.set_ylabel("Component 2")
+
+    # Minimal custom legend
+    # The user might prefer a more advanced legend (one for color, one for shape).
+    # As a quick approach, we'll show shape references for the embedding_type:
+    import matplotlib.lines as mlines
+    import matplotlib.patches as mpatches
+
+    # Prepare shape legend entries
+    shape_legend = []
+    for etype in df_sub["embedding_type"].unique():
+        shape_legend.append(
+            mlines.Line2D(
+                [],
+                [],
+                color="black",
+                marker=marker_map.get(etype, "o"),
+                linestyle="None",
+                markersize=10,
+                label=f"{etype}",
+                markeredgecolor="k",
+            )
+        )
+    ax.legend(handles=shape_legend, loc=legend_loc, fontsize=legend_fontsize)
+
+    # Handle saving
+    if save_plot:
+        # If user wants an extra nametag in the filename:
+        base, ext = os.path.splitext(save_path)
+        # If user didn't provide an extension, or wants to override with save_format:
+        if not ext:
+            ext = f".{save_format}"
+        outname = base
+        if nametag:
+            outname += f"_{nametag}"
+        outpath = f"{outname}{ext}"
+
+        plt.savefig(outpath, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"Plot saved to {outpath}")
+    else:
+        plt.show()
+        logger.info("Displayed embedding clusters interactively.")
 
 
 def plot_embedding_similarity(
     df,
     emb1_type="omics",
     emb2_type="text",
-    subset: int = 10,
+    n_samples: int = 10,
     seed: int = 42,
     label_key=None,  # New parameter for label key
 ):
@@ -706,11 +830,11 @@ def plot_embedding_similarity(
         The embedding type for the rows. Default is 'omics'.
     emb2_type: str, optional
         The embedding type for the columns. Default is 'text'.
-    subset: int, optional
+    n_samples: int, optional
         Number of samples to randomly select for plotting. If 0, use all samples.
         If >10, labels and annotations are excluded. Default is 10.
     label_key: str, optional
-        Column name in `df` to use for labels if subset <= 10. If None, use
+        Column name in `df` to use for labels if n_samples <= 10. If None, use
         'sample_id'. Default is None.
 
     Returns
@@ -718,10 +842,10 @@ def plot_embedding_similarity(
     None
     """
     np.random.seed(seed)
-    if subset > 0:
-        # Randomly sample subset of samples
+    if n_samples > 0:
+        # Randomly sample n_samples of samples
         sample_ids = df["sample_id"].unique()
-        sample_ids = np.random.choice(sample_ids, size=subset, replace=False)
+        sample_ids = np.random.choice(sample_ids, size=n_samples, replace=False)
         df = df[df["sample_id"].isin(sample_ids)]
 
     df = df.set_index("sample_id")
@@ -740,8 +864,8 @@ def plot_embedding_similarity(
     # Plot the heatmap
     plt.figure(figsize=(10, 8))
 
-    if subset > 10:
-        # Exclude labels and annotations if subset > 10
+    if n_samples > 10:
+        # Exclude labels and annotations if n_samples > 10
         sns.heatmap(
             similarity_matrix,
             annot=False,
@@ -775,64 +899,3 @@ def plot_embedding_similarity(
 
     plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
     plt.show()
-
-
-'''
-def plot_embedding_similarity(df, emb1_type="omics", emb2_type="text", subset: int = 10):
-    """
-    Plot the pairwise cosine similarity matrix between two embedding types.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        DataFrame containing 'embedding', 'embedding_type', and 'sample_id' columns.
-    emb1_type: str, optional
-        The embedding type for the rows. Default is 'omics'.
-    emb2_type: str, optional
-        The embedding type for the columns. Default is 'text'.
-    subset: int, optional
-        Number of samples to randomly select for plotting. If 0, use all samples.
-        If >10, labels and annotations are excluded. Default is 10.
-
-    Returns
-    -------
-    None
-    """
-    if subset > 0:
-        # Randomly sample subset of samples
-        sample_ids = df["sample_id"].unique()
-        sample_ids = np.random.choice(sample_ids, size=subset, replace=False)
-        df = df[df["sample_id"].isin(sample_ids)]
-
-    # Extract embeddings by type
-    emb1_df = df[df["embedding_type"] == emb1_type].set_index("sample_id")
-    emb2_df = df[df["embedding_type"] == emb2_type].set_index("sample_id")
-
-    # Ensure both have the same sample_id ordering
-    common_ids = emb1_df.index.intersection(emb2_df.index)
-    emb1_values = np.vstack(emb1_df.loc[common_ids, "embedding"].values)
-    emb2_values = np.vstack(emb2_df.loc[common_ids, "embedding"].values)
-
-    # Compute cosine similarity
-    similarity_matrix = cosine_similarity(emb1_values, emb2_values)
-
-    # Plot the heatmap
-    plt.figure(figsize=(10, 8))
-
-    # Exclude labels and annotations if subset > 10
-    if subset > 10:
-        sns.heatmap(similarity_matrix, annot=False, fmt=".2f", cmap="coolwarm", xticklabels=False, yticklabels=False)
-        plt.xlabel("")  # Remove x-axis label
-        plt.ylabel("")  # Remove y-axis label
-    else:
-        sns.heatmap(
-            similarity_matrix, annot=True, fmt=".2f", cmap="coolwarm", xticklabels=common_ids, yticklabels=common_ids
-        )
-        plt.xlabel(emb2_type)
-        plt.ylabel(emb1_type)
-        plt.xticks(rotation=45, ha="right")
-        plt.yticks(rotation=0)
-
-    plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
-    plt.show()
-'''
