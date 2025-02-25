@@ -1,0 +1,41 @@
+# config.yaml
+# Example Hydra config for evaluation_workflow.py
+
+# Model and dataset parameters
+model_name: "jo-mengr/mmcontext-geo7k-cellxgene3.5k-multiplets"
+dataset_name: "jo-mengr/human_pancreas_norm_complexBatch_single"
+
+# Paths and saving
+save_plots: true
+save_csv: true
+
+# Embeddings and keys
+embedding_keys:
+  - "mmcontext_emb"
+  - "mmcontext_text_emb"
+  - "text_emb_original"
+  - "X_geneformer"
+  - "X_hvg"
+  - "X_pca"
+  - "X_scvi"
+
+# AnnData columns
+batch_key: "tech"
+label_key: "celltype"
+caption_key: None
+
+# scibEvaluator keys
+max_cells_scib: 5000
+n_top_genes_scib: 5000
+
+# Pairwise embedding analysis
+plot_n_samples_pairwise: 20
+
+# Device for model
+model_device: "cpu" # could be "cuda" or "mps"
+
+# Zero-shot text
+zero_shot_text_template: {} #"A sample of {} from a healthy individual"
+
+# Annotation toggling
+do_annotation: true

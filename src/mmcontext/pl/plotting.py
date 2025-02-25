@@ -811,12 +811,20 @@ def visualize_embedding_clusters(
 
 
 def plot_embedding_similarity(
-    df,
-    emb1_type="omics",
-    emb2_type="text",
+    df: pd.DataFrame,
+    emb1_type: str = "omics",
+    emb2_type: str = "text",
     n_samples: int = 10,
     seed: int = 42,
-    label_key=None,  # New parameter for label key
+    label_key: str | None = None,
+    # Additional plotting & saving parameters
+    save_plot: bool = False,
+    save_dir: str | None = None,
+    nametag: str | None = None,
+    figsize: tuple = (10, 8),
+    dpi: int = 300,
+    font_scale: float = 1.0,
+    save_format: str = "png",
 ):
     """
     Plot the pairwise cosine similarity matrix between two embedding types.
@@ -824,78 +832,129 @@ def plot_embedding_similarity(
     Parameters
     ----------
     df: pd.DataFrame
-        DataFrame containing 'embedding', 'embedding_type', 'sample_id', and
-        optionally label columns.
+        DataFrame containing:
+          - 'embedding': The actual embedding vectors.
+          - 'embedding_type': One of e.g. ['omics', 'text'] (str).
+          - 'sample_id': A unique identifier for each sample.
+          - Optionally, additional columns like label_key for annotated labels.
     emb1_type: str, optional
-        The embedding type for the rows. Default is 'omics'.
+        The embedding type to appear on the y-axis (rows). Default is 'omics'.
     emb2_type: str, optional
-        The embedding type for the columns. Default is 'text'.
+        The embedding type to appear on the x-axis (columns). Default is 'text'.
     n_samples: int, optional
         Number of samples to randomly select for plotting. If 0, use all samples.
-        If >10, labels and annotations are excluded. Default is 10.
+        If >10, axis labels and annotations are excluded from the heatmap (for clarity).
+        Default is 10.
+    seed: int, optional
+        Random seed for reproducibility of sampling. Default is 42.
     label_key: str, optional
-        Column name in `df` to use for labels if n_samples <= 10. If None, use
-        'sample_id'. Default is None.
+        Column name in `df` to use for axis labels if `n_samples <= 10`.
+        If None, uses 'sample_id'. Default is None.
+
+    save_plot: bool, optional
+        Whether to save the plot instead of displaying it. Defaults to False.
+    save_dir: str, optional
+        Directory where the plot should be saved (if `save_plot=True`). Defaults to None.
+    nametag: str, optional
+        An extra tag to insert into the saved filename. Defaults to None.
+    figsize: tuple, optional
+        The size of the figure (width, height). Defaults to (10, 8).
+    dpi: int, optional
+        Dots per inch for the figure. Defaults to 300.
+    font_scale: float, optional
+        Seaborn font scale for controlling text size in the heatmap. Defaults to 1.0.
+    save_format: str, optional
+        Image format to save the plot (e.g. "png", "pdf"). Defaults to "png".
 
     Returns
     -------
     None
+        Displays or saves a heatmap of pairwise cosine similarities.
+
+    Notes
+    -----
+    1) Randomly samples 'n_samples' unique sample IDs from `df["sample_id"]` (if n_samples>0).
+    2) Splits the data into two sets: one with `emb1_type` embeddings and one with `emb2_type`.
+    3) Computes cosine similarity between those sets.
+    4) If `n_samples > 10`, it omits text labels in the heatmap to keep things tidy.
+    5) If `n_samples <= 10`, it uses `label_key` (or sample_id if label_key is None) for axis labels.
     """
+    # Set random seed for reproducible sampling
     np.random.seed(seed)
+
+    # Possibly sample a subset of data
     if n_samples > 0:
-        # Randomly sample n_samples of samples
-        sample_ids = df["sample_id"].unique()
-        sample_ids = np.random.choice(sample_ids, size=n_samples, replace=False)
-        df = df[df["sample_id"].isin(sample_ids)]
+        unique_ids = df["sample_id"].unique()
+        if n_samples > len(unique_ids):
+            n_samples = len(unique_ids)  # avoid sampling error
+        chosen_ids = np.random.choice(unique_ids, size=n_samples, replace=False)
+        df = df[df["sample_id"].isin(chosen_ids)]
 
-    df = df.set_index("sample_id")
-    # Extract embeddings by type
-    emb1_df = df[df["embedding_type"] == emb1_type]
-    emb2_df = df[df["embedding_type"] == emb2_type]
+    # Use a Seaborn context manager to adjust font scale
+    with sns.plotting_context("notebook", font_scale=font_scale):
+        # Align data by sample_id
+        df = df.set_index("sample_id", drop=False)  # keep sample_id as a column and index
+        emb1_df = df[df["embedding_type"] == emb1_type]
+        emb2_df = df[df["embedding_type"] == emb2_type]
 
-    # Ensure both have the same sample_id ordering
-    common_ids = emb1_df.index.intersection(emb2_df.index)
-    emb1_values = np.vstack(emb1_df.loc[common_ids, "embedding"].values)
-    emb2_values = np.vstack(emb2_df.loc[common_ids, "embedding"].values)
+        # Only consider intersection of sample IDs present in both emb1 and emb2
+        common_ids = emb1_df.index.intersection(emb2_df.index)
+        emb1_values = np.vstack(emb1_df.loc[common_ids, "embedding"].values)
+        emb2_values = np.vstack(emb2_df.loc[common_ids, "embedding"].values)
 
-    # Compute cosine similarity
-    similarity_matrix = cosine_similarity(emb1_values, emb2_values)
+        # Compute cosine similarity
+        similarity_matrix = cosine_similarity(emb1_values, emb2_values)
 
-    # Plot the heatmap
-    plt.figure(figsize=(10, 8))
+        # Create figure
+        plt.figure(figsize=figsize, dpi=dpi)
 
-    if n_samples > 10:
-        # Exclude labels and annotations if n_samples > 10
-        sns.heatmap(
-            similarity_matrix,
-            annot=False,
-            fmt=".2f",
-            cmap="coolwarm",
-            xticklabels=False,
-            yticklabels=False,
-        )
-        plt.xlabel("")  # Remove x-axis label
-        plt.ylabel("")  # Remove y-axis label
-    else:
-        # Use label_key for labels if provided, otherwise use sample_id
-        if label_key is not None:
-            # Filter by emb1_type to get unique labels
-            labels = df[df["embedding_type"] == emb1_type].loc[common_ids, label_key]
+        # If n_samples > 10, omit axis tick labels
+        if n_samples > 10:
+            sns.heatmap(
+                similarity_matrix,
+                annot=False,
+                fmt=".2f",
+                cmap="coolwarm",
+                xticklabels=False,
+                yticklabels=False,
+            )
+            plt.xlabel("")
+            plt.ylabel("")
         else:
-            labels = common_ids
+            # Use label_key for labels if provided, else sample_id
+            if label_key is not None:
+                labels = emb1_df.loc[common_ids, label_key]
+            else:
+                labels = common_ids
 
-        sns.heatmap(
-            similarity_matrix,
-            annot=True,
-            fmt=".2f",
-            cmap="coolwarm",
-            xticklabels=labels,
-            yticklabels=labels,
-        )
-        plt.xlabel(emb2_type)
-        plt.ylabel(emb1_type)
-        plt.xticks(rotation=45, ha="right")
-        plt.yticks(rotation=0)
+            sns.heatmap(
+                similarity_matrix,
+                annot=True,
+                fmt=".2f",
+                cmap="coolwarm",
+                xticklabels=labels,
+                yticklabels=labels,
+            )
+            plt.xlabel(emb2_type)
+            plt.ylabel(emb1_type)
+            plt.xticks(rotation=45, ha="right")
+            plt.yticks(rotation=0)
 
-    plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
-    plt.show()
+        plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
+
+        if save_plot:
+            if save_dir is None:
+                raise ValueError("Must provide `save_dir` when `save_plot=True`.")
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Build filename
+            base_name = f"embedding_similarity_{emb1_type}_vs_{emb2_type}"
+            if nametag:
+                base_name += f"_{nametag}"
+            save_path = os.path.join(save_dir, f"{base_name}.{save_format}")
+
+            plt.savefig(save_path, bbox_inches="tight")
+            plt.close()
+            print(f"Saved similarity heatmap to {save_path}")
+        else:
+            plt.show()

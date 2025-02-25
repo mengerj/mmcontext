@@ -78,7 +78,7 @@ from mmcontext.utils import load_test_adata_from_hf_dataset
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path=None, config_name="config")
+@hydra.main(version_base=None, config_path="../conf", config_name="eval_conf")
 def main(cfg: DictConfig) -> None:
     """
     Main entry point for the Hydra-driven evaluation workflow.
@@ -118,13 +118,19 @@ def main(cfg: DictConfig) -> None:
     logger.info("Generating mmcontext_emb from test_dataset['anndata_ref']...")
     adata.obsm["mmcontext_emb"] = model.encode(test_dataset["anndata_ref"], device=cfg.model_device)
 
-    logger.info("Generating mmcontext_text_emb from adata.obs['natural_language_annotation']...")
-    text_annotations = adata.obs["natural_language_annotation"].tolist()
-    adata.obsm["mmcontext_text_emb"] = model.encode(text_annotations, device=cfg.model_device)
+    if cfg.caption_key:
+        logger.info("Generating mmcontext_text_emb from adata.obs['natural_language_annotation']...")
+        text_annotations = adata.obs[cfg.caption_key].tolist()
+        adata.obsm["mmcontext_text_emb"] = model.encode(text_annotations, device=cfg.model_device)
 
-    logger.info("Generating text embeddings with original text model...")
-    text_embeddings_original = text_model.encode(text_annotations)
-    adata.obsm["text_emb_original"] = text_embeddings_original
+        logger.info("Generating text embeddings with original text model...")
+        text_embeddings_original = text_model.encode(text_annotations)
+        adata.obsm["text_emb_original"] = text_embeddings_original
+    else:
+        # remove mmcontext_text_emb if and text_emb_original from the list of keys
+        cfg.embedding_keys = [
+            key for key in cfg.embedding_keys if key not in ["mmcontext_text_emb", "text_emb_original"]
+        ]
 
     # 6. Plot UMAP for all embedding_keys with label_key and batch_key
     logger.info("Plotting UMAP for each embedding and color key...")
@@ -145,68 +151,60 @@ def main(cfg: DictConfig) -> None:
                     nametag=f"{emb_key}_{label}",
                 )
 
-    # 7. Pairwise Embedding Analysis (mmcontext_emb vs mmcontext_text_emb)
-    logger.info("Creating pairwise embedding dataframe for mmcontext_emb vs mmcontext_text_emb...")
-    emb_pair_df = create_emb_pair_dataframe(
-        adata,
-        emb1_key="mmcontext_emb",
-        emb2_key="mmcontext_text_emb",
-        subset_size=1000,  # or rename to 'n_samples' param if required by your version
-        label_keys=[cfg.batch_key, cfg.label_key],
-    )
-
-    #   a) visualize_embedding_clusters (method=umap and method=trimap)
-    logger.info("Visualizing embedding clusters (UMAP) for the pair embeddings...")
-    for method in ["umap", "trimap"]:
-        visualize_embedding_clusters(
-            emb_pair_df,
-            method="umap",
-            metric="cosine",
-            n_samples=cfg.plot_n_samples_pairwise,  # newly renamed parameter in your code
-            random_state=42,
-            save_plot=cfg.save_plots,
-            save_path=os.path.join(cfg.output_dir, f"pairwise_cluster_{method}.png") if cfg.save_plots else None,
+    if cfg.caption_key:
+        # 7. Pairwise Embedding Analysis (mmcontext_emb vs mmcontext_text_emb)
+        logger.info("Creating pairwise embedding dataframe for mmcontext_emb vs mmcontext_text_emb...")
+        emb_pair_df = create_emb_pair_dataframe(
+            adata,
+            emb1_key="mmcontext_emb",
+            emb2_key="mmcontext_text_emb",
+            subset_size=1000,  # or rename to 'n_samples' param if required by your version
+            label_keys=[cfg.batch_key, cfg.label_key],
         )
 
-    #   b) plot_embedding_similarity with n_samples=10 and n_samples=200 for demonstration
-    logger.info("Plotting embedding similarity with small subset...")
-    plot_embedding_similarity(
-        emb_pair_df,
-        emb1_type="omics",
-        emb2_type="text",
-        n_samples=10,  # previously subset parameter
-        label_key=cfg.label_key,
-    )
-    if cfg.save_plots:
-        import matplotlib.pyplot as plt
+        #   a) visualize_embedding_clusters (method=umap and method=trimap)
+        logger.info("Visualizing embedding clusters (UMAP) for the pair embeddings...")
+        for method in ["umap", "trimap"]:
+            visualize_embedding_clusters(
+                emb_pair_df,
+                method="umap",
+                metric="cosine",
+                n_samples=cfg.plot_n_samples_pairwise,  # newly renamed parameter in your code
+                random_state=42,
+                save_plot=cfg.save_plots,
+                save_path=os.path.join(output_dir, f"pairwise_cluster_{method}.png") if cfg.save_plots else None,
+            )
 
-        outpath = os.path.join(cfg.output_dir, "similarity_subset10.png")
-        plt.savefig(outpath, dpi=150)
-        logger.info(f"Saved: {outpath}")
-        plt.close()
+        #   b) plot_embedding_similarity with n_samples=10 and n_samples=200 for demonstration
+        logger.info("Plotting embedding similarity with small subset...")
+        plot_embedding_similarity(
+            emb_pair_df,
+            emb1_type="omics",
+            emb2_type="text",
+            n_samples=10,  # previously subset parameter
+            label_key=cfg.label_key,
+            save_plot=cfg.save_plots,
+            save_dir=output_dir,
+            nametag="n10",
+        )
 
-    logger.info("Plotting embedding similarity with larger subset (200)...")
-    plot_embedding_similarity(
-        emb_pair_df,
-        emb1_type="omics",
-        emb2_type="text",
-        n_samples=200,
-        label_key=cfg.label_key,
-    )
-    if cfg.save_plots:
-        import matplotlib.pyplot as plt
-
-        outpath = os.path.join(cfg.output_dir, "similarity_subset200.png")
-        plt.savefig(outpath, dpi=150)
-        logger.info(f"Saved: {outpath}")
-        plt.close()
-
+        logger.info("Plotting embedding similarity with larger subset (200)...")
+        plot_embedding_similarity(
+            emb_pair_df,
+            emb1_type="omics",
+            emb2_type="text",
+            n_samples=200,
+            label_key=cfg.label_key,
+            save_plot=cfg.save_plots,
+            save_dir=output_dir,
+            nametag="n200",
+        )
     # 8. scibEvaluator for metrics
     logger.info("Running scibEvaluator for batch integration and bio-conservation metrics...")
     evaluator = scibEvaluator(
         adata=adata,
-        batch_key=cfg.scib_batch_key,
-        label_key=cfg.scib_label_key,
+        batch_key=cfg.batch_key,
+        label_key=cfg.label_key,
         embedding_key=cfg.embedding_keys,
         n_top_genes=cfg.n_top_genes_scib,
         max_cells=cfg.max_cells_scib,
@@ -218,7 +216,7 @@ def main(cfg: DictConfig) -> None:
 
     #   a) Save results as CSV
     if cfg.save_csv:
-        csv_path = os.path.join(cfg.output_dir, "scibEvaluator_results.csv")
+        csv_path = os.path.join(output_dir, "scibEvaluator_results.csv")
         res_df.to_csv(csv_path, index=False)
         logger.info(f"Saved scibEvaluator results to {csv_path}")
 
@@ -226,15 +224,11 @@ def main(cfg: DictConfig) -> None:
     #      We assume the user has a 'type' column or needs to create one.
     #      scibEvaluator results might already have 'type' or 'embedding' column.
     #      For demonstration, let's rename the column "embedding" to "type".
-    if "embedding" in res_df.columns:
-        res_df.rename(columns={"embedding": "type"}, inplace=True)
-    else:
-        res_df["type"] = res_df.index  # fallback if no embedding column
 
     plot_grouped_bar_chart(
         data=res_df,
         save_plot=cfg.save_plots,
-        save_path=os.path.join(cfg.output_dir, "scibEvaluator_grouped_bar.png") if cfg.save_plots else None,
+        save_path=os.path.join(output_dir, "scibEvaluator_grouped_bar.png") if cfg.save_plots else None,
         title="Comparison of scibEvaluator Metrics",
     )
 
@@ -253,7 +247,7 @@ def main(cfg: DictConfig) -> None:
         if cfg.save_plots:
             import matplotlib.pyplot as plt
 
-            outpath = os.path.join(cfg.output_dir, "umap_annotation_best_label.png")
+            outpath = os.path.join(output_dir, "umap_annotation_best_label.png")
             plt.savefig(outpath, dpi=150)
             logger.info(f"Saved: {outpath}")
             plt.close()
