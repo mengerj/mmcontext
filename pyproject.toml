@@ -47,6 +47,7 @@ dependencies = [
   "session-info",
   "torch",
   "trimap>=1.1.4",
+  "wandb>=0.19.6",
   "zarr<=2.18.4",
 ]
 optional-dependencies.dev = [

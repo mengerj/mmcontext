@@ -10,4 +10,5 @@
 source .venv/bin/activate
 
 # Now run your Python script
+#accelerate launch --num_processes 2 scripts/train_hydra.py
 python3 scripts/train_hydra.py

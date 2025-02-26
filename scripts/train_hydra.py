@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from sentence_transformers import (
     SentenceTransformerTrainingArguments,
 )
 from sentence_transformers.evaluation import BinaryClassificationEvaluator
+from transformers.integrations import WandbCallback
 
 from mmcontext.engine.callback import UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor, zero_shot_classification_roc
@@ -24,7 +26,7 @@ from mmcontext.models import MMContextEncoder
 from mmcontext.pl import plot_umap
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
-from mmcontext.utils import get_device, get_loss, load_test_adata_from_hf_dataset, setup_logging
+from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +55,11 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 2. Build the dataset name and load data
     # -------------------------------------------------------------------------
-    dataset_name = f"{cfg.dataset.basename}_{cfg.dataset.type}"
+    dataset_name = f"{cfg.dataset.basename}_{cfg.dataset.type}_{cfg.dataset.caption}"
     logger.info(f"Starting training with dataset: {dataset_name}")
     dataset = load_dataset(f"jo-mengr/{dataset_name}")
+
+    test_dataset = load_dataset(cfg.dataset.test_dataset)["test"]
 
     # -------------------------------------------------------------------------
     # 3. Compute the correct embedding dimension based on method
@@ -102,13 +106,13 @@ def main(cfg: DictConfig):
     # For example, you could define a 'loss_name' field in your config
     # or just hardcode "contrastive" for now.
     # e.g. "cfg.loss.name"
-    loss_obj = get_loss(cfg.loss, model=model, dataset_type=cfg.dataset.type)
+    loss_obj = get_loss(dataset_type=cfg.dataset.type)
+    loss = loss_obj(model)
 
     # -------------------------------------------------------------------------
     # 8. Set up training arguments
     # -------------------------------------------------------------------------
 
-    unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
     args = SentenceTransformerTrainingArguments(
         output_dir=hydra_run_dir,
         num_train_epochs=cfg.trainer.num_train_epochs,
@@ -124,33 +128,31 @@ def main(cfg: DictConfig):
         save_steps=cfg.trainer.save_steps,
         save_total_limit=cfg.trainer.save_total_limit,
         logging_steps=cfg.trainer.logging_steps,
-        run_name=cfg.trainer.run_name,
-        callbacks=[unfreeze_callback],
+        run_name=str(hydra_run_dir),
     )
 
     # -------------------------------------------------------------------------
     # 9. (Optional) Create an evaluator & evaluate the base model
     # -------------------------------------------------------------------------
-    dev_evaluator = BinaryClassificationEvaluator(
-        sentences1=val_dataset["anndata_ref"],
-        sentences2=val_dataset["caption"],
-        labels=val_dataset["label"],
-    )
+    dev_evaluator = get_evaluator(dataset_type=cfg.dataset.type, dataset=val_dataset)
     dev_evaluator(model)
-
     # -------------------------------------------------------------------------
     # 10. Create a trainer & train
     # -------------------------------------------------------------------------
+    unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
     trainer = SentenceTransformerTrainer(
         model=model,
         args=args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        loss=loss_obj,
+        loss=loss,
         evaluator=dev_evaluator,
         extra_feature_keys=["omics_representation"],
+        callbacks=[unfreeze_callback, WandbCallback()],
     )
     trainer.train()
+    test_evaluator = get_evaluator(dataset_type=cfg.dataset.type, dataset=test_dataset)
+    test_evaluator(model)
 
     # -------------------------------------------------------------------------
     # 11. Save the model and run system monitor
@@ -201,4 +203,8 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.exception(e)
+        sys.exit(1)
