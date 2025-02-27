@@ -72,7 +72,7 @@ def plot_umap(
     font_weight : str, optional
         Weight for the font used in the plot. Defaults to "bold".
     legend_loc : str, optional
-        Location of the legend. Defaults to "right margin".
+        Location of the legend. Defaults to "right margin". For no legend, set to None.
     save_format : str, optional
         Format to save the plot (e.g., "png", "pdf"). Defaults to "png".
     **kwargs : dict
