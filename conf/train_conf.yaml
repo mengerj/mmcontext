@@ -8,7 +8,7 @@
 #   python train.py dataset.basename=my_awesome_dataset
 
 # Here are some defaults:
-embedding_method: "scvi" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
+embedding_method: "geneformer" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
 input_dim_map:
   hvg: 2000
@@ -16,36 +16,38 @@ input_dim_map:
   scvi: 64
   geneformer: 512
 dataset:
-  basename: "cellxgene_pseudo_bulk_35k"
+  basename: "cellxgene_pseudo_bulk_3_5k"
+  type: "pairs"
+  caption: "cell_type"
+test_dataset:
+  name: "jo-mengr/bowel_disease_multiplets_cluster_label"
   type: "multiplets"
-  caption: "natural_language_annotation"
-  test_dataset: "jo-mengr/bowel_disease_multiplets_cluster_label"
 text_encoder:
   name: "pritamdeka/S-BioBert-snli-multinli-stsb"
   freeze_text_encoder: True
-  unfreeze_last_n_layers: 0
+  unfreeze_last_n_layers: 1
 
 #loss: "MultipleNegativesRankingLoss"
 #loss: "ContrastiveLoss"
 #evaluator: "TripletEvaluator" # If not provided, the default evaluator is used
 
 adapter:
-  omics_input_dim: None #this will be overwritten by the embedding_dim_map
-  hidden_dim: 512
-  output_dim: 1024
+  omics_input_dim: #this will be overwritten by the embedding_dim_map
+  hidden_dim:
+  output_dim: 2048
 
 trainer:
-  unfreeze_epoch: 0.03
+  unfreeze_epoch: 4
   output_dir: "../../models/trained"
-  num_train_epochs: 16
-  per_device_train_batch_size: 64
-  per_device_eval_batch_size: 64
+  num_train_epochs: 4
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 8
   learning_rate: 2e-5
   warmup_ratio: 0.1
   fp16: true
   bf16: false
   eval_strategy: "steps"
-  eval_steps: 200
+  eval_steps: 100
   save_strategy: "steps"
   save_steps: 500
   save_total_limit: 2

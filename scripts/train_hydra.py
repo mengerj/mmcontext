@@ -59,7 +59,7 @@ def main(cfg: DictConfig):
     logger.info(f"Starting training with dataset: {dataset_name}")
     dataset = load_dataset(f"jo-mengr/{dataset_name}")
 
-    test_dataset = load_dataset(cfg.dataset.test_dataset)["test"]
+    test_dataset = load_dataset(cfg.test_dataset.name)["test"]
 
     # -------------------------------------------------------------------------
     # 3. Compute the correct embedding dimension based on method
@@ -151,7 +151,7 @@ def main(cfg: DictConfig):
         callbacks=[unfreeze_callback, WandbCallback()],
     )
     trainer.train()
-    test_evaluator = get_evaluator(dataset_type=cfg.dataset.type, dataset=test_dataset)
+    test_evaluator = get_evaluator(dataset_type=cfg.test_dataset.type, dataset=test_dataset)
     test_evaluator(model)
 
     # -------------------------------------------------------------------------

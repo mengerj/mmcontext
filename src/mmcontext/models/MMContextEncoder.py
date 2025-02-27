@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import transformers
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
-import logging
+
 from mmcontext.pp import MMContextProcessor
 
 logger = logging.getLogger(__name__)
@@ -34,14 +34,20 @@ class AdapterModule(nn.Module):
     or directly from your raw omics inputs.
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int = 512, output_dim: int = 2048):
+    def __init__(self, input_dim: int, hidden_dim: int | None = 512, output_dim: int = 2048):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, output_dim),
-            nn.BatchNorm1d(output_dim),
-        )
+        if hidden_dim:
+            self.net = nn.Sequential(
+                nn.Linear(input_dim, hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(hidden_dim, output_dim),
+                nn.BatchNorm1d(output_dim),
+            )
+        else:
+            self.net = nn.Sequential(
+                nn.Linear(input_dim, output_dim),
+                nn.BatchNorm1d(output_dim),
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -58,6 +64,68 @@ class AdapterModule(nn.Module):
             A tensor of shape (batch_size, output_dim).
         """
         return self.net(x)
+
+    def _get_config_dict(self) -> dict:
+        """
+        Returns a configuration dictionary.
+
+        Can be used to reconstruct this model (useful for saving/loading).
+
+        Returns
+        -------
+        dict
+            A config with essential hyperparameters.
+        """
+        return {
+            "input_dim": self.net[0].in_features,
+            "hidden_dim": self.net[0].out_features if len(self.net) > 2 else None,
+            "output_dim": self.net[-2].out_features,
+        }
+
+    def save(self, output_path: str, safe_serialization: bool = True) -> None:
+        """
+        Saves the model configuration and state dict.
+
+        Parameters
+        ----------
+        output_path : str
+            Directory to save model files.
+        safe_serialization : bool, optional
+            If True, use safetensors; else use torch.save.
+        """
+        os.makedirs(output_path, exist_ok=True)
+        if safe_serialization:
+            model_path = os.path.join(output_path, "model.safetensors")
+            save_safetensors_model(self, model_path)
+        else:
+            model_path = os.path.join(output_path, "pytorch_model.bin")
+            torch.save(self.state_dict(), model_path)
+
+    @staticmethod
+    def load(input_path: str, safe_serialization: bool = True):
+        """
+        Loads the model from disk.
+
+        Parameters
+        ----------
+        input_path : str
+            Directory where the model was saved.
+        safe_serialization : bool, optional
+            If True, expects safetensors format; else a PyTorch bin.
+
+        Returns
+        -------
+        AdapterModule
+            The loaded model instance.
+        """
+        model = AdapterModule(0)
+        if safe_serialization and os.path.exists(os.path.join(input_path, "model.safetensors")):
+            load_safetensors_model(model, os.path.join(input_path, "model.safetensors"))
+        else:
+            model.load_state_dict(
+                torch.load(os.path.join(input_path, "pytorch_model.bin"), map_location=torch.device("cpu"))
+            )
+        return model
 
 
 class MMContextEncoder(nn.Module):
@@ -119,6 +187,8 @@ class MMContextEncoder(nn.Module):
         self.omics_input_dim = omics_input_dim
         self.freeze_text_encoder = freeze_text_encoder
         self.unfreeze_last_n_layers = unfreeze_last_n_layers
+        self.adapter_hidden_dim = adapter_hidden_dim
+        self.adapter_output_dim = adapter_output_dim
 
         # Initialize the text encoder
         self.text_encoder = transformers.AutoModel.from_pretrained(text_encoder_name)
@@ -307,6 +377,8 @@ class MMContextEncoder(nn.Module):
             "processor_obsm_key": self.processor_obsm_key,
             "freeze_text_encoder": self.freeze_text_encoder,
             "unfreeze_last_n_layers": self.unfreeze_last_n_layers,
+            "adapter_hidden_dim": self.adapter_hidden_dim,
+            "adapter_output_dim": self.adapter_output_dim,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True) -> None:
