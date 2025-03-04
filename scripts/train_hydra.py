@@ -81,23 +81,31 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 5. Create the model (MMContextEncoder => SentenceTransformer modules)
     # -------------------------------------------------------------------------
-
-    bimodal_model = MMContextEncoder(
-        text_encoder_name=cfg.text_encoder.name,
-        omics_input_dim=cfg.adapter.omics_input_dim,
-        processor_obsm_key=precomputed_key,
-        freeze_text_encoder=cfg.text_encoder.freeze_text_encoder,
-        unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
-        adapter_hidden_dim=cfg.adapter.hidden_dim,
-        adapter_output_dim=cfg.adapter.output_dim,
-    )
-    modules = [bimodal_model]
-    model = SentenceTransformer(modules=modules)
+    if cfg.model:
+        model = SentenceTransformer(cfg.model)
+    else:
+        bimodal_model = MMContextEncoder(
+            text_encoder_name=cfg.text_encoder.name,
+            omics_input_dim=cfg.adapter.omics_input_dim,
+            processor_obsm_key=precomputed_key,
+            freeze_text_encoder=cfg.text_encoder.freeze_text_encoder,
+            unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
+            adapter_hidden_dim=cfg.adapter.hidden_dim,
+            adapter_output_dim=cfg.adapter.output_dim,
+        )
+        modules = [bimodal_model]
+        model = SentenceTransformer(modules=modules)
 
     # -------------------------------------------------------------------------
     # 6. Load train/val split
     # -------------------------------------------------------------------------
     train_dataset = dataset["train"]
+    # randomly shuffle caption column of training data for a test purpose
+    # import random
+    # cap = train_dataset["caption"]
+    # random.shuffle(cap)
+    # replace dataset caption column with shuffled caption column
+    # train_dataset = train_dataset.map(lambda example, idx: {"caption": cap[idx]}, with_indices=True)
     val_dataset = dataset["val"]
 
     # -------------------------------------------------------------------------
@@ -134,7 +142,9 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 9. (Optional) Create an evaluator & evaluate the base model
     # -------------------------------------------------------------------------
-    dev_evaluator = get_evaluator(dataset_type=cfg.dataset.type, dataset=val_dataset)
+    dev_evaluator = get_evaluator(
+        dataset_type=cfg.dataset.type, dataset=val_dataset, batch_size=cfg.trainer.per_device_eval_batch_size
+    )
     dev_evaluator(model)
     # -------------------------------------------------------------------------
     # 10. Create a trainer & train

@@ -74,9 +74,9 @@ def load_test_adata_from_hf_dataset(
     return adata
 
 
-def download_file_from_share_link(share_link, save_path):
+def download_file_from_share_link(share_link, save_path, chunk_size=8192):
     """
-    Downloads a file from a Nextcloud share link and checks if it's a valid .h5ad file.
+    Downloads a file from a Nextcloud share link and validates it based on its suffix.
 
     Parameters
     ----------
@@ -84,37 +84,72 @@ def download_file_from_share_link(share_link, save_path):
         The full share link URL to the file.
     save_path : str
         The local path where the file should be saved.
+    chunk_size : int, optional
+        Size of each chunk in bytes during streaming; defaults to 8192.
 
     Returns
     -------
     bool
-        True if the download was successful and the file is a valid .h5ad, False otherwise.
+        True if the download was successful and the file is valid based on its suffix;
+        False otherwise.
 
-    Example
-    -------
-    >>> success = download_file_from_share_link(
-    ...     "https://nxc-fredato.imbi.uni-freiburg.de/s/Zs6pAa8P5ynDTiP", "path/to/save/file.h5ad"
-    ... )
-    >>> print("Download successful:", success)
+    References
+    ----------
+    Data is expected to come from a Nextcloud share link and is validated in memory.
     """
-    response = requests.get(share_link)
-    if response.status_code == 200:
-        with open(save_path, "wb") as file:
-            file.write(response.content)
+    # Step 1: Stream download the file
+    try:
+        with requests.get(share_link, stream=True) as response:
+            response.raise_for_status()
 
-        try:
+            with open(save_path, "wb") as file:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    file.write(chunk)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to download the file from '{share_link}': {e}")
+        return False
+
+    # Step 2: Validate based on suffix
+    file_suffix = os.path.splitext(save_path)[1].lower()
+
+    try:
+        if file_suffix == ".h5ad":
+            # Validate as an anndata-compatible HDF5 file
             with h5py.File(save_path, "r") as h5_file:
-                if "X" in h5_file:
+                required_keys = ["X", "obs", "var"]  # Common in .h5ad
+                if all(key in h5_file for key in required_keys):
                     logger.info("File is a valid .h5ad file.")
                     return True
                 else:
-                    logger.error("File does not appear to be a valid .h5ad file.")
-        except Exception as e:
-            logger.error(f"Error while checking the file: {e}")
+                    logger.warning("File is an HDF5 file but missing required .h5ad keys.")
+                    return False
 
-        return False
-    else:
-        logger.error(f"Failed to download the file: {response.status_code} - {response.reason}")
+        elif file_suffix == ".npz":
+            # Validate as a .npz file (we can at least confirm we can load it)
+            try:
+                np.load(save_path, allow_pickle=True)
+                logger.info("File is a valid .npz file.")
+                return True
+            except Exception as e:
+                logger.error(f"Error while validating the downloaded file: {e}")
+                return False
+
+        elif file_suffix == ".npy":
+            # Validate as a .npy file
+            try:
+                np.load(save_path, allow_pickle=True)
+                logger.info("File is a valid .npy file.")
+                return True
+            except Exception as e:
+                logger.error(f"Error while validating the downloaded file: {e}")
+                return False
+        else:
+            # If your use-case requires more file types, add them here
+            logger.warning(f"No specific validation logic for files of type '{file_suffix}'. Skipping validation.")
+            return True
+
+    except Exception as e:
+        logger.error(f"Error while validating the downloaded file: {e}")
         return False
 
 
@@ -382,7 +417,7 @@ def get_loss(dataset_type: str, loss_name: str = None):
     return LossClass
 
 
-def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None):
+def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None, batch_size: int = 32):
     """
     Return a suitable evaluator object
 
@@ -433,6 +468,7 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None)
                 sentences1=dataset["anndata_ref"],
                 sentences2=dataset["caption"],
                 labels=dataset["label"],
+                batch_size=batch_size,
             )
         except AttributeError as e:
             raise f"Evaluator class '{evaluator_name}' not found in sentence_transformers.evaluation" from e

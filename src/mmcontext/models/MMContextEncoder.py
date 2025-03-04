@@ -230,71 +230,108 @@ class MMContextEncoder(nn.Module):
         """
         Forward pass that processes text and omics inputs.
 
-        Each input is mapped to a common space dimensions via its adapter, and results
-        are interleaved into a single "sentence_embedding".
+        Each input is mapped to a common dimensionality via its adapter, and the results are merged into one
+        'sentence_embedding' tensor.
 
         Parameters
         ----------
         features : dict
-            A dictionary containing:
-            - "input_ids", "token_type_ids", "attention_mask": for text
-            - "omics_representation": for omics (shape: (batch_size, omics_input_dim))
-            - "omics_text_info": a list specifying the sequence (0=omics, 1=text)
+            Dictionary containing:
+            - "input_ids", "token_type_ids", "attention_mask": text inputs
+            (shape: (num_text_examples, ...))
+            - "omics_representation": omics inputs
+            (shape: (num_omics_examples, omics_input_dim))
+            - "omics_text_info": A sequence of 0s and 1s of length = total_batch_size
+            (i.e., num_omics_examples + num_text_examples). A value of 0 indicates
+            the corresponding row in the final output is omics; a value of 1 indicates text.
+
+            Data is sourced from: your internal multimodal data loader that batches
+            omics and text in parallel.
 
         Returns
         -------
         dict
-            Returns the same dictionary with key "sentence_embedding"
-            appended as a (batch_size, 2048) float tensor.
+            The same 'features' dictionary with a new key "sentence_embedding":
+            a tensor of shape (total_batch_size, adapter_output_dim). The row order
+            aligns with 'omics_text_info'.
         """
-        omics_embeds = []
-        text_embeds = []
-
-        # Omics path: directly through adapter
+        # 1. Prepare omics embeddings
+        omics_embeds = None
         if "omics_representation" in features:
-            omics_out = self.omics_adapter(features["omics_representation"])  # (B, 2048)
-            omics_embeds = omics_out
+            omics_embeds = self.omics_adapter(features["omics_representation"])
+            # shape: (num_omics_examples, adapter_output_dim)
 
-        # Text path: text encoder -> text_adapter
+        # 2. Prepare text embeddings
+        text_embeds = None
         if "input_ids" in features:
             text_output = self.text_encoder(
                 input_ids=features["input_ids"],
                 token_type_ids=features.get("token_type_ids"),
                 attention_mask=features.get("attention_mask"),
             )
-            # text_output[1] is often the pooled (CLS) output in many HF models
-            pooled = text_output[1]  # (B, hidden_size)
-            text_out = self.text_adapter(pooled)  # (B, 2048)
-            text_embeds = text_out
+            # text_output[1] is typically the pooled (CLS) embedding for many HF models
+            pooled = text_output[1]  # shape: (num_text_examples, hidden_size)
+            text_embeds = self.text_adapter(pooled)  # shape: (num_text_examples, adapter_output_dim)
 
-        # Interleave them according to "omics_text_info"
-        sentence_embedding = []
-        omics_iter = iter(omics_embeds) if isinstance(omics_embeds, torch.Tensor) else None
-        text_iter = iter(text_embeds) if isinstance(text_embeds, torch.Tensor) else None
+        # 3. Convert omics_text_info to a PyTorch tensor for boolean indexing
+        omics_text_info = features["omics_text_info"]
 
-        # If omics_embeds is (B, 2048), we can iterate row by row.
-        # Or we can just do a simpler approach if we know B = len(omics_text_info).
-        # For demonstration, we do the row-by-row approach below:
-        if omics_iter:
-            omics_embeds_rows = omics_embeds.unbind(dim=0)
-            omics_iter = iter(omics_embeds_rows)
-
-        if text_iter:
-            text_embeds_rows = text_embeds.unbind(dim=0)
-            text_iter = iter(text_embeds_rows)
-
-        for val in features["omics_text_info"]:
-            if val == 0:
-                if omics_iter is None:
-                    raise ValueError("No omics embeddings available but omics_text_info has 0.")
-                sentence_embedding.append(next(omics_iter))
+        # If it's already a tensor, great; if not, convert it
+        if not isinstance(omics_text_info, torch.Tensor):
+            # Use a long tensor for indexing
+            # We place it on the same device as omics_embeds or text_embeds, whichever is available
+            if omics_embeds is not None:
+                device = omics_embeds.device
+            elif text_embeds is not None:
+                device = text_embeds.device
             else:
-                if text_iter is None:
-                    raise ValueError("No text embeddings available but omics_text_info has 1.")
-                sentence_embedding.append(next(text_iter))
+                device = torch.device("cpu")
+            omics_text_info = torch.tensor(omics_text_info, dtype=torch.long, device=device)
 
-        # Stack up the final embeddings
-        features["sentence_embedding"] = torch.stack(sentence_embedding, dim=0).float()
+        # 4. Create the final "sentence_embedding" placeholder
+        total_batch_size = omics_text_info.shape[0]
+        # Figure out the output dimension from whichever embeddings exist
+        if omics_embeds is not None:
+            adapter_output_dim = omics_embeds.shape[-1]
+            dtype = omics_embeds.dtype
+            device = omics_embeds.device
+        else:
+            adapter_output_dim = text_embeds.shape[-1]
+            dtype = text_embeds.dtype
+            device = text_embeds.device
+
+        sentence_embedding = torch.zeros((total_batch_size, adapter_output_dim), device=device, dtype=dtype)
+
+        # 5. Identify positions of omics (0) vs. text (1)
+        zero_positions = (omics_text_info == 0).nonzero(as_tuple=True)[0]  # indices for omics
+        one_positions = (omics_text_info == 1).nonzero(as_tuple=True)[0]  # indices for text
+
+        # 6. Assign omics embeddings
+        if zero_positions.numel() > 0:
+            # Verify omics_embeds is not None and shapes align
+            if omics_embeds is None:
+                raise ValueError("Found omics entries in omics_text_info but no omics_embeds provided.")
+            if zero_positions.shape[0] != omics_embeds.shape[0]:
+                raise ValueError(
+                    f"Inconsistent shapes: omics_text_info indicates {zero_positions.shape[0]} omics rows, "
+                    f"but omics_embeds has {omics_embeds.shape[0]}."
+                )
+            sentence_embedding[zero_positions] = omics_embeds
+
+        # 7. Assign text embeddings
+        if one_positions.numel() > 0:
+            # Verify text_embeds is not None and shapes align
+            if text_embeds is None:
+                raise ValueError("Found text entries in omics_text_info but no text_embeds provided.")
+            if one_positions.shape[0] != text_embeds.shape[0]:
+                raise ValueError(
+                    f"Inconsistent shapes: omics_text_info indicates {one_positions.shape[0]} text rows, "
+                    f"but text_embeds has {text_embeds.shape[0]}."
+                )
+            sentence_embedding[one_positions] = text_embeds
+
+        # 8. Store in features and return
+        features["sentence_embedding"] = sentence_embedding
         return features
 
     def tokenize(self, texts, padding: str | bool = True) -> dict:
@@ -324,9 +361,9 @@ class MMContextEncoder(nn.Module):
         omics_text_info = []
 
         for data in texts:
-            if isinstance(data, str) and '{"file_path"' in data:
+            if isinstance(data, dict):  # and "file_record" in data.keys():
                 # This indicates a JSON definition for omics
-                data_dict = json.loads(data)
+                data_dict = data
                 omics_reps.append(data_dict)
                 omics_text_info.append(0)
             elif isinstance(data, str):
