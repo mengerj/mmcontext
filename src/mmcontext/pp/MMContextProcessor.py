@@ -106,7 +106,7 @@ class PrecomputedProcessor:
         raise ValueError(f"Unsupported data type: {type(data)}")
 
     @staticmethod
-    def _resolve_file_path(file_path):
+    def _resolve_file_path(file_path, suffix=".npz"):
         """
         Resolve the file path.
 
@@ -128,7 +128,7 @@ class PrecomputedProcessor:
             # the share link.
             hash_object = hashlib.md5(file_path.encode())
             file_hash = hash_object.hexdigest()
-            local_file = os.path.join(tempfile.gettempdir(), f"{file_hash}.h5ad")
+            local_file = os.path.join(tempfile.gettempdir(), f"{file_hash}{suffix}")
             if not os.path.exists(local_file):
                 logger.info(f"Downloading file from share link: {file_path} to {local_file}")
                 success = download_file_from_share_link(file_path, local_file)
@@ -165,18 +165,20 @@ class PrecomputedProcessor:
 
         batch_size = len(data)
         features = None
+        batch_sample_ids = []
 
         # Group data items by embedding path for efficient processing
         grouped_data = {}
         for data_item in data:
             file_record = data_item["file_record"]
+            batch_sample_ids.append(data_item["sample_id"])
             embedding_path = file_record["embeddings"][self.obsm_key]
             if embedding_path not in grouped_data:
-                grouped_data[embedding_path].append(data_item)
+                grouped_data[embedding_path] = data_item
 
         for embedding_path, data_items in grouped_data.items():
             if self.retrieval_mode == "adata":
-                file_path = self._resolve_file_path(data_items["file_record"]["dataset_path"])
+                file_path = self._resolve_file_path(data_items["file_record"]["dataset_path"], suffix=".h5ad")
                 if file_path not in self._data_cache:
                     adata = (
                         anndata.read_h5ad(file_path) if file_path.endswith(".h5ad") else anndata.read_zarr(file_path)
@@ -195,27 +197,33 @@ class PrecomputedProcessor:
                 if embedding_path not in self._data_cache:
                     # Resolve the file path only once per unique embedding_path
                     if embedding_path not in self._path_cache:
-                        self._path_cache[embedding_path] = self._resolve_file_path(embedding_path)
+                        self._path_cache[embedding_path] = self._resolve_file_path(embedding_path, suffix=".npz")
                     resolved_path = self._path_cache[embedding_path]
-
                     npzfile = np.load(resolved_path, allow_pickle=True)
                     emb_matrix = npzfile["data"]
-                    if isinstance(emb_matrix, torch.Tensor):  # If already a tensor, no conversion needed
-                        self._data_cache[embedding_path] = emb_matrix
-                    else:
-                        self._data_cache[embedding_path] = self._convert_to_tensor(emb_matrix)  # Convert to tensor once
-
-                emb_matrix = self._data_cache[embedding_path]
-
-                if features is None:
-                    feature_dim = emb_matrix.shape
-                    features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)
-
-                for i, data_item in enumerate(data_items):
-                    sample_id = data_item["sample_id"]
                     sample_ids = npzfile.get("sample_ids", None)
-                    sample_idx = np.isin(sample_ids, sample_id)
-                    features[i] = emb_matrix[sample_idx]  # No need to convert to tensor again
+                    if isinstance(emb_matrix, torch.Tensor):  # If already a tensor, no conversion needed
+                        self._data_cache[embedding_path] = {"matrix": emb_matrix}
+                    else:
+                        self._data_cache[embedding_path] = {
+                            "matrix": self._convert_to_tensor(emb_matrix)
+                        }  # Convert to tensor once
+                    if sample_ids is not None:
+                        self._data_cache[embedding_path]["sample_ids"] = sample_ids
+                    else:
+                        logger.error(
+                            f"Sample IDs not found in {resolved_path}. Cannot ensure correct order of samples."
+                        )
+                        raise ValueError("Sample IDs not found in the NumPy file.")
+
+                emb_matrix = self._data_cache[embedding_path]["matrix"]
+                sample_ids = self._data_cache[embedding_path]["sample_ids"]
+                # get the correct entries of the embedding matrix for the batch
+                sorted_idx = np.argsort(sample_ids)
+                sorted_sample_ids = sample_ids[sorted_idx]  # Ensure sorted order
+                pos_in_sorted = np.searchsorted(sorted_sample_ids, batch_sample_ids)
+                indices = sorted_idx[pos_in_sorted]
+                features = emb_matrix[indices]
 
         return features
 
