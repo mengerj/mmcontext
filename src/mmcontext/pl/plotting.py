@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+from typing import Optional
 
 import anndata
 import matplotlib.pyplot as plt
@@ -10,9 +11,11 @@ import scanpy as sc
 import seaborn as sns
 import trimap
 import umap
+from anndata import AnnData
 from matplotlib.patches import Patch
 from scipy.sparse import issparse
 from sklearn.metrics.pairwise import cosine_similarity
+from wordcloud import WordCloud
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +180,70 @@ def plot_umap(
     except Exception as e:
         logger.error(f"An error occurred while generating UMAP plot: {e}", exc_info=True)
         raise e
+
+
+def plot_wordcloud(
+    list_of_terms: list[str],
+    separator: str = ",",
+    stopwords: set | None = None,
+    title: str | None = None,
+) -> None:
+    """
+    Create and display a word cloud from a specified obs column in an AnnData object.
+
+    This function takes the values in `adata.obs[obs_key]`—which are strings of
+    terms separated by the specified separator—and plots a word cloud showing
+    the most frequent terms.
+
+    Parameters
+    ----------
+    list_of_terms : list of str
+        A list of strings containing terms to include in the word cloud.
+    separator : str, optional
+        The delimiter separating individual terms in each string. Defaults to ','.
+    stopwords : set of str, optional
+        Optional set of terms to exclude from the word cloud (e.g., 'the', 'and').
+
+    References
+    ----------
+    For plotting the word cloud, this function uses the WordCloud library:
+    https://github.com/amueller/word_cloud
+    """
+    # Initialize an empty dictionary to count occurrences
+    term_counts = {}
+
+    # 1. Collect and count terms
+    for val in list_of_terms:
+        # Skip missing entries
+        if pd.isna(val):
+            continue
+
+        # Split on separator, strip whitespace
+        terms = [term.strip() for term in val.split(separator) if term.strip()]
+        for term in terms:
+            # Skip stopwords if provided
+            if stopwords and term.lower() in stopwords:
+                continue
+            term_counts[term] = term_counts.get(term, 0) + 1
+
+    # If no terms were collected, just log and return
+    if not term_counts:
+        logger.warning(f"No valid terms found with separator '{separator}'.")
+        return
+
+    # 2. Generate the word cloud
+    wordcloud = WordCloud(
+        width=800,  # width of the canvas
+        height=600,  # height of the canvas
+        background_color="white",
+    ).generate_from_frequencies(term_counts)
+
+    # 3. Plot the word cloud
+    plt.figure(figsize=(8, 6))
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.axis("off")
+    plt.title(title)
+    plt.show()
 
 
 def plot_query_scores_umap(
@@ -884,16 +951,16 @@ def plot_embedding_similarity(
 
     # Possibly sample a subset of data
     if n_samples > 0:
-        unique_ids = df["sample_id"].unique()
+        unique_ids = df["sample_index"].unique()
         if n_samples > len(unique_ids):
             n_samples = len(unique_ids)  # avoid sampling error
         chosen_ids = np.random.choice(unique_ids, size=n_samples, replace=False)
-        df = df[df["sample_id"].isin(chosen_ids)]
+        df = df[df["sample_index"].isin(chosen_ids)]
 
     # Use a Seaborn context manager to adjust font scale
     with sns.plotting_context("notebook", font_scale=font_scale):
         # Align data by sample_id
-        df = df.set_index("sample_id", drop=False)  # keep sample_id as a column and index
+        df = df.set_index("sample_index", drop=False)  # keep sample_id as a column and index
         emb1_df = df[df["embedding_type"] == emb1_type]
         emb2_df = df[df["embedding_type"] == emb2_type]
 

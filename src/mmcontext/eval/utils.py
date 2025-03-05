@@ -1,10 +1,72 @@
 import logging
 import random
-from typing import Union
 
+import numpy as np
 import pandas as pd
+from anndata import AnnData
 
 logger = logging.getLogger(__name__)
+
+
+def subset_adata_by_query_score(adata: AnnData, query_key: str, percentile: float) -> tuple[AnnData, AnnData]:
+    """
+    Create two subsets of the given AnnData by filtering on a particular query score.
+
+    Parameters
+    ----------
+    adata : AnnData
+        The AnnData containing a column adata.obs["query_scores"].
+        Each row of this column should be a dictionary with a float score
+        for the given `query_key`.
+    query_key : str
+        The key within each dictionary in adata.obs["query_scores"]
+        whose float value we want to filter on (e.g. "leukemia").
+    percentile : float
+        The percentile (from 0 to 100) used to create the top and bottom filters.
+        For example, 10.0 means top 10% vs bottom 10%.
+
+    Returns
+    -------
+    top_adata : AnnData
+        Subset of `adata` where the row's score is in the top `percentile`.
+    bottom_adata : AnnData
+        Subset of `adata` where the row's score is in the bottom `percentile`.
+
+    References
+    ----------
+    This function uses the `adata.obs["query_scores"]` column (dict-like per row).
+    Make sure your data is loaded and structured such that each
+    entry in `adata.obs["query_scores"]` is a dictionary containing `query_key`.
+    """
+    # Extract the numeric values for the requested query_key
+    if "query_scores" not in adata.obs:
+        raise KeyError("adata.obs does not contain 'query_scores'.")
+
+    # Convert each dict in adata.obs["query_scores"] to the float value for query_key
+    try:
+        scores = adata.obs["query_scores"].apply(lambda d: d[query_key])
+    except Exception as e:
+        raise KeyError(f"Could not extract '{query_key}' from adata.obs['query_scores'].") from e
+
+    # Compute percentile thresholds
+    lower_thresh = np.percentile(scores, percentile)  # e.g., 10th percentile
+    upper_thresh = np.percentile(scores, 100.0 - percentile)  # e.g., 90th percentile
+
+    # Create boolean masks
+    bottom_mask = scores <= lower_thresh
+    top_mask = scores >= upper_thresh
+
+    # Log how many observations are in each subset
+    logger.info(
+        f"Splitting data by '{query_key}' scores at the {percentile}th/({100 - percentile}th) percentile. "
+        f"Found {bottom_mask.sum()} cells in bottom subset, {top_mask.sum()} cells in top subset."
+    )
+
+    # Subset the AnnData
+    bottom_adata = adata[bottom_mask].copy()
+    top_adata = adata[top_mask].copy()
+
+    return top_adata, bottom_adata
 
 
 def create_emb_pair_dataframe(
@@ -93,9 +155,12 @@ def create_emb_pair_dataframe(
     # Convert label_keys to a list if it's a string
     if isinstance(label_keys, str):
         label_keys = [label_keys]
-
+    if bool(set(label_keys) & {"sample_index", "embedding", "embedding_type"}):
+        raise ValueError(
+            "label_keys cannot contain reserved column names: 'sample_index', 'embedding', 'embedding_type'."
+        )
     for idx, sample_id in enumerate(sample_ids):
-        base_row = {"sample_id": sample_id}
+        base_row = {"sample_index": sample_id}
 
         # Add labels to the base row
         if label_keys is not None:
