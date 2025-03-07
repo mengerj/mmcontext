@@ -1,15 +1,39 @@
 # config.yaml
 # Example Hydra config for evaluation_workflow.py
 
-# Model and dataset parameters
-model_name: "jo-mengr/mmcontext-geo7k-cellxgene3.5k-multiplets"
-dataset_name: "jo-mengr/human_pancreas_norm_complexBatch_single"
+# Model parameters
+model_name: "jo-mengr/mmcontext-100k-natural_language_annotation-geneformer-2048-text-unfrozen"
+model_device: "cpu" # could be "cuda" or "mps"
+
+# Dataset configurations
+datasets:
+  bowel_disease:
+    name: "jo-mengr/bowel_disease_pairs_cluster_label"
+    batch_key: "sample_id"
+    label_key: "cluster_label"
+    caption_key: "cluster_label"
+    zero_shot_text_template: "{}"
+  pancreas:
+    name: "jo-mengr/human_pancreas_norm_complexBatch_pairs_celltype"
+    batch_key: "tech"
+    label_key: "celltype"
+    caption_key: None
+    zero_shot_text_template: "A {} cell from the human pancreas"
+
+  # Add more datasets as needed
+  # pbmc:
+  #   name: "jo-mengr/pbmc_dataset"
+  #   batch_key: "batch"
+  #   label_key: "cell_type"
+  #   caption_key: "annotation"
 
 # Paths and saving
 save_plots: true
 save_csv: true
+save_format: "png"
+results_db_path: "outputs/evaluation_results.csv"
 
-# Embeddings and keys
+# Embeddings to evaluate
 embedding_keys:
   - "mmcontext_emb"
   - "mmcontext_text_emb"
@@ -19,23 +43,15 @@ embedding_keys:
   - "X_pca"
   - "X_scvi"
 
-# AnnData columns
-batch_key: "tech"
-label_key: "celltype"
-caption_key: None
-
-# scibEvaluator keys
+# scibEvaluator parameters
 max_cells_scib: 5000
 n_top_genes_scib: 5000
 
 # Pairwise embedding analysis
 plot_n_samples_pairwise: 20
 
-# Device for model
-model_device: "cpu" # could be "cuda" or "mps"
-
-# Zero-shot text
-zero_shot_text_template: {} #"A sample of {} from a healthy individual"
+# Default zero-shot text template (used if dataset-specific one is not provided)
+zero_shot_text_template: "{}"
 
 # Annotation toggling
 do_annotation: true
