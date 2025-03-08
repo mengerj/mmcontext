@@ -460,13 +460,20 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None,
                 f"Evaluator '{evaluator_name}' is not supported for pairs dataset. Choose from {pairs_evaluators}"
             )
 
-        required_keys = {"anndata_ref", "caption", "label"}
-        if not required_keys.issubset(dataset.column_names):
-            raise ValueError(f"Dataset for 'pairs' evaluator must contain keys: {required_keys}")
+        required_keys_processor1 = {"anndata_ref", "caption", "label"}
+        required_keys_processor2 = {"sample_idx", "caption", "label"}
+        if required_keys_processor1.issubset(dataset.column_names):
+            reference_key = "anndata_ref"
+        elif required_keys_processor2.issubset(dataset.column_names):
+            reference_key = "sample_idx"
+        else:
+            raise ValueError(
+                f"Dataset for 'pairs' evaluator must contain keys: {required_keys_processor1} or {required_keys_processor2}"
+            )
         try:
             EvaluatorClass = getattr(evaluation, evaluator_name)
             evaluator_obj = EvaluatorClass(
-                sentences1=dataset["anndata_ref"],
+                sentences1=dataset[reference_key],
                 sentences2=dataset["caption"],
                 labels=dataset["label"],
                 batch_size=batch_size,
@@ -485,14 +492,21 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None,
                 f"Choose from {multiplets_evaluators}"
             )
 
-        required_keys = {"anndata_ref", "positive", "negative_1"}  # Updated to match TripletEvaluator
-        if not required_keys.issubset(dataset.column_names):
-            raise ValueError(f"Dataset for 'multiplets' evaluator must contain keys: {required_keys}")
+        required_keys_processor1 = {"anndata_ref", "positive", "negative_1"}  # Updated to match TripletEvaluator
+        required_keys_processor2 = {"sample_idx", "positive", "negative_1"}  # Updated to match TripletEvaluator
+        if required_keys_processor1.issubset(dataset.column_names):
+            reference_key = "anndata_ref"
+        elif required_keys_processor2.issubset(dataset.column_names):
+            reference_key = "sample_idx"
+        else:
+            raise ValueError(
+                f"Dataset for 'multiplets' evaluator must contain keys: {required_keys_processor1} or {required_keys_processor2}"
+            )
         try:
             EvaluatorClass = getattr(evaluation, evaluator_name)
 
             evaluator_obj = EvaluatorClass(
-                anchors=dataset["anndata_ref"],
+                anchors=dataset[reference_key],
                 positives=dataset["positive"],
                 negatives=dataset["negative_1"],
             )
