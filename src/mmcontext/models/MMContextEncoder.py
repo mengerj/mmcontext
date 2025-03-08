@@ -9,7 +9,7 @@ import transformers
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
 
-from mmcontext.pp import MMContextProcessor
+from mmcontext.pp.MMContextProcessor import MMContextProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -175,20 +175,26 @@ class MMContextEncoder(nn.Module):
         self,
         text_encoder_name: str,
         omics_input_dim: int,
-        processor_obsm_key: str = "X_pp",
         freeze_text_encoder: bool = False,
         unfreeze_last_n_layers: int = 0,
         adapter_hidden_dim: int = 512,
         adapter_output_dim: int = 2048,
+        processor_name: str = "precomputed",
+        # store_path: str = None,
+        processor_obsm_key: str = "X_pca",
+        # feature_dtype: str = "float32",
     ):
         super().__init__()
         self.text_encoder_name = text_encoder_name
-        self.processor_obsm_key = processor_obsm_key
         self.omics_input_dim = omics_input_dim
         self.freeze_text_encoder = freeze_text_encoder
         self.unfreeze_last_n_layers = unfreeze_last_n_layers
         self.adapter_hidden_dim = adapter_hidden_dim
         self.adapter_output_dim = adapter_output_dim
+        self.processor_name = processor_name
+        # self.store_path = store_path
+        # self.feature_dtype = feature_dtype
+        self.processor_obsm_key = processor_obsm_key
 
         # Initialize the text encoder
         self.text_encoder = transformers.AutoModel.from_pretrained(text_encoder_name)
@@ -204,7 +210,21 @@ class MMContextEncoder(nn.Module):
         )
 
         # For tokenization / omics retrieval
-        self.processor = MMContextProcessor(obsm_key=processor_obsm_key, text_encoder_name=text_encoder_name)
+        # Combine all processor-related parameters
+        processor_params = {
+            "processor_name": processor_name,
+            "text_encoder_name": text_encoder_name,
+        }
+
+        # Add store_path and feature_dtype if they're provided
+        # if store_path is not None:
+        #     processor_params["store_path"] = store_path
+        # if feature_dtype is not None:
+        #     processor_params["dtype"] = feature_dtype
+        if processor_obsm_key is not None:
+            processor_params["obsm_key"] = processor_obsm_key
+
+        self.processor = MMContextProcessor(**processor_params)
 
     def _manage_text_encoder_freezing(self):
         """Freezes all parameters in the text encoder if required, and optionally unfreezes the last n layers."""
@@ -361,7 +381,11 @@ class MMContextEncoder(nn.Module):
         omics_text_info = []
 
         for data in texts:
-            if isinstance(data, dict):  # and "file_record" in data.keys():
+            if isinstance(data, int):
+                # integers are sample indices for the datastore and can be used by OptimizedProcessor
+                omics_reps.append(data)
+                omics_text_info.append(0)
+            elif isinstance(data, dict):  # and "file_record" in data.keys():
                 # This indicates a JSON definition for omics
                 data_dict = data
                 omics_reps.append(data_dict)
@@ -411,11 +435,14 @@ class MMContextEncoder(nn.Module):
         return {
             "text_encoder_name": self.text_encoder_name,
             "omics_input_dim": self.omics_input_dim,
-            "processor_obsm_key": self.processor_obsm_key,
             "freeze_text_encoder": self.freeze_text_encoder,
             "unfreeze_last_n_layers": self.unfreeze_last_n_layers,
             "adapter_hidden_dim": self.adapter_hidden_dim,
             "adapter_output_dim": self.adapter_output_dim,
+            "processor_name": self.processor_name,
+            "store_path": self.store_path,
+            "feature_dtype": self.feature_dtype,
+            # Add any other processor kwargs that should be saved
         }
 
     def save(self, output_path: str, safe_serialization: bool = True) -> None:

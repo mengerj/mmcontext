@@ -7,6 +7,8 @@
 # Or you can override any other parameter by specifying its full path, e.g.:
 #   python train.py dataset.basename=my_awesome_dataset
 
+model: #if huggingface repo is provided, this model will be loaded and fine-tuned
+
 # Here are some defaults:
 embedding_method: "geneformer" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
@@ -15,13 +17,22 @@ input_dim_map:
   pca: 64
   scvi: 64
   geneformer: 512
-dataset:
-  basename: "cellxgene_pseudo_bulk_3_5k"
-  type: "pairs"
-  caption: "cell_type"
-test_dataset:
-  name: "jo-mengr/bowel_disease_multiplets_cluster_label"
-  type: "multiplets"
+
+# Modified dataset configuration to support multiple datasets
+datasets:
+  - name: "cellxgene_pseudo_bulk_3_5k"
+    type: "pairs"
+    caption: "natural_language_annotation"
+  - name: "cellxgene_pseudo_bulk_3_5k"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+  # Add more datasets as needed
+
+test_datasets:
+  - name: "jo-mengr/bowel_disease_pairs_cluster_label"
+    type: "pairs"
+  # Add more test datasets as needed
+
 text_encoder:
   name: "pritamdeka/S-BioBert-snli-multinli-stsb"
   freeze_text_encoder: True
@@ -40,8 +51,8 @@ trainer:
   unfreeze_epoch: 4
   output_dir: "../../models/trained"
   num_train_epochs: 4
-  per_device_train_batch_size: 8
-  per_device_eval_batch_size: 8
+  per_device_train_batch_size: 64
+  per_device_eval_batch_size: 64
   learning_rate: 2e-5
   warmup_ratio: 0.1
   fp16: true
