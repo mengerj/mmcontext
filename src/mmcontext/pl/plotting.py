@@ -109,7 +109,8 @@ def plot_umap(
     logger.info("Starting UMAP computation and plotting.")
     if title is None:
         title = f"UMAP of {embedding_key if embedding_key else 'default'}"
-
+    if isinstance(color_key, str):
+        color_key = [color_key]
     # If subset sampling is desired
     if sample_size is not None and sample_size < adata.n_obs:
         # Optional data consolidation step from your codebase:
@@ -138,9 +139,6 @@ def plot_umap(
 
         # Prepare figure for plotting
         plt.figure(figsize=figsize)
-        # Convert color_key to list if it is a single string
-        if isinstance(color_key, str):
-            color_key = [color_key]
         if "cell_type_colors" in adata.uns:
             del adata.uns["cell_type_colors"]
         sc.pl.umap(
@@ -695,7 +693,7 @@ def visualize_embedding_clusters(
     legend_loc: str = "best",
     save_format: str = "png",
     save_plot: bool = False,
-    save_path: str | None = None,
+    save_dir: str | None = None,
 ):
     """
     Visualize embeddings using UMAP or TRIMAP, with custom plot appearance and saving options.
@@ -761,11 +759,11 @@ def visualize_embedding_clusters(
       and color (sample_id). Additional legend modifications can be done as needed.
     """
     # Check and prepare save parameters
-    if save_plot and (not save_path):
-        raise ValueError("`save_path` must be provided when `save_plot=True`.")
+    if save_plot and (not save_dir):
+        save_dir = "."
 
     # Randomly select unique sample IDs
-    all_sample_ids = df["sample_id"].unique()
+    all_sample_ids = df["sample_index"].unique()
     if n_samples > len(all_sample_ids):
         logger.warning(
             f"Requested n_samples ({n_samples}) is greater than total unique sample_ids ({len(all_sample_ids)}). "
@@ -773,7 +771,7 @@ def visualize_embedding_clusters(
         )
         n_samples = len(all_sample_ids)
     selected_sample_ids = np.random.choice(all_sample_ids, size=n_samples, replace=False)
-    df_sub = df[df["sample_id"].isin(selected_sample_ids)].reset_index(drop=True)
+    df_sub = df[df["sample_index"].isin(selected_sample_ids)].reset_index(drop=True)
 
     # Extract embeddings
     embeddings = np.vstack(df_sub["embedding"].values)
@@ -786,7 +784,6 @@ def visualize_embedding_clusters(
             n_inliers=n_neighbors,  # approx. analogous to neighbors in UMAP
             n_random=n_neighbors,
             distance=metric,
-            random_state=random_state,
         )
     else:
         raise ValueError("Method must be 'umap' or 'trimap'.")
@@ -796,7 +793,7 @@ def visualize_embedding_clusters(
     embedding_2d = reducer.fit_transform(embeddings)
 
     # Prepare color palette for sample IDs
-    unique_samples = df_sub["sample_id"].unique()
+    unique_samples = df_sub["sample_index"].unique()
     color_palette = sns.color_palette("husl", len(unique_samples))
     sample_color_map = {sid: color_palette[i] for i, sid in enumerate(unique_samples)}
 
@@ -816,7 +813,7 @@ def visualize_embedding_clusters(
     # Plot each combination of sample_id and embedding_type
     for s_id in unique_samples:
         for emb_type in df_sub["embedding_type"].unique():
-            subset = df_sub[(df_sub["sample_id"] == s_id) & (df_sub["embedding_type"] == emb_type)]
+            subset = df_sub[(df_sub["sample_index"] == s_id) & (df_sub["embedding_type"] == emb_type)]
             if subset.empty:
                 continue
             indices = subset.index.values
@@ -830,9 +827,11 @@ def visualize_embedding_clusters(
                 edgecolors="k",
             )
 
-    ax.set_title(f"Embedding Visualization using {method.upper()} ({metric} distance)")
-    ax.set_xlabel("Component 1")
-    ax.set_ylabel("Component 2")
+    # ax.set_title(f"Embedding Visualization using {method.upper()} ({metric} distance)")
+    # ax.set_xlabel("Component 1")
+    # ax.set_ylabel("Component 2")
+    ax.set_xticks([])
+    ax.set_yticks([])
 
     # Minimal custom legend
     # The user might prefer a more advanced legend (one for color, one for shape).
@@ -860,14 +859,11 @@ def visualize_embedding_clusters(
     # Handle saving
     if save_plot:
         # If user wants an extra nametag in the filename:
-        base, ext = os.path.splitext(save_path)
+        outname = f"{save_dir}/embedding_clusters_{method}"
         # If user didn't provide an extension, or wants to override with save_format:
-        if not ext:
-            ext = f".{save_format}"
-        outname = base
         if nametag:
             outname += f"_{nametag}"
-        outpath = f"{outname}{ext}"
+        outpath = f"{outname}.{save_format}"
 
         plt.savefig(outpath, bbox_inches="tight")
         plt.close(fig)

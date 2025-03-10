@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 
 import numpy as np
@@ -6,6 +7,28 @@ import pandas as pd
 from anndata import AnnData
 
 logger = logging.getLogger(__name__)
+
+
+def load_evaluation_results(results_path: str) -> pd.DataFrame:
+    """
+    Load evaluation results from CSV file.
+
+    Parameters
+    ----------
+    results_path : str
+        Path to the evaluation results CSV file
+
+    Returns
+    -------
+    pd.DataFrame
+        Loaded evaluation results
+    """
+    if not os.path.exists(results_path):
+        raise FileNotFoundError(f"Results file not found: {results_path}")
+
+    results_df = pd.read_csv(results_path)
+    logger.info(f"Loaded {len(results_df)} evaluation results from {results_path}")
+    return results_df
 
 
 def subset_adata_by_query_score(adata: AnnData, query_key: str, percentile: float) -> tuple[AnnData, AnnData]:
@@ -71,41 +94,30 @@ def subset_adata_by_query_score(adata: AnnData, query_key: str, percentile: floa
 
 def create_emb_pair_dataframe(
     adata,
-    emb1_key,
-    emb2_key,
-    label_keys: str | list = None,  # New parameter for label keys
+    embedding_dict: dict[str, str],
+    label_keys: str | list = None,
     subset_size=100,
     seed=42,
-    emb1_type="omics",
-    emb2_type="text",
     obs_filter_key=None,
     obs_filter_value=None,
 ):
     """
-    Create a subset DataFrame for paired omics-text embeddings from an anndata object.
+    Create a DataFrame for multi-modal embeddings from an anndata object.
 
     Parameters
     ----------
     adata : anndata.AnnData
-        An AnnData object where each observation (cell/sample) has precomputed
-        embeddings stored in `.obsm[emb1_key]` and `.obsm[emb2_key]`.
-    emb1_key : str
-        The key in `.obsm` for the first embedding (e.g., omics embeddings).
-    emb2_key : str
-        The key in `.obsm` for the second embedding (e.g., text embeddings).
-    label_keys: str or list, optional
-        Column name(s) in `adata.obs` to add as labels in the output DataFrame.
-        If a string is provided, it is treated as a list of length 1.
-        Default is None (no labels added).
+        AnnData object containing embeddings in .obsm
+    embedding_dict : dict[str, str]
+        Dictionary mapping modality names to their corresponding obsm keys
+        e.g., {"omics": "X_pca", "text": "text_emb", "protein": "protein_emb"}
+    label_keys : str or list, optional
+        Column name(s) in adata.obs to add as labels
     subset_size : int, optional
         Number of samples to select. If the dataset has fewer than `subset_size` samples,
         all available samples are used. Default is 100.
     seed : int, optional
-        Random seed for reproducibility. Default is 42.
-    emb1_type : str, optional
-        Label for the first embedding type. Default is "omics".
-    emb2_type : str, optional
-        Label for the second embedding type. Default is "text".
+        Random seed for reproducibility, default 42
     obs_filter_key : str, optional
         Column name in `adata.obs` to filter samples.
     obs_filter_value : Any, optional
@@ -117,7 +129,7 @@ def create_emb_pair_dataframe(
         A DataFrame with the following columns:
         - 'sample_id': The index of the sample in `adata.obs`
         - 'embedding': The embedding vector as a list of floats
-        - 'embedding_type': The type of embedding (either `emb1_type` or `emb2_type`)
+        - 'modality': The type of embedding (either `modality_1` or `modality_2`)
         - Additional columns for each label specified in `label_keys`
 
     Notes
@@ -146,47 +158,41 @@ def create_emb_pair_dataframe(
     # Extract selected sample IDs
     sample_ids = adata.obs.index[sampled_indices]
 
-    # Retrieve embeddings
-    emb1_values = adata.obsm[emb1_key][sampled_indices]
-    emb2_values = adata.obsm[emb2_key][sampled_indices]
-
     data_rows = []
 
     # Convert label_keys to a list if it's a string
     if isinstance(label_keys, str):
         label_keys = [label_keys]
-    if bool(set(label_keys) & {"sample_index", "embedding", "embedding_type"}):
+
+    # Validate label keys
+    if label_keys and bool(set(label_keys) & {"sample_index", "embedding", "embedding_type"}):
         raise ValueError(
             "label_keys cannot contain reserved column names: 'sample_index', 'embedding', 'embedding_type'."
         )
-    for idx, sample_id in enumerate(sample_ids):
-        base_row = {"sample_index": sample_id}
 
-        # Add labels to the base row
-        if label_keys is not None:
-            for label_key in label_keys:
-                base_row[label_key] = adata.obs[label_key][sampled_indices[idx]]
+    data_rows = []
 
-        # omics row
-        omics_row = base_row.copy()
-        omics_row.update(
-            {
-                "embedding": emb1_values[idx].tolist(),
-                "embedding_type": emb1_type,
-            }
-        )
-        data_rows.append(omics_row)
+    # Create rows for each modality
+    for modality, obsm_key in embedding_dict.items():
+        if obsm_key not in adata.obsm:
+            raise KeyError(f"Embedding key '{obsm_key}' not found in adata.obsm")
 
-        # text row
-        text_row = base_row.copy()
-        text_row.update(
-            {
-                "embedding": emb2_values[idx].tolist(),
-                "embedding_type": emb2_type,
-            }
-        )
-        data_rows.append(text_row)
+        embeddings = adata.obsm[obsm_key][sampled_indices]
+
+        for idx, sample_id in enumerate(sample_ids):
+            row = {"sample_index": sample_id}
+
+            # Add labels
+            if label_keys:
+                for label_key in label_keys:
+                    row[label_key] = adata.obs[label_key][sampled_indices[idx]]
+
+            # Add embedding and type
+            row.update({"embedding": embeddings[idx].tolist(), "embedding_type": modality})
+            data_rows.append(row)
 
     df = pd.DataFrame(data_rows)
-    logger.info("Created a DataFrame with %d rows (2 per pair).", len(df))
+    logger.info(
+        "Created DataFrame with %d rows (%d samples × %d modalities)", len(df), subset_size, len(embedding_dict)
+    )
     return df

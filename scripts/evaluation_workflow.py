@@ -149,9 +149,154 @@ def save_results_to_db(results_dict, db_path):
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
-    # Save the updated database
-    updated_df.to_csv(db_path, index=False)
+    # Save the updated database without writing the index and only including header for new files
+    updated_df.to_csv(db_path, index=False, mode="w")
     logger.info(f"Results saved to database: {db_path}")
+
+    # Also save in a format suitable for funkyheatmap
+    save_results_for_funkyheatmap(updated_df, db_path)
+
+
+def save_results_for_funkyheatmap(results_df, db_path):
+    """
+    Save results in a format suitable for the funkyheatmap package.
+
+    Parameters
+    ----------
+    results_df : pd.DataFrame
+        Results dataframe in long format
+    db_path : str
+        Path to the database file
+    """
+    # Create a unique model identifier
+    results_df["model_id"] = results_df["model_name"].apply(lambda x: x.split("/")[-1])
+
+    # Define metric groups
+    metric_groups = {
+        "bio_metrics": [
+            "scib_ARI",
+            "scib_NMI",
+            "scib_ASW",
+            "scib_Isolated_Labels_ASW",
+            "scib_Isolated_Labels_F1",
+            "scib_cLISI",
+        ],
+        "batch_metrics": ["scib_Graph_Connectivity", "scib_Silhouette_Batch", "scib_iLISI", "scib_PCR"],
+        "alignment_metrics": ["modality_gap_irrelevant_score", "full_comparison_score"],
+        "annotation_metrics": ["annotation_accuracy", "zero_shot_macro_auc"],
+    }
+
+    # Pivot the data to wide format with models as rows and metrics as columns
+    # First, create a unique metric identifier by combining dataset_name and metric_name
+    results_df["metric_id"] = results_df["dataset_name"] + "_" + results_df["metric_name"]
+
+    # Pivot the data
+    pivot_df = results_df.pivot(
+        index=["model_id", "model_name", "timestamp"], columns="metric_id", values="metric_value"
+    ).reset_index()
+
+    # Rename the index column to 'id' for funkyheatmap
+    pivot_df = pivot_df.rename(columns={"model_id": "id"})
+
+    # Save the wide format data
+    funky_db_path = os.path.splitext(db_path)[0] + "_funkyheatmap.csv"
+    pivot_df.to_csv(funky_db_path, index=False)
+    logger.info(f"Results saved in funkyheatmap format to: {funky_db_path}")
+
+    # Create and save column_info DataFrame
+    column_names = pivot_df.columns.tolist()
+
+    # Determine the group for each column
+    column_groups_list = []
+    for col in column_names:
+        if col in ["id", "model_name", "timestamp"]:
+            group = "info"
+        else:
+            # Extract dataset and metric from the column name
+            parts = col.split("_")
+            dataset = parts[0]
+            metric = "_".join(parts[1:])
+
+            # Determine the metric group
+            metric_group = None
+            for group_name, metrics in metric_groups.items():
+                if any(m.split("_", 1)[1] if m.startswith("scib_") else m == metric for m in metrics):
+                    metric_group = group_name
+                    break
+
+            if metric_group:
+                group = f"{dataset}_{metric_group}"
+            else:
+                group = f"{dataset}_other"
+
+        column_groups_list.append(group)
+
+    # Create column_info DataFrame
+    column_info = pd.DataFrame(
+        {
+            "id": column_names,
+            "name": [col.replace("_", " ").title() if col != "id" else "Model ID" for col in column_names],
+            "geom": ["text" if col in ["id", "model_name", "timestamp"] else "bar" for col in column_names],
+            "group": column_groups_list,
+            "palette": [
+                "black"
+                if col in ["id", "model_name", "timestamp"]
+                else "Blues"
+                if any(m in col for m in metric_groups["batch_metrics"])
+                else "Greens"
+                if any(m in col for m in metric_groups["bio_metrics"])
+                else "Reds"
+                if any(m in col for m in metric_groups["alignment_metrics"])
+                else "YlOrBr"
+                if any(m in col for m in metric_groups["annotation_metrics"])
+                else "Purples"
+                for col in column_names
+            ],
+            "width": [3 if col == "id" else 2 if col in ["model_name", "timestamp"] else 1 for col in column_names],
+            "legend": [False if col in ["id", "model_name", "timestamp"] else True for col in column_names],
+        }
+    )
+
+    # Save column_info
+    column_info_path = os.path.splitext(db_path)[0] + "_column_info.csv"
+    column_info.to_csv(column_info_path, index=False)
+    logger.info(f"Column info saved to: {column_info_path}")
+
+    # Create and save column_groups DataFrame
+    unique_groups = sorted(set(column_groups_list))
+
+    # Extract dataset and metric group from each group
+    group_info = []
+    for group in unique_groups:
+        if group == "info":
+            level1 = "Info"
+            level2 = "Model Information"
+        else:
+            parts = group.split("_")
+            dataset = parts[0]
+            metric_group = "_".join(parts[1:])
+
+            level1 = dataset.title()
+
+            if metric_group == "bio_metrics":
+                level2 = "Biological Metrics"
+            elif metric_group == "batch_metrics":
+                level2 = "Batch Integration Metrics"
+            elif metric_group == "alignment_metrics":
+                level2 = "Alignment Metrics"
+            elif metric_group == "annotation_metrics":
+                level2 = "Annotation Metrics"
+            else:
+                level2 = "Other Metrics"
+
+        group_info.append({"group": group, "level1": level1, "level2": level2})
+
+    column_groups_df = pd.DataFrame(group_info)
+
+    # Save column_groups
+    column_groups_path = os.path.splitext(db_path)[0] + "_column_groups.csv"
+    column_groups_df.to_csv(column_groups_path, index=False)
+    logger.info(f"Column groups saved to: {column_groups_path}")
 
 
 def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results):
@@ -387,7 +532,7 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
     # 9. Annotation and Query
     if cfg.do_annotation and label_key in adata.obs.columns:
         logger.info("Annotating omics data with OmicsQueryAnnotator...")
-        annotator = OmicsQueryAnnotator(model)
+        annotator = OmicsQueryAnnotator(model, is_cosine=False)
         # e.g. labels from adata.obs[label_key]
         labels = adata.obs[label_key].values.tolist()
 
@@ -459,7 +604,12 @@ def main(cfg: DictConfig) -> None:
         "output_dir": output_dir,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-
+    # Add model_short_name if provided in config
+    if hasattr(cfg, "model_short_name"):
+        results["model_short_name"] = cfg.model_short_name
+    else:
+        # Extract short name from model_name (last part after '/')
+        results["model_short_name"] = cfg.model_name.split("/")[-1]
     # Load Model (once for all datasets)
     logger.info(f"Loading model: {cfg.model_name}")
     model = SentenceTransformer(cfg.model_name, device=cfg.model_device)
