@@ -245,11 +245,13 @@ def remove_zero_variance_genes(adata):
     if np.any(zero_variance_genes):
         adata = adata[:, ~zero_variance_genes]
         logger.info(f"Removed {num_zero_variance_genes} genes with zero variance.")
+        return adata
     else:
         logger.info("No genes with zero variance found.")
+        return adata
 
 
-def check_zero_variance_cells(adata):
+def remove_zero_variance_cells(adata):
     """Check for cells with zero variance in an AnnData object."""
     logger = logging.getLogger(__name__)
     if sp.issparse(adata.X):
@@ -261,8 +263,10 @@ def check_zero_variance_cells(adata):
     if np.any(zero_variance_cells):
         adata = adata[~zero_variance_cells, :]
         logger.info(f"Removed {num_zero_variance_cells} cells with zero variance.")
+        return adata
     else:
         logger.info("No cells with zero variance found.")
+        return adata
 
 
 def remove_duplicate_cells(adata: anndata.AnnData, inplace: bool = True):
@@ -316,19 +320,6 @@ def remove_duplicate_cells(adata: anndata.AnnData, inplace: bool = True):
         filtered_adata = adata[unique_cell_mask].copy()
         logger.info(f"Returning new AnnData object with {filtered_adata.n_obs} cells.")
         return filtered_adata
-
-
-def remove_entries(adata):
-    """Remove zero variance genes and cells, and zero rows and columns from an AnnData object."""
-    # Remove zero variance genes
-    # remove_zero_variance_genes(adata)
-    # Remove zero variance cells
-    check_zero_variance_cells(adata)
-    # Remove zero rows and columns
-    # sc.pp.filter_genes(adata, min_cells=1)
-    sc.pp.filter_cells(adata, min_genes=1)
-    # remove duplicate cells
-    # remove_duplicate_cells(adata)
 
 
 """

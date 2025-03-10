@@ -47,6 +47,7 @@ class scibEvaluator:
         n_top_genes: int | None = None,
         max_cells: int | None = None,
         logger: logging.Logger | None = None,
+        in_parallel: bool = True,
     ):
         self.adata = adata
         self.batch_key = batch_key
@@ -57,6 +58,7 @@ class scibEvaluator:
         self.n_top_genes = n_top_genes
         self.max_cells = max_cells
         self.logger = logger or logging.getLogger(__name__)
+        self.in_parallel = in_parallel
         # check if all keys are present in adata
         if self.embedding_key is not None:
             if isinstance(self.embedding_key, list):
@@ -161,8 +163,11 @@ class scibEvaluator:
                 except Exception as e:
                     self.logger.error(f"Error in data reduction: {e}")
                     self.logger.error("Using full data for metrics computation.")
+                    # If HVG not performed, compute PCA on all genes
+                    self.logger.info("Computing PCA on all genes...")
+                    sc.pp.pca(adata, n_comps=50)
+                    sc.pp.neighbors(adata, use_rep="X_pca")
             else:
-                # If HVG not performed, compute PCA on all genes
                 self.logger.info("Computing PCA on all genes...")
                 sc.pp.pca(adata, n_comps=50)
                 sc.pp.neighbors(adata, use_rep="X_pca")
@@ -229,17 +234,27 @@ class scibEvaluator:
     def compute_metrics_in_parallel(self, adata: AnnData, metrics: list[tuple[str, Any, dict[str, Any]]]):
         """Compute metrics in parallel using a ThreadPoolExecutor."""
         results = {}
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_metric = {
-                executor.submit(metric_func, adata, **params): name for name, metric_func, params in metrics
-            }
-            for future in concurrent.futures.as_completed(future_to_metric):
-                metric_name = future_to_metric[future]
+        if self.in_parallel:
+            # Compute in parallel
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future_to_metric = {
+                    executor.submit(metric_func, adata, **params): name for name, metric_func, params in metrics
+                }
+                for future in concurrent.futures.as_completed(future_to_metric):
+                    metric_name = future_to_metric[future]
+                    try:
+                        result = future.result()
+                        results[metric_name] = result
+                    except Exception as e:
+                        self.logger.error(f"Error computing {metric_name}: {e}")
+        else:
+            # Compute serially
+            for name, metric_func, params in metrics:
                 try:
-                    result = future.result()
-                    results[metric_name] = result
+                    result = metric_func(adata, **params)
+                    results[name] = result
                 except Exception as e:
-                    self.logger.error(f"Error computing {metric_name}: {e}")
+                    self.logger.error(f"Error computing {name}: {e}")
         return results
 
     def compute_average_scores(self, bio_results: dict[str, Any], batch_results: dict[str, Any]) -> dict[str, Any]:

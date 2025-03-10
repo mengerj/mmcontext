@@ -24,7 +24,7 @@ class MMContextProcessor:
 
     def __init__(
         self,
-        processor_name="optimized",
+        processor_name="precomputed",
         text_encoder_name="sentence-transformers/all-MiniLM-L6-v2",
         **processor_kwargs,
     ):

@@ -1,81 +1,198 @@
 import logging
+import os
 import random
 
+import numpy as np
 import pandas as pd
+from anndata import AnnData
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
-def create_emb_pair_dataframe(dataset_split, model, subset_size=100, seed=42):
+def load_evaluation_results(results_path: str) -> pd.DataFrame:
     """
-    Create a small subset dataframe for paired omics-text embeddings.
+    Load evaluation results from CSV file.
 
     Parameters
     ----------
-    dataset_split : list or Dataset
-        A Hugging Face dataset split (e.g. dataset["train"]) with the columns
-        "anndata_ref", "caption", and "label".
-        Data source: Hugging Face dataset containing pairs of omics and text data.
-    model : sentence_transformers.SentenceTransformer
-        A model (or similar) with an .encode method for generating embeddings.
-        Make sure it can handle both text (str) and omics inputs (e.g., preprocessed data).
-    subset_size : int, optional
-        How many positive pairs to sample. By default 100.
-    seed : int, optional
-        Random seed for reproducibility, by default 42.
+    results_path : str
+        Path to the evaluation results CSV file
 
     Returns
     -------
     pd.DataFrame
-        A DataFrame with columns:
+        Loaded evaluation results
+    """
+    if not os.path.exists(results_path):
+        raise FileNotFoundError(f"Results file not found: {results_path}")
+
+    results_df = pd.read_csv(results_path)
+    logger.info(f"Loaded {len(results_df)} evaluation results from {results_path}")
+    return results_df
+
+
+def subset_adata_by_query_score(adata: AnnData, query_key: str, percentile: float) -> tuple[AnnData, AnnData]:
+    """
+    Create two subsets of the given AnnData by filtering on a particular query score.
+
+    Parameters
+    ----------
+    adata : AnnData
+        The AnnData containing a column adata.obs["query_scores"].
+        Each row of this column should be a dictionary with a float score
+        for the given `query_key`.
+    query_key : str
+        The key within each dictionary in adata.obs["query_scores"]
+        whose float value we want to filter on (e.g. "leukemia").
+    percentile : float
+        The percentile (from 0 to 100) used to create the top and bottom filters.
+        For example, 10.0 means top 10% vs bottom 10%.
+
+    Returns
+    -------
+    top_adata : AnnData
+        Subset of `adata` where the row's score is in the top `percentile`.
+    bottom_adata : AnnData
+        Subset of `adata` where the row's score is in the bottom `percentile`.
+
+    References
+    ----------
+    This function uses the `adata.obs["query_scores"]` column (dict-like per row).
+    Make sure your data is loaded and structured such that each
+    entry in `adata.obs["query_scores"]` is a dictionary containing `query_key`.
+    """
+    # Extract the numeric values for the requested query_key
+    if "query_scores" not in adata.obs:
+        raise KeyError("adata.obs does not contain 'query_scores'.")
+
+    # Convert each dict in adata.obs["query_scores"] to the float value for query_key
+    try:
+        scores = adata.obs["query_scores"].apply(lambda d: d[query_key])
+    except Exception as e:
+        raise KeyError(f"Could not extract '{query_key}' from adata.obs['query_scores'].") from e
+
+    # Compute percentile thresholds
+    lower_thresh = np.percentile(scores, percentile)  # e.g., 10th percentile
+    upper_thresh = np.percentile(scores, 100.0 - percentile)  # e.g., 90th percentile
+
+    # Create boolean masks
+    bottom_mask = scores <= lower_thresh
+    top_mask = scores >= upper_thresh
+
+    # Log how many observations are in each subset
+    logger.info(
+        f"Splitting data by '{query_key}' scores at the {percentile}th/({100 - percentile}th) percentile. "
+        f"Found {bottom_mask.sum()} cells in bottom subset, {top_mask.sum()} cells in top subset."
+    )
+
+    # Subset the AnnData
+    bottom_adata = adata[bottom_mask].copy()
+    top_adata = adata[top_mask].copy()
+
+    return top_adata, bottom_adata
+
+
+def create_emb_pair_dataframe(
+    adata,
+    embedding_dict: dict[str, str],
+    label_keys: str | list = None,
+    subset_size=100,
+    seed=42,
+    obs_filter_key=None,
+    obs_filter_value=None,
+):
+    """
+    Create a DataFrame for multi-modal embeddings from an anndata object.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        AnnData object containing embeddings in .obsm
+    embedding_dict : dict[str, str]
+        Dictionary mapping modality names to their corresponding obsm keys
+        e.g., {"omics": "X_pca", "text": "text_emb", "protein": "protein_emb"}
+    label_keys : str or list, optional
+        Column name(s) in adata.obs to add as labels
+    subset_size : int, optional
+        Number of samples to select. If the dataset has fewer than `subset_size` samples,
+        all available samples are used. Default is 100.
+    seed : int, optional
+        Random seed for reproducibility, default 42
+    obs_filter_key : str, optional
+        Column name in `adata.obs` to filter samples.
+    obs_filter_value : Any, optional
+        Value that `obs_filter_key` should match to include samples.
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame with the following columns:
+        - 'sample_id': The index of the sample in `adata.obs`
         - 'embedding': The embedding vector as a list of floats
-        - 'embedding_type': Either 'omics' or 'text'
-        - 'pair': An integer pairing ID that groups each omics-text pair
+        - 'modality': The type of embedding (either `modality_1` or `modality_2`)
+        - Additional columns for each label specified in `label_keys`
 
     Notes
     -----
-    1. We filter the dataset to use only examples where label == 1 (true pairs).
-    2. For each pair, we generate two rows in the resulting DataFrame:
-       one for the omics embedding, one for the text embedding.
-    3. 'subset_size' is used to avoid embedding a huge dataset. If your dataset
-       has fewer than 'subset_size' positive pairs, you'll just get all of them.
-    4. If your 'anndata_ref' is not directly compatible with `model.encode()`,
-       you should adapt the code to handle your omics embedding step
-       (e.g., loading an .h5ad file, calling a separate pipeline, etc.).
+    1. If `obs_filter_key` and `obs_filter_value` are provided, only samples where
+       `adata.obs[obs_filter_key] == obs_filter_value` are included.
+    2. This function assumes that each sample has one paired embedding in `.obsm[emb1_key]`
+       and `.obsm[emb2_key]`.
+    3. The function randomly selects `subset_size` samples from `adata.obs` while maintaining
+       the pairing between `emb1_key` and `emb2_key`.
+    4. The returned DataFrame contains two rows per sample (one for each embedding type).
     """
-    # Filter dataset for the correct pairs only
-    logger.info("Filtering dataset for label == 1 (true pairs).")
-    positive_pairs = [row for row in dataset_split if row["label"] == 1]
+    # Apply filtering if specified
+    if obs_filter_key is not None and obs_filter_value is not None:
+        logger.info("Filtering dataset for %s == %s.", obs_filter_key, obs_filter_value)
+        adata = adata[adata.obs[obs_filter_key] == obs_filter_value]
 
-    # Sample a subset if the dataset is large
+    # Ensure subset_size is not larger than available samples
+    available_samples = adata.n_obs
+    subset_size = min(subset_size, available_samples)
+
+    # Sample a subset of indices
     random.seed(seed)
-    if len(positive_pairs) > subset_size:
-        logger.info("Sampling %d out of %d positive pairs.", subset_size, len(positive_pairs))
-        positive_pairs = random.sample(positive_pairs, k=subset_size)
-    else:
-        logger.info("Using all %d positive pairs (fewer than subset_size).", len(positive_pairs))
+    sampled_indices = random.sample(range(available_samples), k=subset_size)
+
+    # Extract selected sample IDs
+    sample_ids = adata.obs.index[sampled_indices]
 
     data_rows = []
-    # We create a pairing ID for each row in our subset
-    for idx, row in enumerate(positive_pairs):
-        # 1) Embed omics
-        omics_emb = model.encode([row["anndata_ref"]])  # shape: (1, emb_dim)
-        # 2) Embed text
-        text_emb = model.encode([row["caption"]])  # shape: (1, emb_dim)
 
-        # omics row
-        data_rows.append(
-            {
-                "embedding": omics_emb[0].tolist(),
-                "embedding_type": "omics",
-                "pair": idx,  # pairing ID
-            }
+    # Convert label_keys to a list if it's a string
+    if isinstance(label_keys, str):
+        label_keys = [label_keys]
+
+    # Validate label keys
+    if label_keys and bool(set(label_keys) & {"sample_index", "embedding", "embedding_type"}):
+        raise ValueError(
+            "label_keys cannot contain reserved column names: 'sample_index', 'embedding', 'embedding_type'."
         )
 
-        # text row
-        data_rows.append({"embedding": text_emb[0].tolist(), "embedding_type": "text", "pair": idx})
+    data_rows = []
+
+    # Create rows for each modality
+    for modality, obsm_key in embedding_dict.items():
+        if obsm_key not in adata.obsm:
+            raise KeyError(f"Embedding key '{obsm_key}' not found in adata.obsm")
+
+        embeddings = adata.obsm[obsm_key][sampled_indices]
+
+        for idx, sample_id in enumerate(sample_ids):
+            row = {"sample_index": sample_id}
+
+            # Add labels
+            if label_keys:
+                for label_key in label_keys:
+                    row[label_key] = adata.obs[label_key][sampled_indices[idx]]
+
+            # Add embedding and type
+            row.update({"embedding": embeddings[idx].tolist(), "embedding_type": modality})
+            data_rows.append(row)
 
     df = pd.DataFrame(data_rows)
-    logger.info("Created a DataFrame with %d rows (2 per pair).", len(df))
+    logger.info(
+        "Created DataFrame with %d rows (%d samples × %d modalities)", len(df), subset_size, len(embedding_dict)
+    )
     return df

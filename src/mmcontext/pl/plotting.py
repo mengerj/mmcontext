@@ -1,5 +1,7 @@
 import logging
 import os
+import random
+from typing import Optional
 
 import anndata
 import matplotlib.pyplot as plt
@@ -7,8 +9,13 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import seaborn as sns
+import trimap
+import umap
+from anndata import AnnData
 from matplotlib.patches import Patch
 from scipy.sparse import issparse
+from sklearn.metrics.pairwise import cosine_similarity
+from wordcloud import WordCloud
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +75,7 @@ def plot_umap(
     font_weight : str, optional
         Weight for the font used in the plot. Defaults to "bold".
     legend_loc : str, optional
-        Location of the legend. Defaults to "right margin".
+        Location of the legend. Defaults to "right margin". For no legend, set to None.
     save_format : str, optional
         Format to save the plot (e.g., "png", "pdf"). Defaults to "png".
     **kwargs : dict
@@ -102,7 +109,8 @@ def plot_umap(
     logger.info("Starting UMAP computation and plotting.")
     if title is None:
         title = f"UMAP of {embedding_key if embedding_key else 'default'}"
-
+    if isinstance(color_key, str):
+        color_key = [color_key]
     # If subset sampling is desired
     if sample_size is not None and sample_size < adata.n_obs:
         # Optional data consolidation step from your codebase:
@@ -120,10 +128,10 @@ def plot_umap(
         # Compute neighbors
         if embedding_key is not None:
             logger.info(f"Computing neighbors with use_rep='{embedding_key}'.")
-            sc.pp.neighbors(adata, use_rep=embedding_key, **kwargs)
+            sc.pp.neighbors(adata, use_rep=embedding_key, metric="cosine", **kwargs)
         else:
             logger.info("Embedding key is None; using default neighbors.")
-            sc.pp.neighbors(adata, **kwargs)
+            sc.pp.neighbors(adata, metric="cosine", **kwargs)
 
         # Compute UMAP if not already present
         # if "X_umap" not in adata.obsm:
@@ -131,9 +139,6 @@ def plot_umap(
 
         # Prepare figure for plotting
         plt.figure(figsize=figsize)
-        # Convert color_key to list if it is a single string
-        if isinstance(color_key, str):
-            color_key = [color_key]
         if "cell_type_colors" in adata.uns:
             del adata.uns["cell_type_colors"]
         sc.pl.umap(
@@ -173,6 +178,70 @@ def plot_umap(
     except Exception as e:
         logger.error(f"An error occurred while generating UMAP plot: {e}", exc_info=True)
         raise e
+
+
+def plot_wordcloud(
+    list_of_terms: list[str],
+    separator: str = ",",
+    stopwords: set | None = None,
+    title: str | None = None,
+) -> None:
+    """
+    Create and display a word cloud from a specified obs column in an AnnData object.
+
+    This function takes the values in `adata.obs[obs_key]`—which are strings of
+    terms separated by the specified separator—and plots a word cloud showing
+    the most frequent terms.
+
+    Parameters
+    ----------
+    list_of_terms : list of str
+        A list of strings containing terms to include in the word cloud.
+    separator : str, optional
+        The delimiter separating individual terms in each string. Defaults to ','.
+    stopwords : set of str, optional
+        Optional set of terms to exclude from the word cloud (e.g., 'the', 'and').
+
+    References
+    ----------
+    For plotting the word cloud, this function uses the WordCloud library:
+    https://github.com/amueller/word_cloud
+    """
+    # Initialize an empty dictionary to count occurrences
+    term_counts = {}
+
+    # 1. Collect and count terms
+    for val in list_of_terms:
+        # Skip missing entries
+        if pd.isna(val):
+            continue
+
+        # Split on separator, strip whitespace
+        terms = [term.strip() for term in val.split(separator) if term.strip()]
+        for term in terms:
+            # Skip stopwords if provided
+            if stopwords and term.lower() in stopwords:
+                continue
+            term_counts[term] = term_counts.get(term, 0) + 1
+
+    # If no terms were collected, just log and return
+    if not term_counts:
+        logger.warning(f"No valid terms found with separator '{separator}'.")
+        return
+
+    # 2. Generate the word cloud
+    wordcloud = WordCloud(
+        width=800,  # width of the canvas
+        height=600,  # height of the canvas
+        background_color="white",
+    ).generate_from_frequencies(term_counts)
+
+    # 3. Plot the word cloud
+    plt.figure(figsize=(8, 6))
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.axis("off")
+    plt.title(title)
+    plt.show()
 
 
 def plot_query_scores_umap(
@@ -603,3 +672,352 @@ def plot_grouped_bar_chart(
     else:
         plt.show()
         logger.info("Displayed grouped bar chart interactively.")
+
+
+def visualize_embedding_clusters(
+    df: pd.DataFrame,
+    method: str = "umap",
+    metric: str = "euclidean",
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    random_state: int = 42,
+    n_samples: int = 50,
+    # Plot appearance & saving
+    nametag: str | None = None,
+    figsize: tuple = (10, 8),
+    dpi: int = 300,
+    point_size: float = 50.0,
+    frameon: bool = False,
+    legend_fontsize: int = 10,
+    font_weight: str = "bold",
+    legend_loc: str = "best",
+    save_format: str = "png",
+    save_plot: bool = False,
+    save_dir: str | None = None,
+):
+    """
+    Visualize embeddings using UMAP or TRIMAP, with custom plot appearance and saving options.
+
+    With different shapes for embedding types ('omics' or 'text') and different colors for each sample ID.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing:
+            - 'embedding': The actual embedding vectors (np.array or list of floats).
+            - 'embedding_type': A categorical field (e.g., 'omics' or 'text').
+            - 'sample_id': A unique identifier for each sample.
+    method : str, optional
+        Dimensionality reduction method ('umap' or 'trimap'). Default is 'umap'.
+    metric : str, optional
+        Distance metric for dimensionality reduction (e.g., 'euclidean' or 'cosine').
+        For UMAP, it sets the 'metric' parameter. For TRIMAP, it sets 'distance'.
+        Default is 'euclidean'.
+    n_neighbors : int, optional
+        Number of neighbors for UMAP or TRIMAP. Default is 15.
+    min_dist : float, optional
+        Minimum distance between points in UMAP. Ignored by TRIMAP. Default is 0.1.
+    random_state : int, optional
+        Random seed for reproducibility. Default is 42.
+    n_samples : int, optional
+        Number of unique sample IDs to randomly select for plotting. Default is 50.
+    nametag : str or None, optional
+        A tag to add to the saved plot name if save_plot=True. Default is None.
+    figsize : tuple, optional
+        The size of the figure (width, height). Default is (10, 8).
+    dpi : int, optional
+        Dots per inch for the figure. Default is 300.
+    point_size : float, optional
+        Marker size for the scatter plot. Default is 50.0.
+    frameon : bool, optional
+        Whether to draw a frame around the plot. Default is False.
+    legend_fontsize : int, optional
+        Font size for the legend. Default is 10.
+    font_weight : str, optional
+        Weight for the font used in the plot. Default is "bold".
+    legend_loc : str, optional
+        Location of the legend (e.g., 'best', 'upper right'). Default is "best".
+    save_format : str, optional
+        File format if the plot is saved, e.g. "png" or "pdf". Default is "png".
+    save_plot : bool, optional
+        Whether to save the plot to disk instead of showing it interactively. Default is False.
+    save_path : str or None, optional
+        Path to save the figure. If save_plot=True, this must be provided.
+        The final saved filename will be appended with nametag and `save_format` if needed.
+
+    Returns
+    -------
+    None
+        Displays or saves the plot.
+
+    Notes
+    -----
+    - This function randomly samples 'n_samples' unique sample_ids from 'df'.
+      The dimensionality reduction is applied only on this subset.
+    - Marker shapes are currently mapped as {'omics': 'o', 'text': 's'}.
+    - A minimal legend is created to illustrate the shape (embedding_type)
+      and color (sample_id). Additional legend modifications can be done as needed.
+    """
+    # Check and prepare save parameters
+    if save_plot and (not save_dir):
+        save_dir = "."
+
+    # Randomly select unique sample IDs
+    all_sample_ids = df["sample_index"].unique()
+    if n_samples > len(all_sample_ids):
+        logger.warning(
+            f"Requested n_samples ({n_samples}) is greater than total unique sample_ids ({len(all_sample_ids)}). "
+            "Using all sample_ids instead."
+        )
+        n_samples = len(all_sample_ids)
+    selected_sample_ids = np.random.choice(all_sample_ids, size=n_samples, replace=False)
+    df_sub = df[df["sample_index"].isin(selected_sample_ids)].reset_index(drop=True)
+
+    # Extract embeddings
+    embeddings = np.vstack(df_sub["embedding"].values)
+
+    # Initialize reducer
+    if method.lower() == "umap":
+        reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, metric=metric, random_state=random_state)
+    elif method.lower() == "trimap":
+        reducer = trimap.TRIMAP(
+            n_inliers=n_neighbors,  # approx. analogous to neighbors in UMAP
+            n_random=n_neighbors,
+            distance=metric,
+        )
+    else:
+        raise ValueError("Method must be 'umap' or 'trimap'.")
+
+    # Fit and transform
+    logger.info(f"Applying {method.upper()} to subset of size={len(df_sub)} with metric={metric}...")
+    embedding_2d = reducer.fit_transform(embeddings)
+
+    # Prepare color palette for sample IDs
+    unique_samples = df_sub["sample_index"].unique()
+    color_palette = sns.color_palette("husl", len(unique_samples))
+    sample_color_map = {sid: color_palette[i] for i, sid in enumerate(unique_samples)}
+
+    # Prepare marker shapes
+    marker_map = {"omics": "o", "text": "s"}
+
+    # Create the plot
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    ax = plt.gca()
+
+    # Adjust frame, font, etc.
+    plt.rc("font", size=legend_fontsize, weight=font_weight)
+    if not frameon:
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+    # Plot each combination of sample_id and embedding_type
+    for s_id in unique_samples:
+        for emb_type in df_sub["embedding_type"].unique():
+            subset = df_sub[(df_sub["sample_index"] == s_id) & (df_sub["embedding_type"] == emb_type)]
+            if subset.empty:
+                continue
+            indices = subset.index.values
+            ax.scatter(
+                embedding_2d[indices, 0],
+                embedding_2d[indices, 1],
+                c=[sample_color_map[s_id]],
+                marker=marker_map.get(emb_type, "o"),
+                s=point_size,
+                alpha=0.7,
+                edgecolors="k",
+            )
+
+    # ax.set_title(f"Embedding Visualization using {method.upper()} ({metric} distance)")
+    # ax.set_xlabel("Component 1")
+    # ax.set_ylabel("Component 2")
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    # Minimal custom legend
+    # The user might prefer a more advanced legend (one for color, one for shape).
+    # As a quick approach, we'll show shape references for the embedding_type:
+    import matplotlib.lines as mlines
+    import matplotlib.patches as mpatches
+
+    # Prepare shape legend entries
+    shape_legend = []
+    for etype in df_sub["embedding_type"].unique():
+        shape_legend.append(
+            mlines.Line2D(
+                [],
+                [],
+                color="black",
+                marker=marker_map.get(etype, "o"),
+                linestyle="None",
+                markersize=10,
+                label=f"{etype}",
+                markeredgecolor="k",
+            )
+        )
+    ax.legend(handles=shape_legend, loc=legend_loc, fontsize=legend_fontsize)
+
+    # Handle saving
+    if save_plot:
+        # If user wants an extra nametag in the filename:
+        outname = f"{save_dir}/embedding_clusters_{method}"
+        # If user didn't provide an extension, or wants to override with save_format:
+        if nametag:
+            outname += f"_{nametag}"
+        outpath = f"{outname}.{save_format}"
+
+        plt.savefig(outpath, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"Plot saved to {outpath}")
+    else:
+        plt.show()
+        logger.info("Displayed embedding clusters interactively.")
+
+
+def plot_embedding_similarity(
+    df: pd.DataFrame,
+    emb1_type: str = "omics",
+    emb2_type: str = "text",
+    n_samples: int = 10,
+    seed: int = 42,
+    label_key: str | None = None,
+    # Additional plotting & saving parameters
+    save_plot: bool = False,
+    save_dir: str | None = None,
+    nametag: str | None = None,
+    figsize: tuple = (10, 8),
+    dpi: int = 300,
+    font_scale: float = 1.0,
+    save_format: str = "png",
+):
+    """
+    Plot the pairwise cosine similarity matrix between two embedding types.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        DataFrame containing:
+          - 'embedding': The actual embedding vectors.
+          - 'embedding_type': One of e.g. ['omics', 'text'] (str).
+          - 'sample_id': A unique identifier for each sample.
+          - Optionally, additional columns like label_key for annotated labels.
+    emb1_type: str, optional
+        The embedding type to appear on the y-axis (rows). Default is 'omics'.
+    emb2_type: str, optional
+        The embedding type to appear on the x-axis (columns). Default is 'text'.
+    n_samples: int, optional
+        Number of samples to randomly select for plotting. If 0, use all samples.
+        If >10, axis labels and annotations are excluded from the heatmap (for clarity).
+        Default is 10.
+    seed: int, optional
+        Random seed for reproducibility of sampling. Default is 42.
+    label_key: str, optional
+        Column name in `df` to use for axis labels if `n_samples <= 10`.
+        If None, uses 'sample_id'. Default is None.
+
+    save_plot: bool, optional
+        Whether to save the plot instead of displaying it. Defaults to False.
+    save_dir: str, optional
+        Directory where the plot should be saved (if `save_plot=True`). Defaults to None.
+    nametag: str, optional
+        An extra tag to insert into the saved filename. Defaults to None.
+    figsize: tuple, optional
+        The size of the figure (width, height). Defaults to (10, 8).
+    dpi: int, optional
+        Dots per inch for the figure. Defaults to 300.
+    font_scale: float, optional
+        Seaborn font scale for controlling text size in the heatmap. Defaults to 1.0.
+    save_format: str, optional
+        Image format to save the plot (e.g. "png", "pdf"). Defaults to "png".
+
+    Returns
+    -------
+    None
+        Displays or saves a heatmap of pairwise cosine similarities.
+
+    Notes
+    -----
+    1) Randomly samples 'n_samples' unique sample IDs from `df["sample_id"]` (if n_samples>0).
+    2) Splits the data into two sets: one with `emb1_type` embeddings and one with `emb2_type`.
+    3) Computes cosine similarity between those sets.
+    4) If `n_samples > 10`, it omits text labels in the heatmap to keep things tidy.
+    5) If `n_samples <= 10`, it uses `label_key` (or sample_id if label_key is None) for axis labels.
+    """
+    # Set random seed for reproducible sampling
+    np.random.seed(seed)
+
+    # Possibly sample a subset of data
+    if n_samples > 0:
+        unique_ids = df["sample_index"].unique()
+        if n_samples > len(unique_ids):
+            n_samples = len(unique_ids)  # avoid sampling error
+        chosen_ids = np.random.choice(unique_ids, size=n_samples, replace=False)
+        df = df[df["sample_index"].isin(chosen_ids)]
+
+    # Use a Seaborn context manager to adjust font scale
+    with sns.plotting_context("notebook", font_scale=font_scale):
+        # Align data by sample_id
+        df = df.set_index("sample_index", drop=False)  # keep sample_id as a column and index
+        emb1_df = df[df["embedding_type"] == emb1_type]
+        emb2_df = df[df["embedding_type"] == emb2_type]
+
+        # Only consider intersection of sample IDs present in both emb1 and emb2
+        common_ids = emb1_df.index.intersection(emb2_df.index)
+        emb1_values = np.vstack(emb1_df.loc[common_ids, "embedding"].values)
+        emb2_values = np.vstack(emb2_df.loc[common_ids, "embedding"].values)
+
+        # Compute cosine similarity
+        similarity_matrix = cosine_similarity(emb1_values, emb2_values)
+
+        # Create figure
+        plt.figure(figsize=figsize, dpi=dpi)
+
+        # If n_samples > 10, omit axis tick labels
+        if n_samples > 10:
+            sns.heatmap(
+                similarity_matrix,
+                annot=False,
+                fmt=".2f",
+                cmap="coolwarm",
+                xticklabels=False,
+                yticklabels=False,
+            )
+            plt.xlabel("")
+            plt.ylabel("")
+        else:
+            # Use label_key for labels if provided, else sample_id
+            if label_key is not None:
+                labels = emb1_df.loc[common_ids, label_key]
+            else:
+                labels = common_ids
+
+            sns.heatmap(
+                similarity_matrix,
+                annot=True,
+                fmt=".2f",
+                cmap="coolwarm",
+                xticklabels=labels,
+                yticklabels=labels,
+            )
+            plt.xlabel(emb2_type)
+            plt.ylabel(emb1_type)
+            plt.xticks(rotation=45, ha="right")
+            plt.yticks(rotation=0)
+
+        plt.title(f"Pairwise Cosine Similarity: {emb1_type} vs {emb2_type}")
+
+        if save_plot:
+            if save_dir is None:
+                raise ValueError("Must provide `save_dir` when `save_plot=True`.")
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Build filename
+            base_name = f"embedding_similarity_{emb1_type}_vs_{emb2_type}"
+            if nametag:
+                base_name += f"_{nametag}"
+            save_path = os.path.join(save_dir, f"{base_name}.{save_format}")
+
+            plt.savefig(save_path, bbox_inches="tight")
+            plt.close()
+            print(f"Saved similarity heatmap to {save_path}")
+        else:
+            plt.show()
