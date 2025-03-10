@@ -48,6 +48,7 @@ dependencies = [
   "torch",
   "trimap>=1.1.4",
   "wandb>=0.19.6",
+  "wordcloud>=1.9.4",
   "zarr<=2.18.4",
 ]
 optional-dependencies.dev = [
