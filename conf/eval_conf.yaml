@@ -2,7 +2,7 @@
 # Example Hydra config for evaluation_workflow.py
 
 # Model parameters
-model_name: "jo-mengr/mmcontext-100k-natural_language_annotation-pca-2048-text-unfrozen"
+model_name: "jo-mengr/mmcontext-100k-natural_language_annotation-hvg-2048-text-unfrozen"
 model_short_name: "mmcontext_geneformer"
 model_device: "cpu" # could be "cuda" or "mps"
 

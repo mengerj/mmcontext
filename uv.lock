@@ -2759,7 +2759,6 @@ name = "pydantic"
 version = "2.10.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "annotated-types" },
     { name = "pydantic-core" },
     { name = "typing-extensions" },
 ]

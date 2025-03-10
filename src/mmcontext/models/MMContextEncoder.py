@@ -440,8 +440,9 @@ class MMContextEncoder(nn.Module):
             "adapter_hidden_dim": self.adapter_hidden_dim,
             "adapter_output_dim": self.adapter_output_dim,
             "processor_name": self.processor_name,
-            "store_path": self.store_path,
-            "feature_dtype": self.feature_dtype,
+            "processor_obsm_key": self.processor_obsm_key,
+            # "store_path": self.store_path,
+            # "feature_dtype": self.feature_dtype,
             # Add any other processor kwargs that should be saved
         }
 

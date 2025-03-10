@@ -2,7 +2,7 @@
 Test suite for OmicsQueryAnnotator and related functionality.
 
 We use pytest, so run these tests via:
-   pytest tests/test_omics_query_annotator.py
+   pytest tests/test_query_annotate.py
 """
 
 import anndata
@@ -12,14 +12,6 @@ import torch
 
 from mmcontext.engine import OmicsQueryAnnotator
 from mmcontext.utils import compute_cosine_similarity
-
-# Check if faiss is available
-try:
-    import faiss
-
-    FAISS_AVAILABLE = True
-except Exception:
-    FAISS_AVAILABLE = False
 
 # -------------------------------
 # Pytest fixtures
@@ -71,118 +63,68 @@ def dummy_model():
 
 
 # -------------------------------
-# Tests for build_label_index / annotate_omics_data
+# Tests for annotate_omics_data
 # -------------------------------
 
 
-@pytest.mark.skipif(not FAISS_AVAILABLE, reason="Faiss is not available")
-def test_build_label_index(dummy_model, dummy_labels):
-    """
-    Ensure that build_label_index stores the labels and creates a Faiss index with the right size.
-    """
-    oq = OmicsQueryAnnotator(model=dummy_model, is_cosine=True)
-    oq.build_label_index(dummy_labels)
-
-    assert oq.labels_ == dummy_labels, "Labels must be stored in the same order."
-    assert oq.faiss_index is not None, "Faiss index should be built."
-    assert oq.embeddings.shape == (len(dummy_labels), 4), "Embeddings shape should match (n_labels, embed_dim)."
-
-
-@pytest.mark.skipif(not FAISS_AVAILABLE, reason="Faiss is not available")
 def test_annotate_omics_data(dummy_model, dummy_labels, dummy_adata):
     """
-    Test that annotate_omics_data adds 'inferred_labels' to adata.obs.
+    Test that annotate_omics_data adds 'inferred_labels' and 'best_label' to adata.obs.
     """
     oq = OmicsQueryAnnotator(model=dummy_model, is_cosine=True)
-    oq.build_label_index(dummy_labels)
-    oq.annotate_omics_data(dummy_adata, n_top=2, use_faiss=True)
+    oq.annotate_omics_data(dummy_adata, labels=dummy_labels)
 
     # We expect adata.obs["inferred_labels"] to exist
     assert "inferred_labels" in dummy_adata.obs
+    assert "best_label" in dummy_adata.obs
     # Check length: it should match n_obs
     assert len(dummy_adata.obs["inferred_labels"]) == dummy_adata.n_obs
+    assert len(dummy_adata.obs["best_label"]) == dummy_adata.n_obs
 
-    # Each element is a dict with up to n_top keys
+    # Each element in inferred_labels is a dict
     for d in dummy_adata.obs["inferred_labels"]:
         assert isinstance(d, dict)
-        assert len(d) <= 2, "Expected up to 2 top labels per sample."
+        assert len(d) <= len(dummy_labels), "Should not have more scores than labels"
+
+    # Each best_label should be one of the original labels
+    for label in dummy_adata.obs["best_label"]:
+        assert label in dummy_labels, f"Best label {label} not in original labels"
 
 
 # -------------------------------
-# Tests for build_omics_index / query_with_text
+# Tests for query_with_text
 # -------------------------------
 
 
-@pytest.mark.skipif(not FAISS_AVAILABLE, reason="Faiss is not available")
-def test_build_omics_index(dummy_model, dummy_adata):
+def test_query_with_text(dummy_model, dummy_adata):
     """
-    Verify building an omics index creates a Faiss index with correct shape.
-    """
-    oq = OmicsQueryAnnotator(model=dummy_model, is_cosine=True)
-    oq.build_omics_index(dummy_adata)
-
-    assert oq.faiss_index is not None, "Faiss index should be built."
-    assert oq.embeddings.shape == (dummy_adata.n_obs, 4), "Embeddings should match (n_obs, embed_dim)."
-    # sample_ids_ should match obs_names
-    assert oq.sample_ids_ == list(dummy_adata.obs_names)
-
-
-@pytest.mark.skipif(not FAISS_AVAILABLE, reason="Faiss is not available")
-def test_query_with_text_faiss(dummy_model, dummy_adata):
-    """
-    Check that query_with_text using Faiss fills adata.obs["query_scores"] properly.
+    Check that query_with_text fills adata.obs["query_scores"] properly.
     """
     oq = OmicsQueryAnnotator(model=dummy_model, is_cosine=True)
-    oq.build_omics_index(dummy_adata)
-
     queries = ["some text", "some other text"]
-    oq.query_with_text(dummy_adata, queries, use_faiss=True, n_top=2)
+    oq.query_with_text(dummy_adata, queries)
 
     assert "query_scores" in dummy_adata.obs
     assert len(dummy_adata.obs["query_scores"]) == dummy_adata.n_obs
 
-    # Each element in adata.obs["query_scores"] is a dict with up to 2 keys
+    # Each element in query_scores should be a dict with entries for each query
     for d in dummy_adata.obs["query_scores"]:
         assert isinstance(d, dict)
-        # We won't necessarily always get 2 keys per sample if there's something off,
-        # but typically we expect up to n_top keys. Just check type correctness:
+        assert len(d) == len(queries), "Should have scores for all queries"
         for k, v in d.items():
-            assert isinstance(k, str)
-            assert isinstance(v, float)
-
-
-def test_query_with_text_matmul(dummy_model, dummy_adata):
-    """
-    Check that query_with_text using matrix multiplication fills adata.obs["query_scores"] properly.
-    """
-    oq = OmicsQueryAnnotator(model=dummy_model, is_cosine=True)
-
-    queries = ["text query 1", "text query 2"]
-    oq.query_with_text(dummy_adata, queries, use_faiss=False, device="cpu", n_top=5, emb_key="mmcontext_emb")
-
-    assert "query_scores" in dummy_adata.obs
-    # shape: (n_obs,) of dictionaries
-    assert len(dummy_adata.obs["query_scores"]) == dummy_adata.n_obs
-
-    for d in dummy_adata.obs["query_scores"]:
-        assert isinstance(d, dict)
-        # now we should have 2 keys for 2 queries
-        assert len(d) == 2
-        for k, v in d.items():
-            assert k in queries
-            assert isinstance(v, float)
+            assert k in queries, f"Query {k} not in original queries"
+            assert isinstance(v, float), "Scores should be floats"
 
 
 # -------------------------------
-# Tests for compute_cosine_similarity_torch
+# Tests for compute_cosine_similarity
 # -------------------------------
 
 
-def test_compute_cosine_similarity_torch_cpu():
+def test_compute_cosine_similarity_basic():
     """
-    Simple test to confirm correctness of compute_cosine_similarity_torch on CPU.
+    Simple test to confirm correctness of compute_cosine_similarity on CPU.
     """
-
     # Example small vectors
     # shape: (n_samples, dim) = (3, 2)
     samples = np.array([[1, 0], [0, 1], [1, 1]], dtype=np.float32)
@@ -214,17 +156,15 @@ def test_compute_cosine_similarity_torch_cpu():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-def test_compute_cosine_similarity_torch_gpu():
+def test_compute_cosine_similarity_gpu():
     """
-    Test compute_cosine_similarity_torch on a CUDA GPU if available.
+    Test compute_cosine_similarity on a CUDA GPU if available.
     """
-    from mmcontext.utils import compute_cosine_similarity_torch
-
     samples = np.random.rand(5, 4).astype(np.float32)
     queries = np.random.rand(3, 4).astype(np.float32)
 
-    sim_cpu = compute_cosine_similarity_torch(samples, queries, device="cpu")
-    sim_gpu = compute_cosine_similarity_torch(samples, queries, device="cuda")
+    sim_cpu = compute_cosine_similarity(samples, queries, device="cpu")
+    sim_gpu = compute_cosine_similarity(samples, queries, device="cuda")
 
     # They should be almost identical
     np.testing.assert_allclose(sim_cpu, sim_gpu, atol=1e-5)
@@ -234,11 +174,10 @@ def test_compute_cosine_similarity_torch_gpu():
     not getattr(torch.backends, "mps", False) or not torch.backends.mps.is_available(),
     reason="MPS device not available",
 )
-def test_compute_cosine_similarity_torch_mps():
+def test_compute_cosine_similarity_mps():
     """
-    Test compute_cosine_similarity_torch on Apple Silicon MPS device if available.
+    Test compute_cosine_similarity on Apple Silicon MPS device if available.
     """
-
     samples = np.random.rand(5, 4).astype(np.float32)
     queries = np.random.rand(3, 4).astype(np.float32)
 
@@ -255,110 +194,58 @@ def test_best_label_annotation():
     adata.obs["inferred_labels"].
     """
 
-    import anndata
-    import numpy as np
-
-    from mmcontext.engine import OmicsQueryAnnotator
-
-    # ------------------------------------------------
-    # 1. Create a deterministic mock model
-    # ------------------------------------------------
+    # Create a deterministic mock model
     class DeterministicMockModel:
         def encode(self, list_of_strings):
             """
             We'll encode sample embeddings and label embeddings in a way that
             ensures a specific label is guaranteed to be the highest-scoring.
-
-            Strategy:
-              - If the input strings look like "sample_0", "sample_1", etc.,
-                we'll produce embeddings that favor label_0 or label_1.
-              - If the input strings look like "label_0", "label_1", etc.,
-                we'll produce specific distinct embeddings.
             """
-            # For demonstration, let's say we have 2 samples and 3 labels
-            # We'll handle the shape dynamically based on len(list_of_strings).
-
             embeddings = []
             for s in list_of_strings:
                 if s.startswith("sample_"):
-                    # We can parse the sample index
                     idx = int(s.split("_")[-1])
-                    # Example: sample_0 -> [1,0,0], sample_1 -> [0,1,0], etc.
-                    # Just be consistent so we can predict the best label.
                     vec = np.zeros(3, dtype=np.float32)
                     if idx < 3:
                         vec[idx] = 1.0
                     embeddings.append(vec)
                 elif s.startswith("label_"):
-                    # parse label index
                     idx = int(s.split("_")[-1])
-                    # label_0 -> [1,0,0], label_1 -> [0,1,0], label_2 -> [0,0,1]
                     vec = np.zeros(3, dtype=np.float32)
                     vec[idx] = 1.0
                     embeddings.append(vec)
                 else:
-                    # fallback for random or unrecognized strings
-                    # produce a zero vector of dim=3 for simplicity
                     embeddings.append(np.zeros(3, dtype=np.float32))
-
             return np.array(embeddings, dtype=np.float32)
 
-    # ------------------------------------------------
-    # 2. Construct an AnnData with 2 samples
-    # ------------------------------------------------
-    X = np.random.rand(2, 5).astype(np.float32)  # random dummy gene expression
+    # Create test data
+    X = np.random.rand(2, 5).astype(np.float32)
     adata = anndata.AnnData(X)
-    # We'll label the samples "sample_0" and "sample_1"
     adata.obs_names = ["sample_0", "sample_1"]
-    # Store the sample embeddings in .obsm["mmcontext_emb"] using the mock format
-    # We'll just reuse the model's logic by calling encode() on the sample names
     mock_model = DeterministicMockModel()
-    sample_emb = mock_model.encode(adata.obs_names.to_list())  # shape: (2,3)
+    sample_emb = mock_model.encode(adata.obs_names.to_list())
     adata.obsm["mmcontext_emb"] = sample_emb
 
-    # ------------------------------------------------
-    # 3. Create some label strings
-    # ------------------------------------------------
-    labels = ["label_0", "label_1", "label_2"]  # 3 labels
-
-    # ------------------------------------------------
-    # 4. Run annotate_omics_data
-    # ------------------------------------------------
+    # Create labels and run annotation
+    labels = ["label_0", "label_1", "label_2"]
     oq = OmicsQueryAnnotator(model=mock_model, is_cosine=True)
-    # We'll do a short call, letting 'labels=...' define which label embeddings are used
-    # We'll do matrix multiplication (use_faiss=False).
-    oq.annotate_omics_data(adata, labels=labels, use_faiss=False, n_top=3)
+    oq.annotate_omics_data(adata, labels=labels)
 
-    # ------------------------------------------------
-    # 5. Test the results
-    # ------------------------------------------------
-    # Check the new columns in adata.obs
-    assert "inferred_labels" in adata.obs, "'inferred_labels' was not created."
-    assert "best_label" in adata.obs, "'best_label' was not created."
+    # Check results
+    assert "inferred_labels" in adata.obs
+    assert "best_label" in adata.obs
 
-    # We have 2 samples; each element in adata.obs["inferred_labels"] is a dict
     inferred_labels = adata.obs["inferred_labels"]
     best_labels = adata.obs["best_label"]
 
-    assert len(inferred_labels) == 2
-    assert len(best_labels) == 2
-
-    # For each sample, check that best_label is the label with the highest score
+    # Verify best_label matches highest score in inferred_labels
     for i in range(2):
-        label_scores = inferred_labels[i]  # dictionary {label_str: score}
+        label_scores = inferred_labels[i]
         found_best = best_labels[i]
-        # Make sure found_best is actually one of the dictionary keys
-        assert found_best in label_scores, f"best_label='{found_best}' not among keys {list(label_scores.keys())}"
-        # Verify it has the maximum score in the dict
-        max_label = max(label_scores, key=label_scores.get)  # label with highest value
-        assert found_best == max_label, f"Expected best_label='{max_label}' but got '{found_best}'."
+        assert found_best in label_scores
+        max_label = max(label_scores, key=label_scores.get)
+        assert found_best == max_label
 
-    # If we want to confirm the logic matches our encoding logic:
-    # - sample_0's embedding = [1,0,0]
-    #   so it should have highest dot product with label_0 => best_label = 'label_0'
-    # - sample_1's embedding = [0,1,0]
-    #   so it should match label_1 => best_label = 'label_1'
+    # Verify expected behavior based on our encoding scheme
     assert best_labels[0] == "label_0"
     assert best_labels[1] == "label_1"
-
-    print("Test passed: best_label is correctly identified for each sample.")
