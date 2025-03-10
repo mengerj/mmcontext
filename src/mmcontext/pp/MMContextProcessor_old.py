@@ -11,7 +11,6 @@ import transformers
 
 from mmcontext.utils import download_file_from_share_link
 
-# from mmcontext.pp.efficient_ds import OptimizedProcessor
 logger = logging.getLogger(__name__)
 
 
@@ -24,7 +23,7 @@ class MMContextProcessor:
 
     def __init__(
         self,
-        processor_name="optimized",
+        processor_name="precomputed",
         text_encoder_name="sentence-transformers/all-MiniLM-L6-v2",
         **processor_kwargs,
     ):
@@ -36,10 +35,8 @@ class MMContextProcessor:
         if processor_name == "precomputed":
             # obsm_key and retrieval mode should be passed as kwargs
             return PrecomputedProcessor(**processor_kwargs)
-        # elif processor_name == "optimized":
-        #    return OptimizedProcessor(**processor_kwargs)
         else:
-            raise ValueError(f"Invalid omics processor class: {processor_name}. Only 'precomputed' are supported.")
+            raise ValueError(f"Invalid omics processor class: {processor_name}. Only 'precomputed' is supported.")
 
 
 class PrecomputedProcessor:
@@ -73,11 +70,10 @@ class PrecomputedProcessor:
         self.obsm_key = obsm_key
         self._data_cache = {}
         self._path_cache = {}  # Cache for resolved file paths
-        # Initialize device in constructor
         logger.info(
             f"Initialized PrecomputedProcessor. "
             f"Retrieval mode: {retrieval_mode}. "
-            f"Metadata from AnnData obsm_key: {obsm_key}. "
+            f"Metadata from AnnData obsm_key: {obsm_key}."
         )
         if retrieval_mode == "numpy" and obsm_key is None:
             raise ValueError("In numpy mode, 'obsm_key' must be provided.")
@@ -101,6 +97,7 @@ class PrecomputedProcessor:
         ValueError
             If the data type is unsupported.
         """
+        # ensure tensor has dtype float32
         if isinstance(data, torch.Tensor):
             return data.float()
         if isinstance(data, sp.spmatrix):
@@ -173,64 +170,65 @@ class PrecomputedProcessor:
 
         batch_size = len(data)
         features = None
+        batch_sample_ids = []
 
         # Group data items by embedding path for efficient processing
         grouped_data = {}
         for data_item in data:
             file_record = data_item["file_record"]
+            batch_sample_ids.append(data_item["sample_id"])
             embedding_path = file_record["embeddings"][self.obsm_key]
             if embedding_path not in grouped_data:
-                grouped_data[embedding_path] = []
-            grouped_data[embedding_path].append(data_item)
+                grouped_data[embedding_path] = data_item
 
-        # Pre-allocate the features tensor once we know the dimensions
         for embedding_path, data_items in grouped_data.items():
-            if self.retrieval_mode == "numpy":
-                # Resolve the file path only once per unique embedding_path
+            if self.retrieval_mode == "adata":
+                file_path = self._resolve_file_path(data_items["file_record"]["dataset_path"], suffix=".h5ad")
+                if file_path not in self._data_cache:
+                    adata = (
+                        anndata.read_h5ad(file_path) if file_path.endswith(".h5ad") else anndata.read_zarr(file_path)
+                    )
+                    self._data_cache[file_path] = adata
+                adata = self._data_cache[file_path]
+                if features is None:
+                    feature_dim = adata.obsm[self.obsm_key].shape
+                    features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)
+                for i, data_item in enumerate(data_items):
+                    sample_id = data_item["sample_id"]
+                    sample_idx = adata.obs.index == sample_id
+                    features[i] = self._convert_to_tensor(adata.obsm[self.obsm_key][sample_idx])
+
+            elif self.retrieval_mode == "numpy":
                 if embedding_path not in self._data_cache:
+                    # Resolve the file path only once per unique embedding_path
                     if embedding_path not in self._path_cache:
                         self._path_cache[embedding_path] = self._resolve_file_path(embedding_path, suffix=".npz")
                     resolved_path = self._path_cache[embedding_path]
-
-                    # Load the data with mmap_mode='r' for memory efficiency
-                    npzfile = np.load(resolved_path, allow_pickle=True, mmap_mode="r")
+                    npzfile = np.load(resolved_path, allow_pickle=True)
                     emb_matrix = npzfile["data"]
                     sample_ids = npzfile.get("sample_ids", None)
-
-                    # Convert to tensor once and store in cache
-                    if isinstance(emb_matrix, torch.Tensor):
-                        tensor_matrix = emb_matrix.to(self.device)
+                    if isinstance(emb_matrix, torch.Tensor):  # If already a tensor, no conversion needed
+                        self._data_cache[embedding_path] = {"matrix": emb_matrix}
                     else:
-                        # Move conversion to CUDA if available
-                        if isinstance(emb_matrix, sp.spmatrix):
-                            tensor_matrix = torch.from_numpy(emb_matrix.toarray()).float()
-                        else:
-                            tensor_matrix = torch.from_numpy(emb_matrix).float()
+                        self._data_cache[embedding_path] = {
+                            "matrix": self._convert_to_tensor(emb_matrix)
+                        }  # Convert to tensor once
+                    if sample_ids is not None:
+                        self._data_cache[embedding_path]["sample_ids"] = sample_ids
+                    else:
+                        logger.error(
+                            f"Sample IDs not found in {resolved_path}. Cannot ensure correct order of samples."
+                        )
+                        raise ValueError("Sample IDs not found in the NumPy file.")
 
-                    self._data_cache[embedding_path] = {"matrix": tensor_matrix, "sample_ids": sample_ids}
-
-                # Get cached data
-                cached_data = self._data_cache[embedding_path]
-                emb_matrix = cached_data["matrix"]
-                sample_ids = cached_data["sample_ids"]
-
-                # Initialize features tensor if not already done
-                if features is None:
-                    feature_dim = emb_matrix.shape[1]
-                    features = torch.zeros((batch_size, feature_dim), dtype=torch.float32)  # , device=self.device)
-
-                # Collect all sample IDs for this batch
-                batch_sample_ids = [item["sample_id"] for item in data_items]
-
-                # Use vectorized operations for indexing
+                emb_matrix = self._data_cache[embedding_path]["matrix"]
+                sample_ids = self._data_cache[embedding_path]["sample_ids"]
+                # get the correct entries of the embedding matrix for the batch
                 sorted_idx = np.argsort(sample_ids)
-                sorted_sample_ids = sample_ids[sorted_idx]
+                sorted_sample_ids = sample_ids[sorted_idx]  # Ensure sorted order
                 pos_in_sorted = np.searchsorted(sorted_sample_ids, batch_sample_ids)
-
-                # Get indices for this batch
-                for _i, (item_idx, data_item) in enumerate(zip(pos_in_sorted, data_items, strict=False)):
-                    item_pos = list(data).index(data_item)
-                    features[item_pos] = emb_matrix[sorted_idx[item_idx]]
+                indices = sorted_idx[pos_in_sorted]
+                features = emb_matrix[indices]
 
         return features
 

@@ -71,6 +71,7 @@ class SystemMonitor:
                     except ValueError:
                         # Assume it's a UUID and fetch the handle
                         handle = pynvml.nvmlDeviceGetHandleByUUID(entry)
+                        self.gpu_handles.append(handle)
             else:
                 # If no CUDA_VISIBLE_DEVICES, use gpu_indices or detect all available GPUs
                 if self.gpu_indices is not None:

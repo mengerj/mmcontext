@@ -7,21 +7,32 @@
 # Or you can override any other parameter by specifying its full path, e.g.:
 #   python train.py dataset.basename=my_awesome_dataset
 
+model: #if huggingface repo is provided, this model will be loaded and fine-tuned
+
 # Here are some defaults:
-embedding_method: "geneformer" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
+embedding_method: "hvg" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
 input_dim_map:
   hvg: 2000
   pca: 64
   scvi: 64
   geneformer: 512
-dataset:
-  basename: "cellxgene_pseudo_bulk_3_5k"
-  type: "pairs"
-  caption: "cell_type"
-test_dataset:
-  name: "jo-mengr/bowel_disease_multiplets_cluster_label"
-  type: "multiplets"
+
+# Modified dataset configuration to support multiple datasets
+datasets:
+  # - name: "cellxgene_pseudo_bulk_3_5k"
+  # type: "multiplets"
+  # caption: "natural_language_annotation"
+  - name: "geo_7k"
+    type: "pairs"
+    caption: "natural_language_annotation"
+  # Add more datasets as needed
+
+test_datasets:
+  - name: "jo-mengr/bowel_disease_pairs_cluster_label"
+    type: "pairs"
+  # Add more test datasets as needed
+
 text_encoder:
   name: "pritamdeka/S-BioBert-snli-multinli-stsb"
   freeze_text_encoder: True
@@ -33,15 +44,15 @@ text_encoder:
 
 adapter:
   omics_input_dim: #this will be overwritten by the embedding_dim_map
-  hidden_dim:
+  hidden_dim: 512
   output_dim: 2048
 
 trainer:
-  unfreeze_epoch: 4
+  unfreeze_epoch: 2
   output_dir: "../../models/trained"
-  num_train_epochs: 4
-  per_device_train_batch_size: 8
-  per_device_eval_batch_size: 8
+  num_train_epochs: 8
+  per_device_train_batch_size: 128
+  per_device_eval_batch_size: 128
   learning_rate: 2e-5
   warmup_ratio: 0.1
   fp16: true
@@ -53,3 +64,4 @@ trainer:
   save_total_limit: 2
   logging_steps: 200
   run_name: "mmcontext"
+  dataloader_num_workers: 1
