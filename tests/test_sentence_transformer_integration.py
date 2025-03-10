@@ -19,11 +19,6 @@ def mock_processor(monkeypatch, tmp_path):
     """
     Mock processor for NumPy retrieval mode.
     """
-
-    def mock__resolve_file_path(self, file_path, suffix=".npz"):
-        """Mock file path resolution to return our test NPZ file."""
-        return str(tmp_path / "test_embeddings.npz")
-
     # Create test data
     np.random.seed(42)
     test_data = np.random.randn(4, 8)  # 4 samples, 8 dimensions
@@ -32,14 +27,21 @@ def mock_processor(monkeypatch, tmp_path):
     # Save test data
     np.savez(tmp_path / "test_embeddings.npz", data=test_data, sample_ids=sample_ids)
 
-    # Patch the resolve_file_path function
-    monkeypatch.setattr(
-        "mmcontext.pp.MMContextProcessor.PrecomputedProcessor._resolve_file_path", mock__resolve_file_path
-    )
-
+    # Create processor first
     processor = MMContextProcessor(
         processor_name="precomputed", text_encoder_name="prajjwal1/bert-tiny", obsm_key="X_emb"
     )
+
+    # Then patch the specific instance's method
+    def mock__resolve_file_path(self, file_path, suffix=".npz"):
+        """Mock file path resolution to return our test NPZ file."""
+        return str(tmp_path / "test_embeddings.npz")
+
+    # Directly set the method on the instance
+    processor.omics_processor._resolve_file_path = lambda file_path, suffix=".npz": mock__resolve_file_path(
+        None, file_path, suffix
+    )
+
     return processor
 
 
@@ -56,6 +58,7 @@ def bimodal_encoder(mock_processor):
         processor_obsm_key="X_emb",
     )
     model.processor = mock_processor
+    model.processor.omics_processor.clear_cache()
     return model
 
 
@@ -71,7 +74,7 @@ def test_omics_retrieval(bimodal_encoder):
             "sample_id": "SAMPLE_2",
         },
     ]
-
+    bimodal_encoder.processor.omics_processor.clear_cache()
     rep = bimodal_encoder.processor.omics_processor.get_rep(omics_data)
     assert rep is not None, "get_rep returned None"
     assert isinstance(rep, torch.Tensor), "Expected torch.Tensor output"
@@ -114,6 +117,18 @@ def test_sentence_transformer_integration(bimodal_encoder, tmp_path):
     save_dir = tmp_path / "st_model"
     st_model.save(str(save_dir))
     loaded_model = SentenceTransformer(str(save_dir))
+
+    # Apply the same mock to the loaded model
+    def mock__resolve_file_path(self, file_path, suffix=".npz"):
+        """Mock file path resolution to return our test NPZ file."""
+        return str(tmp_path / "test_embeddings.npz")
+
+    # Get the MMContextEncoder module from the loaded model
+    loaded_encoder = loaded_model._first_module()
+    loaded_encoder.processor.omics_processor._resolve_file_path = (
+        lambda file_path, suffix=".npz": mock__resolve_file_path(None, file_path, suffix)
+    )
+    loaded_encoder.processor.omics_processor.clear_cache()
 
     # Compare embeddings
     emb_loaded = loaded_model.encode(inputs, convert_to_tensor=True)
