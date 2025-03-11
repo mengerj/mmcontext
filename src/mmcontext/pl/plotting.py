@@ -114,7 +114,7 @@ def plot_umap(
     # If subset sampling is desired
     if sample_size is not None and sample_size < adata.n_obs:
         # Optional data consolidation step from your codebase:
-        from mmcontext.pp.utils import consolidate_low_frequency_categories
+        from mmcontext.utils import consolidate_low_frequency_categories
 
         # Randomly sample the cells
         adata = adata[np.random.choice(adata.obs_names, sample_size, replace=False)]

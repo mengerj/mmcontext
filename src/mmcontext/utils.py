@@ -1,156 +1,210 @@
-# tests/utils.py
-import json
 import logging
 import os
-import random
-import tempfile
 from datetime import datetime
-from pathlib import Path
 
 import anndata
-import h5py
 import numpy as np
 import pandas as pd
-import requests
+import scanpy as sc
+import scipy.sparse as sp
 import torch
-import torch.nn as nn
+from omegaconf import DictConfig
 from sentence_transformers import evaluation, losses
 
 logger = logging.getLogger(__name__)
 
 
-def load_test_adata_from_hf_dataset(
-    test_dataset,
-    sample_size=10,
-):
-    """
-    Load an AnnData object from a Hugging Face test dataset that contains a share link to an external `.h5ad` file.
+def consolidate_low_frequency_categories(adata: anndata.AnnData, columns: list, threshold: int, remove=False):
+    """Consolidates low frequency categories in specified columns of an AnnData object.
 
-    This function downloads the file to a temporary directory
-    and reads it into memory.
+    Modifies the AnnData object's .obs by setting entries in specified columns
+    to 'remaining {column_name}' or removing them if their frequency is below a specified threshold.
+    Converts columns to non-categorical if necessary to adjust the categories dynamically.
 
     Parameters
     ----------
-    test_dataset : dict
-        A dictionary-like object representing the HF dataset split (e.g., `test_dataset["train"]`).
-        It must contain an 'anndata_ref' field, where each element is a JSON string with a "file_path" key.
-    sample_size : int, optional
-        Number of random rows to check for file path consistency before download, by default 10.
+    adata
+        The AnnData object to be processed.
+    columns
+        List of column names in adata.obs to check for low frequency.
+    threshold
+        Frequency threshold below which categories are considered low.
+    remove
+        If True, categories below the threshold are removed entirely.
 
     Returns
     -------
-    anndata.AnnData
-        The AnnData object read from the downloaded `.h5ad` file.
-
-    Notes
-    -----
-    - Data is assumed to come from a Hugging Face dataset with a single unique `file_path` for all rows.
-    - The function downloads the file to a temporary directory, which is removed when this function returns.
-    - If multiple rows have different `file_path` values, the function raises an error.
+    anndata.AnnData: The modified AnnData object.
     """
-    # If the dataset split is large, reduce the sample size to the dataset size
-    size_of_dataset = len(test_dataset)
-    sample_size = min(sample_size, size_of_dataset)
+    # Ensure the object is loaded into memory if it's in backed mode
+    if adata.isbacked:
+        adata = adata.to_memory()
 
-    # Randomly sample rows to ensure all file paths match
-    indices_to_check = random.sample(range(size_of_dataset), sample_size)
-    paths = []
-    for idx in indices_to_check:
-        adata_ref = test_dataset[idx]["anndata_ref"]
-        paths.append(adata_ref["file_record"]["dataset_path"])
+    for col in columns:
+        if col in adata.obs.columns:
+            # Convert column to string if it's categorical
+            if isinstance(adata.obs[col].dtype, pd.CategoricalDtype):
+                as_string = adata.obs[col].astype(str)
+                adata.obs[col] = as_string
 
-    # Ensure that all random rows have the same file path
-    first_path = paths[0]
-    for p in paths[1:]:
-        if p != first_path:
-            raise ValueError("Not all sampled rows contain the same file path. Please verify the dataset consistency.")
+            # Calculate the frequency of each category
+            freq = adata.obs[col].value_counts()
 
-    # Download the file from the share link into a temporary directory
-    with tempfile.TemporaryDirectory() as tmpdir:
-        save_path = Path(tmpdir) / "test.h5ad"
-        download_file_from_share_link(first_path, str(save_path))
-        adata = anndata.read_h5ad(save_path)
+            # Identify low frequency categories
+            low_freq_categories = freq[freq < threshold].index
+
+            if remove:
+                # Remove entries with low frequency categories entirely
+                mask = ~adata.obs[col].isin(low_freq_categories)
+                adata._inplace_subset_obs(mask)
+                # Convert column back to categorical with new categories
+                adata.obs[col] = pd.Categorical(adata.obs[col])
+            else:
+                # Update entries with low frequency categories to 'remaining {col}'
+                adata.obs.loc[adata.obs[col].isin(low_freq_categories), col] = f"remaining {col}"
+
+                # Convert column back to categorical with new categories
+                adata.obs[col] = pd.Categorical(adata.obs[col])
+
+        else:
+            print(f"Column {col} not found in adata.obs")
 
     return adata
 
 
-def download_file_from_share_link(share_link, save_path, chunk_size=8192):
+def remove_zero_rows_and_columns(adata: anndata.AnnData, inplace: bool = True):
     """
-    Downloads a file from a Nextcloud share link and validates it based on its suffix.
+    Removes rows (cells) and columns (genes) from adata.X that are all zeros, or that have zero variance.
 
     Parameters
     ----------
-    share_link : str
-        The full share link URL to the file.
-    save_path : str
-        The local path where the file should be saved.
-    chunk_size : int, optional
-        Size of each chunk in bytes during streaming; defaults to 8192.
+    adata : AnnData
+        The AnnData object to filter.
+    inplace : bool, optional (default: False)
+        If True, modifies the adata object in place.
+        If False, returns a new filtered AnnData object.
 
     Returns
     -------
-    bool
-        True if the download was successful and the file is valid based on its suffix;
-        False otherwise.
-
-    References
-    ----------
-    Data is expected to come from a Nextcloud share link and is validated in memory.
+    AnnData or None
+        If inplace is False, returns the filtered AnnData object.
+        If inplace is True, modifies adata in place and returns None.
     """
-    # Step 1: Stream download the file
-    try:
-        with requests.get(share_link, stream=True) as response:
-            response.raise_for_status()
+    logger = logging.getLogger(__name__)
+    # Check if adata.X is sparse or dense
+    if sp.issparse(adata.X):
+        # Sparse matrix
+        non_zero_row_indices = adata.X.getnnz(axis=1) > 0
+        non_zero_col_indices = adata.X.getnnz(axis=0) > 0
+    else:
+        # Dense matrix
+        non_zero_row_indices = np.any(adata.X != 0, axis=1)
+        non_zero_col_indices = np.any(adata.X != 0, axis=0)
+    logger.info(f"Number of zero rows: {adata.X.shape[0] - np.sum(non_zero_row_indices)}")
+    logger.info(f"Number of zero columns: {adata.X.shape[1] - np.sum(non_zero_col_indices)}")
+    logger.info("Removing zero rows and columns...")
+    if inplace:
+        # Filter the AnnData object in place
+        adata._inplace_subset_obs(non_zero_row_indices)
+        adata._inplace_subset_var(non_zero_col_indices)
+    else:
+        # Return a filtered copy
+        adata = adata[:, non_zero_col_indices]  # Subset variables (genes)
+        adata = adata[non_zero_row_indices, :]  # Subset observations (cells)
 
-            with open(save_path, "wb") as file:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    file.write(chunk)
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to download the file from '{share_link}': {e}")
-        return False
+        return adata.copy()
 
-    # Step 2: Validate based on suffix
-    file_suffix = os.path.splitext(save_path)[1].lower()
 
-    try:
-        if file_suffix == ".h5ad":
-            # Validate as an anndata-compatible HDF5 file
-            with h5py.File(save_path, "r") as h5_file:
-                required_keys = ["X", "obs", "var"]  # Common in .h5ad
-                if all(key in h5_file for key in required_keys):
-                    logger.info("File is a valid .h5ad file.")
-                    return True
-                else:
-                    logger.warning("File is an HDF5 file but missing required .h5ad keys.")
-                    return False
+def remove_zero_variance_genes(adata):
+    """Remove genes with zero variance from an AnnData object."""
+    logger = logging.getLogger(__name__)
+    if sp.issparse(adata.X):
+        # For sparse matrices
+        gene_variances = np.array(adata.X.power(2).mean(axis=0) - np.square(adata.X.mean(axis=0))).flatten()
+    else:
+        # For dense matrices
+        gene_variances = np.var(adata.X, axis=0)
+    zero_variance_genes = gene_variances == 0
+    num_zero_variance_genes = np.sum(zero_variance_genes)
 
-        elif file_suffix == ".npz":
-            # Validate as a .npz file (we can at least confirm we can load it)
-            try:
-                np.load(save_path, allow_pickle=True)
-                logger.info("File is a valid .npz file.")
-                return True
-            except Exception as e:
-                logger.error(f"Error while validating the downloaded file: {e}")
-                return False
+    if np.any(zero_variance_genes):
+        adata = adata[:, ~zero_variance_genes]
+        logger.info(f"Removed {num_zero_variance_genes} genes with zero variance.")
+        return adata
+    else:
+        logger.info("No genes with zero variance found.")
+        return adata
 
-        elif file_suffix == ".npy":
-            # Validate as a .npy file
-            try:
-                np.load(save_path, allow_pickle=True)
-                logger.info("File is a valid .npy file.")
-                return True
-            except Exception as e:
-                logger.error(f"Error while validating the downloaded file: {e}")
-                return False
+
+def remove_zero_variance_cells(adata):
+    """Check for cells with zero variance in an AnnData object."""
+    logger = logging.getLogger(__name__)
+    if sp.issparse(adata.X):
+        cell_variances = np.array(adata.X.power(2).mean(axis=1) - np.square(adata.X.mean(axis=1))).flatten()
+    else:
+        cell_variances = np.var(adata.X, axis=1)
+    zero_variance_cells = cell_variances == 0
+    num_zero_variance_cells = np.sum(zero_variance_cells)
+    if np.any(zero_variance_cells):
+        adata = adata[~zero_variance_cells, :]
+        logger.info(f"Removed {num_zero_variance_cells} cells with zero variance.")
+        return adata
+    else:
+        logger.info("No cells with zero variance found.")
+        return adata
+
+
+def remove_duplicate_cells(adata: anndata.AnnData, inplace: bool = True):
+    """
+    Removes duplicate cells (rows) from adata.X.
+
+    Parameters
+    ----------
+    adata : AnnData
+        The AnnData object to filter.
+    inplace : bool, optional (default: False)
+        If True, modifies the adata object in place.
+        If False, returns a new filtered AnnData object.
+
+    Returns
+    -------
+    AnnData or None
+        If inplace is False, returns the filtered AnnData object.
+        If inplace is True, modifies adata in place and returns None.
+    """
+    logger = logging.getLogger(__name__)
+    # Convert adata.X to dense array if it's sparse
+    if sp.issparse(adata.X):
+        X_dense = adata.X.toarray()
+    else:
+        X_dense = adata.X
+
+    # Convert to DataFrame for easier comparison
+    df = pd.DataFrame(X_dense)
+
+    # Find duplicate rows
+    duplicate_cell_mask = df.duplicated(keep="first")
+    num_duplicates = duplicate_cell_mask.sum()
+    logger.info(f"Number of duplicate cells: {num_duplicates}")
+
+    if num_duplicates == 0:
+        logger.info("No duplicate cells to remove.")
+        if inplace:
+            return None
         else:
-            # If your use-case requires more file types, add them here
-            logger.warning(f"No specific validation logic for files of type '{file_suffix}'. Skipping validation.")
-            return True
+            return adata.copy()
 
-    except Exception as e:
-        logger.error(f"Error while validating the downloaded file: {e}")
-        return False
+    # Indices of unique cells
+    unique_cell_mask = ~duplicate_cell_mask
+
+    if inplace:
+        adata._inplace_subset_obs(unique_cell_mask)
+        logger.info(f"Removed {num_duplicates} duplicate cells.")
+        return None
+    else:
+        filtered_adata = adata[unique_cell_mask].copy()
+        logger.info(f"Returning new AnnData object with {filtered_adata.n_obs} cells.")
+        return filtered_adata
 
 
 def setup_logging(logging_dir="logs"):
@@ -186,40 +240,6 @@ def setup_logging(logging_dir="logs"):
         logger.addHandler(console)
 
     return logger
-
-
-def sample_zinb(mu, theta, pi):
-    """
-    Samples from the Zero-Inflated Negative Binomial distribution.
-
-    Parameters
-    ----------
-    - mu (torch.Tensor): Mean of the NB distribution (batch_size, num_genes)
-    - theta (torch.Tensor): Dispersion parameter of the NB distribution (batch_size, num_genes)
-    - pi (torch.Tensor): Zero-inflation probability (batch_size, num_genes)
-
-    Returns
-    -------
-    - samples (torch.Tensor): Sampled counts (batch_size, num_genes)
-    """
-    # Ensure parameters are on the same device and have the same shape
-    assert mu.shape == theta.shape == pi.shape
-
-    # Sample zero-inflation indicator z
-    bernoulli_dist = torch.distributions.Bernoulli(probs=pi)
-    z = bernoulli_dist.sample()
-
-    # Sample from Negative Binomial distribution
-    # Compute probability p from mu and theta
-    p = theta / (theta + mu)
-    # Convert to total_count (r) and probability (1 - p)
-    nb_dist = torch.distributions.NegativeBinomial(total_count=theta, probs=1 - p)
-    nb_sample = nb_dist.sample()
-
-    # Combine zero-inflation and NB samples
-    samples = z * 0 + (1 - z) * nb_sample
-
-    return samples
 
 
 def compute_cosine_similarity(sample_embeddings, query_embeddings, device="cpu"):
@@ -261,112 +281,6 @@ def compute_cosine_similarity(sample_embeddings, query_embeddings, device="cpu")
     # Move back to CPU, convert to numpy
     sim = sim_t.cpu().numpy()
     return sim
-
-
-def create_test_anndata(n_samples=20, n_features=100, cell_types=None, tissues=None, batch_categories=None):
-    """
-    Create a test AnnData object with synthetic data, including batch information.
-
-    Parameters
-    ----------
-    n_samples : int
-        Number of cells (observations). Default is 20.
-    n_features : int
-        Number of genes (variables). Default is 100.
-    cell_types : list, optional
-        List of cell types. Defaults to ["B cell", "T cell", "NK cell"].
-    tissues : list, optional
-        List of tissues. Defaults to ["blood", "lymph"].
-    batch_categories : list, optional
-        List of batch categories. Defaults to ["Batch1", "Batch2"].
-
-    Returns
-    -------
-    anndata.AnnData
-        Generated AnnData object.
-    """
-    import numpy as np
-
-    # Set default values for mutable arguments if they are None
-    if cell_types is None:
-        cell_types = ["B cell", "T cell", "NK cell"]
-    if tissues is None:
-        tissues = ["blood", "lymph"]
-    if batch_categories is None:
-        batch_categories = ["Batch1", "Batch2"]
-
-    # Set a random seed for reproducibility
-    np.random.seed(42)
-
-    # Determine the number of batches and allocate samples to batches
-    n_batches = len(batch_categories)
-    samples_per_batch = n_samples // n_batches
-    remainder = n_samples % n_batches
-
-    batch_labels = []
-    for i, batch in enumerate(batch_categories):
-        n = samples_per_batch + (1 if i < remainder else 0)
-        batch_labels.extend([batch] * n)
-
-    # Shuffle batch labels
-    np.random.shuffle(batch_labels)
-
-    # Generate observation (cell) metadata
-
-    obs = pd.DataFrame(
-        {
-            "cell_type": np.random.choice(cell_types, n_samples),
-            "tissue": np.random.choice(tissues, n_samples),
-            "batch": batch_labels,
-        }
-    )
-    obs.index = [f"Cell_{i}" for i in range(n_samples)]
-    # transform obs to categorical
-    obs = obs.astype("category")
-    obs["sample_id"] = np.arange(n_samples)
-    # Generate a random data matrix (e.g., gene expression values)
-    X = np.zeros((n_samples, n_features))
-    for i, batch in enumerate(batch_categories):
-        # Get indices of cells in this batch
-        idx = obs[obs["batch"] == batch].index
-        idx = [obs.index.get_loc(i) for i in idx]
-
-        # Generate data for this batch
-        # For simplicity, let's make a mean shift between batches
-        mean = np.random.rand(n_features) * (i + 1)  # Different mean for each batch
-        X[idx, :] = np.random.normal(loc=mean, scale=1.0, size=(len(idx), n_features))
-
-    # Create variable (gene) metadata
-    var = pd.DataFrame({"gene_symbols": [f"Gene_{i}" for i in range(n_features)]})
-    var.index = [f"Gene_{i}" for i in range(n_features)]
-
-    # Create the AnnData object
-    adata = anndata.AnnData(X=X, obs=obs, var=var)
-
-    return adata
-
-
-def create_test_emb_anndata(n_samples, emb_dim, data_key="d_emb_aligned", context_key="c_emb_aligned", sample_ids=None):
-    """
-    Helper function to create a test AnnData object with specified embeddings and sample IDs.
-
-    Args:
-        n_samples (int): Number of samples (cells).
-        emb_dim (int): Embedding dimension.
-        data_key (str): Key for data embeddings in adata.obsm.
-        context_key (str): Key for context embeddings in adata.obsm.
-        sample_ids (list): List of sample IDs. If None, default IDs are assigned.
-
-    Returns
-    -------
-        AnnData: The constructed AnnData object.
-    """
-    adata = create_test_anndata(n_samples=n_samples)
-    adata.obsm[data_key] = np.random.rand(n_samples, emb_dim)
-    adata.obsm[context_key] = np.random.rand(n_samples, emb_dim)
-    if sample_ids is not None:
-        adata.obs["sample_id"] = sample_ids
-    return adata
 
 
 def get_loss(dataset_type: str, loss_name: str = None):

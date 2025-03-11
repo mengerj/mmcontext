@@ -9,7 +9,7 @@ import transformers
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
 
-from mmcontext.pp.MMContextProcessor import MMContextProcessor
+from mmcontext.models.MMContextProcessor import MMContextProcessor
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ import torch
 from sentence_transformers import SentenceTransformer
 
 from mmcontext.models import MMContextEncoder
-from mmcontext.pp.MMContextProcessor import MMContextProcessor
+from mmcontext.models.MMContextProcessor import MMContextProcessor
 
 logger = logging.getLogger(__name__)
 

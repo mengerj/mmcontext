@@ -73,10 +73,10 @@ from mmcontext.engine import OmicsQueryAnnotator
 from mmcontext.eval import evaluate_annotation_accuracy, scibEvaluator, zero_shot_classification_roc
 from mmcontext.eval.embedding_alignment import evaluate_modality_alignment
 from mmcontext.eval.utils import create_emb_pair_dataframe
+from mmcontext.file_utils import load_test_adata_from_hf_dataset
 from mmcontext.pl import plot_umap, visualize_embedding_clusters
 from mmcontext.pl.plotting import plot_embedding_similarity, plot_grouped_bar_chart
-from mmcontext.pp.utils import consolidate_low_frequency_categories
-from mmcontext.utils import load_test_adata_from_hf_dataset
+from mmcontext.utils import consolidate_low_frequency_categories
 
 logger = logging.getLogger(__name__)
 
