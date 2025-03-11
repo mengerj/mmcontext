@@ -196,16 +196,7 @@ class PrecomputedProcessor:
                     npzfile = np.load(resolved_path, allow_pickle=True, mmap_mode="r")
                     emb_matrix = npzfile["data"]
                     sample_ids = npzfile.get("sample_ids", None)
-
-                    # Convert to tensor once and store in cache
-                    if isinstance(emb_matrix, torch.Tensor):
-                        tensor_matrix = emb_matrix.to(self.device)
-                    else:
-                        # Move conversion to CUDA if available
-                        if isinstance(emb_matrix, sp.spmatrix):
-                            tensor_matrix = torch.from_numpy(emb_matrix.toarray()).float()
-                        else:
-                            tensor_matrix = torch.from_numpy(emb_matrix).float()
+                    tensor_matrix = self._convert_to_tensor(emb_matrix)
 
                     self._data_cache[embedding_path] = {"matrix": tensor_matrix, "sample_ids": sample_ids}
 
