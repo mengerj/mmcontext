@@ -95,41 +95,28 @@ def save_results_to_db(results_dict, db_path):
     # Extract metadata that applies to all rows
     metadata = {
         "model_name": results_dict["model_name"],
+        "model_short_name": results_dict["model_short_name"],
+        "dataset_name": results_dict["dataset_name"],
         "output_dir": results_dict["output_dir"],
         "timestamp": results_dict["timestamp"],
     }
 
     # Create rows for the long format
     rows = []
+
+    # Process all metrics
     for key, value in results_dict.items():
-        # Skip metadata keys as they'll be added to each row
+        # Skip metadata keys
         if key in metadata:
             continue
 
-        # Parse the key to extract dataset and metric names
-        # Example key format: "bowel_disease_scib_nmi" or "bowel_disease_annotation_accuracy"
-        parts = key.split("_")
-
-        # Find the dataset name (everything before known metric types)
-        metric_indicators = ["scib", "annotation", "modality", "zero", "full"]
-        dataset_parts = []
-        metric_parts = []
-        found_metric = False
-
-        for part in parts:
-            if not found_metric and part not in metric_indicators:
-                dataset_parts.append(part)
-            else:
-                found_metric = True
-                metric_parts.append(part)
-
-        dataset_name = "_".join(dataset_parts)
-        metric_name = "_".join(metric_parts)
+        # Parse the key to extract dataset and metric information
+        # Format: dataset_name|metric_name
+        metric_name = key
 
         # Create a row with all relevant information
         row = {
             **metadata,
-            "dataset_name": dataset_name,
             "metric_name": metric_name,
             "metric_value": value,
         }
@@ -149,154 +136,9 @@ def save_results_to_db(results_dict, db_path):
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
-    # Save the updated database without writing the index and only including header for new files
+    # Save the updated database
     updated_df.to_csv(db_path, index=False, mode="w")
     logger.info(f"Results saved to database: {db_path}")
-
-    # Also save in a format suitable for funkyheatmap
-    save_results_for_funkyheatmap(updated_df, db_path)
-
-
-def save_results_for_funkyheatmap(results_df, db_path):
-    """
-    Save results in a format suitable for the funkyheatmap package.
-
-    Parameters
-    ----------
-    results_df : pd.DataFrame
-        Results dataframe in long format
-    db_path : str
-        Path to the database file
-    """
-    # Create a unique model identifier
-    results_df["model_id"] = results_df["model_name"].apply(lambda x: x.split("/")[-1])
-
-    # Define metric groups
-    metric_groups = {
-        "bio_metrics": [
-            "scib_ARI",
-            "scib_NMI",
-            "scib_ASW",
-            "scib_Isolated_Labels_ASW",
-            "scib_Isolated_Labels_F1",
-            "scib_cLISI",
-        ],
-        "batch_metrics": ["scib_Graph_Connectivity", "scib_Silhouette_Batch", "scib_iLISI", "scib_PCR"],
-        "alignment_metrics": ["modality_gap_irrelevant_score", "full_comparison_score"],
-        "annotation_metrics": ["annotation_accuracy", "zero_shot_macro_auc"],
-    }
-
-    # Pivot the data to wide format with models as rows and metrics as columns
-    # First, create a unique metric identifier by combining dataset_name and metric_name
-    results_df["metric_id"] = results_df["dataset_name"] + "_" + results_df["metric_name"]
-
-    # Pivot the data
-    pivot_df = results_df.pivot(
-        index=["model_id", "model_name", "timestamp"], columns="metric_id", values="metric_value"
-    ).reset_index()
-
-    # Rename the index column to 'id' for funkyheatmap
-    pivot_df = pivot_df.rename(columns={"model_id": "id"})
-
-    # Save the wide format data
-    funky_db_path = os.path.splitext(db_path)[0] + "_funkyheatmap.csv"
-    pivot_df.to_csv(funky_db_path, index=False)
-    logger.info(f"Results saved in funkyheatmap format to: {funky_db_path}")
-
-    # Create and save column_info DataFrame
-    column_names = pivot_df.columns.tolist()
-
-    # Determine the group for each column
-    column_groups_list = []
-    for col in column_names:
-        if col in ["id", "model_name", "timestamp"]:
-            group = "info"
-        else:
-            # Extract dataset and metric from the column name
-            parts = col.split("_")
-            dataset = parts[0]
-            metric = "_".join(parts[1:])
-
-            # Determine the metric group
-            metric_group = None
-            for group_name, metrics in metric_groups.items():
-                if any(m.split("_", 1)[1] if m.startswith("scib_") else m == metric for m in metrics):
-                    metric_group = group_name
-                    break
-
-            if metric_group:
-                group = f"{dataset}_{metric_group}"
-            else:
-                group = f"{dataset}_other"
-
-        column_groups_list.append(group)
-
-    # Create column_info DataFrame
-    column_info = pd.DataFrame(
-        {
-            "id": column_names,
-            "name": [col.replace("_", " ").title() if col != "id" else "Model ID" for col in column_names],
-            "geom": ["text" if col in ["id", "model_name", "timestamp"] else "bar" for col in column_names],
-            "group": column_groups_list,
-            "palette": [
-                "black"
-                if col in ["id", "model_name", "timestamp"]
-                else "Blues"
-                if any(m in col for m in metric_groups["batch_metrics"])
-                else "Greens"
-                if any(m in col for m in metric_groups["bio_metrics"])
-                else "Reds"
-                if any(m in col for m in metric_groups["alignment_metrics"])
-                else "YlOrBr"
-                if any(m in col for m in metric_groups["annotation_metrics"])
-                else "Purples"
-                for col in column_names
-            ],
-            "width": [3 if col == "id" else 2 if col in ["model_name", "timestamp"] else 1 for col in column_names],
-            "legend": [False if col in ["id", "model_name", "timestamp"] else True for col in column_names],
-        }
-    )
-
-    # Save column_info
-    column_info_path = os.path.splitext(db_path)[0] + "_column_info.csv"
-    column_info.to_csv(column_info_path, index=False)
-    logger.info(f"Column info saved to: {column_info_path}")
-
-    # Create and save column_groups DataFrame
-    unique_groups = sorted(set(column_groups_list))
-
-    # Extract dataset and metric group from each group
-    group_info = []
-    for group in unique_groups:
-        if group == "info":
-            level1 = "Info"
-            level2 = "Model Information"
-        else:
-            parts = group.split("_")
-            dataset = parts[0]
-            metric_group = "_".join(parts[1:])
-
-            level1 = dataset.title()
-
-            if metric_group == "bio_metrics":
-                level2 = "Biological Metrics"
-            elif metric_group == "batch_metrics":
-                level2 = "Batch Integration Metrics"
-            elif metric_group == "alignment_metrics":
-                level2 = "Alignment Metrics"
-            elif metric_group == "annotation_metrics":
-                level2 = "Annotation Metrics"
-            else:
-                level2 = "Other Metrics"
-
-        group_info.append({"group": group, "level1": level1, "level2": level2})
-
-    column_groups_df = pd.DataFrame(group_info)
-
-    # Save column_groups
-    column_groups_path = os.path.splitext(db_path)[0] + "_column_groups.csv"
-    column_groups_df.to_csv(column_groups_path, index=False)
-    logger.info(f"Column groups saved to: {column_groups_path}")
 
 
 def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results):
@@ -324,6 +166,7 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
         Updated results dictionary
     """
     dataset_name = dataset_config.name
+    dataset_id = dataset_config.repo_id
     batch_key = dataset_config.batch_key
     label_key = dataset_config.label_key
     caption_key = dataset_config.caption_key if hasattr(dataset_config, "caption_key") else None
@@ -336,20 +179,20 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
     )
 
     # Create dataset-specific output directory
-    dataset_dir = os.path.join(output_dir, dataset_name.split("/")[-1])
+    dataset_dir = os.path.join(output_dir, dataset_id.split("/")[-1])
     os.makedirs(dataset_dir, exist_ok=True)
 
-    logger.info(f"Evaluating dataset: {dataset_name}")
+    logger.info(f"Evaluating dataset: {dataset_id}")
     logger.info(f"  - batch_key: {batch_key}")
     logger.info(f"  - label_key: {label_key}")
     logger.info(f"  - caption_key: {caption_key}")
     logger.info(f"  - text_template: {text_template}")
 
     # 1. Load Dataset
-    dataset = load_dataset(dataset_name)
+    dataset = load_dataset(dataset_id)
     test_dataset = dataset["test"]
     # If the dataset has "pairs" in the name, filter the label column for == 1.0
-    if "pairs" in dataset_name:
+    if "pairs" in dataset_id:
         test_dataset = test_dataset.filter(lambda x: x["label"] == 1.0)
 
     # 2. Prepare AnnData
@@ -437,9 +280,8 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
         modality_gap_irrelevant_score, full_comparison_score = evaluate_modality_alignment(emb_pair_df)
 
         # Add alignment scores to results
-        dataset_key = dataset_name.split("/")[-1]
-        results[f"{dataset_key}_modality_gap_irrelevant_score"] = modality_gap_irrelevant_score
-        results[f"{dataset_key}_full_comparison_score"] = full_comparison_score
+        results["modality_gap_irrelevant_score"] = modality_gap_irrelevant_score
+        results["full_comparison_score"] = full_comparison_score
 
         #   a) visualize_embedding_clusters (method=umap and method=trimap)
         logger.info("Visualizing embedding clusters for the pair embeddings...")
@@ -504,10 +346,21 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
         logger.info(f"\n{res_df}")
 
         # Extract mmcontext_emb results for the central database
-        dataset_key = dataset_name.split("/")[-1]
-        mmcontext_results = res_df[res_df["type"] == "mmcontext_emb"]
-        for _, row in mmcontext_results.iterrows():
-            results[f"{dataset_key}_scib_{row['metric']}"] = row["value"]
+        mmcontext_results = res_df[res_df["type"] == "embedding_mmcontext_emb"]
+        for col in mmcontext_results:
+            if col in [
+                "ARI",
+                "NMI",
+                "ASW",
+                "Isolated_Labels_ASW",
+                "Isolated_Labels_F1",
+                "Bio_Conservation_Score",
+                "Graph_Connectivity",
+                "Silhouette_Batch",
+                "Batch_Integration_Score",
+                "Overall_Score",
+            ]:
+                results[f"scib_{col}"] = mmcontext_results[col][1]
 
         #   a) Save all results as CSV in the output directory
         if cfg.save_csv:
@@ -559,8 +412,8 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
         logger.info(f"Annotation accuracy: {accuracy}")
 
         # Add annotation accuracy to results
-        dataset_key = dataset_name.split("/")[-1]
-        results[f"{dataset_key}_annotation_accuracy"] = accuracy
+        # dataset_key = dataset_name.split("/")[-1]
+        results["annotation_accuracy"] = accuracy
 
         logger.info("Computing zero-shot classification ROC...")
         macro_auc, auc_details = zero_shot_classification_roc(
@@ -575,11 +428,13 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
         logger.info(f"Detail per label: {auc_details}")
 
         # Add zero-shot classification results to results
-        results[f"{dataset_key}_zero_shot_macro_auc"] = macro_auc
+        results["zero_shot_macro_auc"] = macro_auc
     elif cfg.do_annotation:
         logger.warning(f"Skipping annotation: label_key '{label_key}' not found in adata.obs")
-
-    return results
+    # Save results to the central database
+    if cfg.save_csv and hasattr(cfg, "results_db_path") and cfg.results_db_path:
+        save_results_to_db(results, cfg.results_db_path)
+    return
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="eval_conf")
@@ -598,9 +453,9 @@ def main(cfg: DictConfig) -> None:
     # use hydra run dir as output dir
     output_dir = HydraConfig.get().run.dir
 
-    # Initialize results dictionary
     results = {
         "model_name": cfg.model_name,
+        "model_short_name": cfg.model_short_name,
         "output_dir": output_dir,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -621,11 +476,8 @@ def main(cfg: DictConfig) -> None:
     # Evaluate each dataset
     for dataset_key, dataset_config in cfg.datasets.items():
         logger.info(f"Processing dataset: {dataset_key}")
-        results = evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results)
-
-    # Save results to the central database
-    if cfg.save_csv and hasattr(cfg, "results_db_path") and cfg.results_db_path:
-        save_results_to_db(results, cfg.results_db_path)
+        results["dataset_name"] = dataset_config.name
+        evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results)
 
     logger.info("===== Workflow complete! =====")
 

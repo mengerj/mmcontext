@@ -9,13 +9,15 @@ model_device: "cpu" # could be "cuda" or "mps"
 # Dataset configurations
 datasets:
   bowel_disease:
-    name: "jo-mengr/bowel_disease_pairs_cluster_label"
+    repo_id: "jo-mengr/bowel_disease_pairs_cluster_label"
+    name: "bowel_disease"
     batch_key: "sample_id"
     label_key: "cluster_label"
     caption_key: "cluster_label"
     zero_shot_text_template: "{}"
   pancreas:
-    name: "jo-mengr/human_pancreas_norm_complexBatch_pairs_celltype"
+    repo_id: "jo-mengr/human_pancreas_norm_complexBatch_pairs_celltype"
+    name: "pancreas"
     batch_key: "tech"
     label_key: "celltype"
     caption_key: None
