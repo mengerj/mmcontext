@@ -8,8 +8,7 @@ import pytest
 import torch
 from sentence_transformers import SentenceTransformer
 
-from mmcontext.models import MMContextEncoder
-from mmcontext.models.MMContextProcessor import MMContextProcessor
+from mmcontext.models import MMContextEncoder, MMContextProcessor
 
 logger = logging.getLogger(__name__)
 

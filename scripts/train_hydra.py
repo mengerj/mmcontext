@@ -18,10 +18,10 @@ from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
+from mmcontext.models import MMContextEncoder
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
-from mmcontext.file_utils import get_evaluator, get_loss  # , load_test_adata_from_hf_dataset
-from mmcontext.models import MMContextEncoder
+from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf_dataset
 
 logger = logging.getLogger(__name__)
 

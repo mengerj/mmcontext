@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import psutil
 import pynvml
-import torch
 
 
 class SystemMonitor:

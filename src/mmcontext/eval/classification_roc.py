@@ -2,11 +2,10 @@ import logging
 
 import numpy as np
 import pandas as pd
-import torch
 from scipy.special import softmax
-from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.metrics import roc_auc_score
 
-from mmcontext.file_utils import compute_cosine_similarity
+from mmcontext.utils import compute_cosine_similarity
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

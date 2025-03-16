@@ -69,8 +69,12 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from sentence_transformers import SentenceTransformer
 
-from mmcontext.engine import OmicsQueryAnnotator
-from mmcontext.eval import evaluate_annotation_accuracy, scibEvaluator, zero_shot_classification_roc
+from mmcontext.eval import (
+    OmicsQueryAnnotator,
+    evaluate_annotation_accuracy,
+    scibEvaluator,
+    zero_shot_classification_roc,
+)
 from mmcontext.eval.embedding_alignment import evaluate_modality_alignment
 from mmcontext.eval.utils import create_emb_pair_dataframe
 from mmcontext.file_utils import load_test_adata_from_hf_dataset

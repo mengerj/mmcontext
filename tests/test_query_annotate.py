@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 import torch
 
-from mmcontext.engine import OmicsQueryAnnotator
-from mmcontext.file_utils import compute_cosine_similarity
+from mmcontext.eval import OmicsQueryAnnotator
+from mmcontext.utils import compute_cosine_similarity
 
 # -------------------------------
 # Pytest fixtures
