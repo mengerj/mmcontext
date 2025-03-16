@@ -3,55 +3,61 @@
 [![Tests][badge-tests]][tests]
 [![Documentation][badge-docs]][documentation]
 
-[badge-tests]: https://img.shields.io/github/actions/workflow/status/mengerj/mmcontext/test.yaml?branch=main
-[badge-docs]: https://img.shields.io/readthedocs/mmcontext
+Align embeddings across multiple modalities using context-aware embeddings at the sample level.
 
-Align embeddings of multiple modalities through context embeddings on a sample level
+**mmcontext** is built upon the excellent [sentence-transformers](https://www.sbert.net/) framework maintained by [Hugging Face](https://huggingface.co/). By leveraging their comprehensive documentation and extensive capabilities for text embeddings, **mmcontext** enables you to efficiently generate multi-modal embeddings without reinventing the wheel.
 
-## Getting started
+![Conceptual Diagram](docs/figs/concept.png)
 
-Please refer to the [documentation][],
-in particular, the [API documentation][]. This project was build with the amazing [scverse cookie cutter template][]. Check it out!
+## Getting Started
+
+Please refer to our [documentation](https://mmcontext.readthedocs.io), especially the [API documentation](https://mmcontext.readthedocs.io/en/latest/api.html). This project was built using the amazing [scverse cookie cutter template](https://github.com/scverse/cookiecutter-scverse)—check it out!
 
 ## Installation
 
-You need to have Python 3.10 or newer installed on your system.
+Ensure you have **Python 3.10** or newer installed.
 
-Currently mmcontext can be installed from source.
-
-<!--
-1) Install the latest release of `mmcontext` from [PyPI][]:
-
-```bash
-pip install mmcontext
-```
--->
-
-1. Install the latest development version:
+Currently, `mmcontext` is available for installation directly from the GitHub source:
 
 ```bash
 pip install git+https://github.com/mengerj/mmcontext.git@main
 
-In case the sentence-transformer package install is not updated to the current version of the fork:
+# If sentence-transformers dependency is outdated, use:
 pip install git+https://github.com/mengerj/sentence-transformers.git@master
 ```
 
-## Release notes
+_(PyPI release coming soon!)_
 
-See the [changelog][].
+## Contributing
+
+This package is under active development. Contributions and suggestions are very welcome—please open an [issue](https://github.com/mengerj/mmcontext/issues) to propose enhancements, report bugs, or discuss potential improvements.
+
+## Release Notes
+
+Review the latest changes in the [Changelog](https://mmcontext.readthedocs.io/en/latest/changelog.html).
 
 ## Contact
 
-If you found a bug, please use the [issue tracker][].
+Encountered a bug or need help? Please use the [issue tracker](https://github.com/mengerj/mmcontext/issues).
 
 ## Citation
 
-> t.b.a
+If you find **mmcontext** useful for your research, please consider citing it as follows until an official publication is available:
 
-[scverse cookie cutter template]: https://github.com/scverse/cookiecutter-scverse
-[issue tracker]: https://github.com/mengerj/mmcontext/issues
+```bibtex
+@misc{mmcontext,
+  author = {Your Name},
+  title = {mmcontext: Multi-modal Contextual Embeddings},
+  year = {2025},
+  publisher = {GitHub},
+  journal = {GitHub Repository},
+  url = {https://github.com/mengerj/mmcontext}
+}
+```
+
+---
+
+[badge-tests]: https://img.shields.io/github/actions/workflow/status/mengerj/mmcontext/test.yaml?branch=main
+[badge-docs]: https://img.shields.io/readthedocs/mmcontext
 [tests]: https://github.com/mengerj/mmcontext/actions/workflows/test.yml
 [documentation]: https://mmcontext.readthedocs.io
-[changelog]: https://mmcontext.readthedocs.io/en/latest/changelog.html
-[api documentation]: https://mmcontext.readthedocs.io/en/latest/api.html
-[pypi]: https://pypi.org/project/mmcontext
