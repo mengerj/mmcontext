@@ -8,20 +8,27 @@ model_device: "cpu" # could be "cuda" or "mps"
 
 # Dataset configurations
 datasets:
-  bowel_disease:
-    repo_id: "jo-mengr/bowel_disease_pairs_cluster_label"
-    name: "bowel_disease"
-    batch_key: "sample_id"
-    label_key: "cluster_label"
-    caption_key: "cluster_label"
-    zero_shot_text_template: "{}"
-  pancreas:
-    repo_id: "jo-mengr/human_pancreas_norm_complexBatch_pairs_celltype"
-    name: "pancreas"
-    batch_key: "tech"
-    label_key: "celltype"
-    caption_key: None
-    zero_shot_text_template: "A {} cell from the human pancreas"
+  #bowel_disease:
+  #  repo_id: "jo-mengr/bowel_disease_pairs_cluster_label"
+  #  name: "bowel_disease"
+  #   batch_key: "sample_id"
+  #   label_key: "cluster_label"
+  #   caption_key: "cluster_label"
+  #   zero_shot_text_template: "{}"
+  # pancreas:
+  #    repo_id: "jo-mengr/human_pancreas_norm_complexBatch_pairs_celltype"
+  #    name: "pancreas"
+  #   batch_key: "tech"
+  #    label_key: "celltype"
+  #    caption_key: None
+  #    zero_shot_text_template: "A {} cell from the human pancreas"
+  tabula_sapiens_bone_marrow:
+    repo_id: "jo-mengr/tabula_sapiens_bone_marrow_single"
+    name: "tabula_sapiens_bone_marrow"
+    batch_key: "_scvi_batch"
+    label_key: "cell_type"
+    caption_key: "cell_type"
+    zero_shot_text_template: "A {} cell from the human bone marrow"
 
   # Add more datasets as needed
   # pbmc:

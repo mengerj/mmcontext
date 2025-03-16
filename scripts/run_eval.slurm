@@ -12,10 +12,10 @@ source .venv/bin/activate
 echo "Virtual environment activated"
 
 # Run evaluations sequentially
-echo "Evaluating HVG model"
-python scripts/evaluation_workflow.py \
-    ++model_name="jo-mengr/mmcontext-100k-natural_language_annotation-hvg-2048-text-unfrozen" \
-    ++model_short_name="biobert_hvg"
+#echo "Evaluating HVG model"
+#python scripts/evaluation_workflow.py \
+#    ++model_name="jo-mengr/mmcontext-100k-natural_language_annotation-hvg-2048-text-unfrozen" \
+#    ++model_short_name="biobert_hvg"
 
 echo "Evaluating PCA model"
 python scripts/evaluation_workflow.py \
