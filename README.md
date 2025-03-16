@@ -7,7 +7,7 @@ Align embeddings across multiple modalities using context-aware embeddings at th
 
 **mmcontext** is built upon the excellent [sentence-transformers](https://www.sbert.net/) framework maintained by [Hugging Face](https://huggingface.co/). By leveraging their comprehensive documentation and extensive capabilities for text embeddings, **mmcontext** enables you to efficiently generate multi-modal embeddings without reinventing the wheel.
 
-![Conceptual Diagram](figs/concept.png)
+![Conceptual Diagram](/figs/concept.png)
 
 ## Getting Started
 
