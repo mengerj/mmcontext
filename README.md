@@ -46,7 +46,7 @@ If you find **mmcontext** useful for your research, please consider citing it as
 
 ```bibtex
 @misc{mmcontext,
-  author = {Your Name},
+  author = {Jonatan Menger},
   title = {mmcontext: Multi-modal Contextual Embeddings},
   year = {2025},
   publisher = {GitHub},
