@@ -21,9 +21,6 @@ docs/_build/
 docs/_autosummary/
 docs/generated/
 
-#images
-*.png
-
 #model weights
 *.pth
 
