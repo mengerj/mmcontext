@@ -7,7 +7,6 @@
 :maxdepth: 1
 api/index
 changelog.md
-contributing.md
 references.md
 
 ```
