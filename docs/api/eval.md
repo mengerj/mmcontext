@@ -28,7 +28,7 @@ The {class}`mmcontext.eval.evaluate_scib.scibEvaluator` implements the batch-int
     :toctree: ../generated/
     :nosignatures:
 
-    eval.scibEvaluator
+    eval.evaluate_scib.scibEvaluator
 ```
 
 ## Annotation accuracy and ROC
