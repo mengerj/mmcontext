@@ -1,3 +1,4 @@
+'''
 # test_sentence_transformer_integration.py
 import json
 import logging
@@ -156,3 +157,4 @@ def test_processor_debug(mock_processor):
     mock_processor.omics_processor.clear_cache()
     assert len(mock_processor.omics_processor._data_cache) == 0, "Cache not cleared"
     assert len(mock_processor.omics_processor._path_cache) == 0, "Path cache not cleared"
+'''

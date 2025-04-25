@@ -10,6 +10,7 @@ import scipy.sparse as sp
 import torch
 from omegaconf import DictConfig
 from sentence_transformers import evaluation, losses
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -373,13 +374,13 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None,
                 f"Evaluator '{evaluator_name}' is not supported for pairs dataset. Choose from {pairs_evaluators}"
             )
 
-        required_keys = {"anndata_ref", "caption", "label"}
+        required_keys = {"data_representation", "caption", "label"}
         if not required_keys.issubset(dataset.column_names):
             raise ValueError(f"Dataset for 'pairs' evaluator must contain keys: {required_keys}")
         try:
             EvaluatorClass = getattr(evaluation, evaluator_name)
             evaluator_obj = EvaluatorClass(
-                sentences1=dataset["anndata_ref"],
+                sentences1=dataset["data_representation"],
                 sentences2=dataset["caption"],
                 labels=dataset["label"],
                 batch_size=batch_size,
@@ -398,14 +399,14 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None,
                 f"Choose from {multiplets_evaluators}"
             )
 
-        required_keys = {"anndata_ref", "positive", "negative_1"}  # Updated to match TripletEvaluator
+        required_keys = {"anchor", "positive", "negative_1"}  # Updated to match TripletEvaluator
         if not required_keys.issubset(dataset.column_names):
             raise ValueError(f"Dataset for 'multiplets' evaluator must contain keys: {required_keys}")
         try:
             EvaluatorClass = getattr(evaluation, evaluator_name)
 
             evaluator_obj = EvaluatorClass(
-                anchors=dataset["anndata_ref"],
+                anchors=dataset["anchor"],
                 positives=dataset["positive"],
                 negatives=dataset["negative_1"],
             )
@@ -428,3 +429,33 @@ def get_device():
         return torch.device("mps")
     else:
         return torch.device("cpu")
+
+
+'''
+def prepare_omics_resources(hf_ds, *, prefix: str = "sample_idx:"):
+    """
+    Parameters
+    ----------
+    hf_ds : datasets.Dataset
+        Must expose ``sample_idx`` and ``data_representation``.
+    prefix : str, optional
+        Tag added in front of each key in the lookup (default ``"sample_idx:"``).
+
+    Returns
+    -------
+    embedding_matrix : np.ndarray  (num_ids, dim)
+    lookup           : dict[str, int]
+    """
+    lookup = {}
+    vectors = []
+    # loop over row with progress bar
+    for row in tqdm(hf_ds, desc="Preparing omics resources", unit="row"):
+        sid = row["sample_idx"]
+        vec = row["data_representation"]
+        row_id = len(lookup)  # 0‥N–1 in encounter order
+        lookup[f"{prefix}{sid}"] = row_id
+        vectors.append(vec)
+
+    embedding_matrix = np.stack(vectors).astype("float32")
+    return embedding_matrix, lookup
+'''

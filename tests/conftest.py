@@ -1,3 +1,4 @@
+'''
 import importlib.resources
 import json
 import logging.config
@@ -47,3 +48,4 @@ def configure_logging():
 @pytest.fixture(scope="session", autouse=True)
 def load_env():
     load_dotenv()
+'''

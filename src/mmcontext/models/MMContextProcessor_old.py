@@ -15,7 +15,7 @@ from mmcontext.file_utils import download_file_from_share_link
 logger = logging.getLogger(__name__)
 
 
-class MMContextProcessor:
+class MMContextProcessor_old:
     """A Processor to create initial embeddings for text and omics data input.
 
     Uses a tokenizer for text data and a custom processor for omics data.
