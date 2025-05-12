@@ -101,6 +101,14 @@ class MiniOmicsModel(PreTrainedModel):
             padding_idx=padding_idx,
         )
         model = cls(cfg)
+        # check that the padding_idx row in embedding_matrix is all zeros
+        if not np.all(embedding_matrix[padding_idx] == 0):
+            logger.info("appending padding vector to the embedding matrix")
+            raise ValueError(
+                "INPUT ERROR: Row %d in the embedding matrix is not all zeros. "
+                "The input embedding matrix must contain a row of zeros for the padding_idx.",
+                padding_idx,
+            )
         with torch.no_grad():
             model.embeddings.weight.copy_(torch.from_numpy(embedding_matrix))
         logger.info(
@@ -116,6 +124,7 @@ class MiniOmicsModel(PreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor,
+        attention_mask: torch.BoolTensor | None = None,
         **unused,
     ) -> BaseModelOutputWithPooling:
         """
@@ -127,6 +136,9 @@ class MiniOmicsModel(PreTrainedModel):
         ----------
         input_ids : torch.LongTensor, shape (B, L)
             Integer sample IDs.
+        attention_mask : torch.BoolTensor, shape (B, L), optional
+            Mask which indicates which of the tokens are real and which are padded.
+            Especially important if witin the omics modalities, differing sentences lengths are used.
 
         Returns
         -------
@@ -134,11 +146,22 @@ class MiniOmicsModel(PreTrainedModel):
             * ``last_hidden_state`` – raw embeddings (B, L, H)
             * ``pooler_output``     – first token (B, H)
         """
+        # Guarantee both batch and sequence dims
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(1)  # (B, 1)
+        if attention_mask is None:
+            # build it from padding_idx when caller did not supply one
+            attention_mask = input_ids != self.config.padding_idx
+
         hidden = self.embeddings(input_ids)  # (B, L, H)
-        pooled = hidden[:, 0]  # (B, H)
+
+        # ❸ mean-pool *only* over real tokens
+        token_counts = attention_mask.sum(dim=1).clamp(min=1).unsqueeze(-1)  # (B, 1)
+        pooled = hidden.sum(dim=1) / token_counts  # (B, H)
+
         return BaseModelOutputWithPooling(
-            last_hidden_state=hidden,
-            pooler_output=pooled,
+            last_hidden_state=hidden,  # (B, L, H)
+            pooler_output=pooled,  # (B, H)
         )
 
 

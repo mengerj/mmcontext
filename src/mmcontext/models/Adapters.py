@@ -11,73 +11,83 @@ logger = logging.getLogger(__name__)
 
 class AdapterModule(nn.Module):
     """
-    Adapter to be used to map text and omics encodings into common space.
+    Light-weight projection head
 
-    Transforms an input tensor (batch_size, input_dim) into a 2048-dimensional
-    output via a two-layer MLP with ReLU, followed by BatchNorm1d(2048).
+    used for mapping text/omics encodings into a shared space.
+    The module is a simple feed-forward network with optional
+    batch normalization and ReLU activation.
+
+    Modes
+    -----
+    1. **Identity** – `hidden_dim in (None, 0)` *and*
+       (`output_dim in (None, 0)` **or** `output_dim == input_dim`)
+       → acts as `nn.Identity`.
+    2. **Linear → BN** – `hidden_dim in (None, 0)`  but
+       `output_dim != input_dim`
+       → single `Linear + BatchNorm1d`.
+    3. **Linear → ReLU → Linear → BN** – default MLP.
 
     Parameters
     ----------
     input_dim : int
-        Dimension of the input features.
-    output_dim : int, optional
-        Dimension of the adapter's output, by default 2048.
-
-    References
-    ----------
-    The data for this module comes from either the text encoder output
-    or directly from your raw omics inputs.
+        Dimensionality of the incoming features.
+    hidden_dim : int | None, optional
+        Size of the hidden layer.  If *None* or *0*, the hidden layer is
+        skipped altogether.
+    output_dim : int | None, optional
+        Size of the final output.  If *None* or *0*, falls back to
+        `input_dim`.
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int | None = 512, output_dim: int = 2048):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int | None = 512,
+        output_dim: int | None = 2048,
+    ) -> None:
         super().__init__()
-        if hidden_dim:
+
+        # ------- normalise “None / 0” -----------------------------------
+        hidden_dim = None if not hidden_dim else hidden_dim
+        output_dim = input_dim if not output_dim else output_dim
+
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+
+        # ------- build the sub-network ----------------------------------
+        if hidden_dim is None and output_dim == input_dim:
+            # Pure identity
+            self.net = nn.Identity()
+            self.is_identity = True
+        elif hidden_dim is None:
+            # Single linear projection
+            self.net = nn.Sequential(
+                nn.Linear(input_dim, output_dim),
+                nn.BatchNorm1d(output_dim),
+            )
+            self.is_identity = False
+        else:
+            # Two-layer MLP
             self.net = nn.Sequential(
                 nn.Linear(input_dim, hidden_dim),
                 nn.ReLU(inplace=True),
                 nn.Linear(hidden_dim, output_dim),
                 nn.BatchNorm1d(output_dim),
             )
-        else:
-            self.net = nn.Sequential(
-                nn.Linear(input_dim, output_dim),
-                nn.BatchNorm1d(output_dim),
-            )
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
+            self.is_identity = False
 
+    # -------------------------------- forward -----------------------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass of the adapter module.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            A tensor of shape (batch_size, input_dim).
-
-        Returns
-        -------
-        torch.Tensor
-            A tensor of shape (batch_size, output_dim).
-        """
+        """Forward pass."""
         return self.net(x)
 
+    # -------------------------------- config ------------------------------
     def _get_config_dict(self) -> dict:
-        """
-        Returns a configuration dictionary.
-
-        Can be used to reconstruct this model (useful for saving/loading).
-
-        Returns
-        -------
-        dict
-            A config with essential hyperparameters.
-        """
         return {
-            "input_dim": self.net[0].in_features,
-            "hidden_dim": self.net[0].out_features if len(self.net) > 2 else None,
-            "output_dim": self.net[-2].out_features,
+            "input_dim": self.input_dim,
+            "hidden_dim": self.hidden_dim,
+            "output_dim": self.output_dim,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True) -> None:
