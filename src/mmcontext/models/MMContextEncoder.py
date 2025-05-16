@@ -1071,7 +1071,6 @@ class MMContextEncoder(nn.Module):
                 local_map,
                 layer_key=layer_key,
                 axis=axis,
-                storage_opts={"compression": "zip"} if not extract_zip else None,
             )
             df["split"] = split_name  # keep the provenance
             split_frames.append(df)
