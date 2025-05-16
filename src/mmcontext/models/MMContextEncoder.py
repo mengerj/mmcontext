@@ -26,7 +26,8 @@ import json
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any, Union
+from pathlib import Path
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -38,8 +39,15 @@ from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
 from transformers import AutoModel, AutoTokenizer
 
+from mmcontext.file_utils import (
+    build_embedding_df,
+    collect_unique_links,
+    download_and_extract_links,
+)
+
 from .Adapters import AdapterModule
 from .MiniOmicsEncoder import MiniOmicsModel
+from .onehot import OneHotTextEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +101,12 @@ class MMContextProcessor:
         *,
         prefix: str = _PREFIX,
     ) -> None:
-        self.text_tok = AutoTokenizer.from_pretrained(text_encoder_name)
+        if text_encoder_name == "one_hot":
+            self.text_tok = None  # no HF tokenizer
+            self._sentence2id: dict[str, int] = {}
+            self._next_id = 1  # 0 is reserved for padding
+        else:
+            self.text_tok = AutoTokenizer.from_pretrained(text_encoder_name)
         self.lookup = omics_lookup
         self.prefix = prefix
         self._text_only = omics_lookup is None
@@ -160,6 +173,10 @@ class MMContextProcessor:
         KeyError
             If an omics token is missing from the lookup table.
         """
+        # ---------- NEW ----------
+        is_one_hot = self.text_tok is None  # set in __init__ when encoder == "one_hot"
+        # --------------------------
+
         # ----------------------------------------------------------------- #
         # TEXT-ONLY MODE
         # ----------------------------------------------------------------- #
@@ -167,8 +184,18 @@ class MMContextProcessor:
             for i, item in enumerate(texts):
                 if not isinstance(item, str):
                     raise TypeError(f"In text-only mode all inputs must be strings (got {type(item)} at position {i}).")
-
-            tok_out = self.text_tok(texts, padding=padding, return_tensors="pt", **tok_kwargs)
+            # ---------- NEW ----------
+            if is_one_hot:
+                ids = torch.tensor(
+                    [self._sentence2id.setdefault(t, self._next_id + i) for i, t in enumerate(texts)], dtype=torch.long
+                ).unsqueeze(1)  # (B, 1)
+                self._next_id += len(texts)  # grow vocab
+                tok_out = {
+                    "input_ids": ids,
+                    "attention_mask": torch.ones_like(ids),
+                }
+            else:
+                tok_out = self.text_tok(texts, padding=padding, return_tensors="pt", **tok_kwargs)
             # tok["attention_mask"] = tok["attention_mask"].bool()
             tok_out["omics_text_info"] = torch.ones(len(texts), dtype=torch.int8)
             return tok_out
@@ -203,8 +230,18 @@ class MMContextProcessor:
 
         # -------------- text branch --------------------------------------
         if text_vals:
-            tok_out = self.text_tok(text_vals, padding=padding, return_tensors="pt", **tok_kwargs)
-            # tok["attention_mask"] = tok["attention_mask"].bool()
+            if is_one_hot:
+                ids = torch.tensor(
+                    [self._sentence2id.setdefault(t, self._next_id + i) for i, t in enumerate(text_vals)],
+                    dtype=torch.long,
+                ).unsqueeze(1)  # (n_text, 1)
+                self._next_id += len(text_vals)
+                tok_out = {
+                    "input_ids": ids,
+                    "attention_mask": torch.ones_like(ids),
+                }
+            else:
+                tok_out = self.text_tok(text_vals, padding=padding, return_tensors="pt", **tok_kwargs)
             for k, v in tok_out.items():  # v shape: (n_text, L)
                 full = [torch.zeros_like(v[0])] * len(texts)
                 for src, dst in enumerate(text_pos):
@@ -320,6 +357,12 @@ class MMContextEncoder(nn.Module):
         # ------------------------------------------------ text tower
         if isinstance(text_encoder_name, nn.Module):
             self.text_encoder = text_encoder_name
+        elif text_encoder_name == "one_hot":
+            # Default: 1 million sentence slots, match adapter_output_dim or fall back to 768
+            embed_dim = adapter_output_dim or 768
+            self.text_encoder = OneHotTextEncoder(
+                num_sentences=1_000_000, embed_dim=embed_dim, trainable=not freeze_text_encoder
+            )
         else:
             self.text_encoder = AutoModel.from_pretrained(text_encoder_name)
         text_hidden_dim = self.text_encoder.config.hidden_size
@@ -557,7 +600,6 @@ class MMContextEncoder(nn.Module):
 
         text_mask = features["omics_text_info"] == 1
         omics_mask = ~text_mask
-
         # ------------------------------------------------------------------ #
         # text branch
         # ------------------------------------------------------------------ #
@@ -572,7 +614,6 @@ class MMContextEncoder(nn.Module):
                 attention_mask=features["attention_mask"][text_mask],
                 token_type_ids=token_type_slice,
             )
-
             # pooled sentence vector
             sent_out[text_mask] = self.text_adapter(txt_out.pooler_output.to(dtype))
 
@@ -598,7 +639,6 @@ class MMContextEncoder(nn.Module):
             om_out = self.omics_encoder(  # (n, O, H)
                 input_ids=features["omics_ids"][omics_mask]
             )
-
             sent_out[omics_mask] = self.omics_adapter(om_out.pooler_output.to(dtype))
 
             if self.output_token_embeddings:
@@ -954,11 +994,99 @@ class MMContextEncoder(nn.Module):
             return_added=True,
         )
 
+    # ------------------------------------------------------------------
+    # public helper -----------------------------------------------------
+    # ------------------------------------------------------------------
+    def get_initial_embeddings(
+        self,
+        hf_dataset: DatasetDict,
+        *,
+        layer_key: str,
+        axis: Literal["obs", "var"] = "obs",
+        download_dir: str | Path = "../../data/downloaded_chunks",
+        extract_zip: bool = True,
+        overwrite: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Download all embedding chunks referenced in *hf_dataset* and return in a format suitable for registration.
+
+        This assumes the dataset has a column named ``"share_link"`` in each split,
+        which contains the share links to the Nextcloud files. The function will
+        download the files, extract them, and return a DataFrame with the
+        embeddings.
+
+        Parameters
+        ----------
+        hf_dataset
+            A Hugging Face :pyclass:`~datasets.DatasetDict` that contains one or
+            more splits *and* a ``"share_link"`` column in each split.
+        layer_key
+            Name of the embedding to pull –
+            * ``.obsm[layer_key]`` if *axis="obs"*
+            * ``.varm[layer_key]`` if *axis="var"*
+        axis
+            ``"obs"`` → use ``adata.obs.index``
+            ``"var"`` → use ``adata.var.index``.
+        download_dir
+            Local root folder where the chunk files (ZIPs or extracted stores)
+            will be materialised.
+        extract_zip
+            If *True* unpack Nextcloud ZIP downloads into ``chunk_<n>.zarr/``.
+            If *False* keep the ZIP and let Zarr’s *zip-store* backend read it
+            directly (requires Zarr ≥ 2.16).
+        overwrite
+            Re-download / re-extract even if the target already exists.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Combined DataFrame (all splits) with two columns:
+
+            ==========  ==================================================
+            column      content
+            ==========  ==================================================
+            ``token``   *obs* or *var* label (string)
+            ``embedding``  1-D :class:`numpy.ndarray` of floats
+            ==========  ==================================================
+        """
+        # --------------------------------------------------------------
+        # 1) collect & download unique share links
+        # --------------------------------------------------------------
+        links, _ = collect_unique_links(hf_dataset)
+        path_map = download_and_extract_links(
+            links,
+            target_dir=download_dir,
+            extract=extract_zip,
+            overwrite=overwrite,
+        )
+
+        # --------------------------------------------------------------
+        # 2) build per-split DataFrames, then concat
+        # --------------------------------------------------------------
+        split_frames: list[pd.DataFrame] = []
+        for split_name, ds in hf_dataset.items():
+            # translate split-specific links → local paths
+            local_map = {lk: path_map[lk] for lk in ds["share_link"]}
+            df = build_embedding_df(
+                local_map,
+                layer_key=layer_key,
+                axis=axis,
+                storage_opts={"compression": "zip"} if not extract_zip else None,
+            )
+            df["split"] = split_name  # keep the provenance
+            split_frames.append(df)
+
+        full_df = pd.concat(split_frames, ignore_index=True)
+        logger.info("Combined embedding DataFrame shape: %s", full_df.shape)
+        print("Use the returned DataFrame to register the embeddings with `register_initial_embeddings()`.")
+        return full_df
+
     def prefix_ds(
         self,
         ds: HFDataset | DatasetDict,
         cols_to_prefix: str | list[str],
         *,  # keyword-only below
+        caption_col: str = "caption",
         positive_col: str = "positive",
         label_col: str = "label",
         negative_prefix: str = "negative",
@@ -988,11 +1116,12 @@ class MMContextEncoder(nn.Module):
             pref_cols = list(cols_to_prefix)
 
             if is_multiplets:
-                pref_cols.append(positive_col)
-                pref_cols += [c for c in split.column_names if c.startswith(negative_prefix)]
-                keep_cols = pref_cols  # anchor + positive + negatives
+                keep_cols = []
+                keep_cols += pref_cols
+                keep_cols.append(positive_col)
+                keep_cols += [c for c in split.column_names if c.startswith(negative_prefix)]
             elif is_pairs:
-                keep_cols = pref_cols + ["captions", label_col]
+                keep_cols = pref_cols + [caption_col, label_col]
             else:  # single – keep everything
                 keep_cols = list(split.column_names)
 
