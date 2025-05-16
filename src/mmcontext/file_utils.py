@@ -458,7 +458,6 @@ def build_embedding_df(
     layer_key: str,
     axis: Literal["obs", "var"] = "obs",
     chunk_rows: int = 1024,
-    storage_opts: dict | None = None,
 ) -> pd.DataFrame:
     """
     Get embeddings, either for *obs* or *var*.
@@ -482,9 +481,6 @@ def build_embedding_df(
         ``"var"`` → use ``adata.var.index`` and ``adata.varm[layer_key]``.
     chunk_rows
         Number of rows to pull at once from the embedding matrix.
-    storage_opts
-        Extra ``storage_options`` forwarded to ``zarr.open`` (set
-        ``{"compression": "zip"}`` if you kept the ZIP archive).
 
     Returns
     -------
