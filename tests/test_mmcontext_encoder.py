@@ -938,3 +938,82 @@ def test_identity_adapter_when_no_hidden_no_output(TextEncStub):
     feats = enc.tokenize(_single_text_feature())
     out = enc(feats)
     assert out["sentence_embedding"].shape[-1] == enc.text_encoder.config.hidden_size
+
+
+# ---------------------------------------------------------------------
+# prefix_ds: single-pair & multi-pair datasets
+# ---------------------------------------------------------------------
+
+
+def _check_prefixed(col, pref):
+    """Helper – every string in *col* must start with the prefix."""
+    assert all(s.startswith(pref) for s in col)
+
+
+def test_prefix_ds_pairs_and_multiplets(text_only_encoder):
+    import datasets
+
+    enc = text_only_encoder  # fixture – no omics registered
+    pref = enc.processor.prefix  # usually "sample_idx:"
+
+    # ----------------------- 1) PAIRS ---------------------------------
+    pair_ds = datasets.Dataset.from_dict(
+        {
+            "sample_idx": ["S1", "S2", "S3"],
+            "caption": ["cap1", "cap2", "cap3"],
+            "label": [1, 0, 1],
+            "junk_col": [42, 43, 44],  # must be dropped
+        }
+    )
+
+    proc_pair = enc.prefix_ds(pair_ds, cols_to_prefix="sample_idx")
+
+    # Columns retained: anchor, caption, label
+    assert set(proc_pair.column_names) == {"sample_idx", "caption", "label"}
+    _check_prefixed(proc_pair["sample_idx"], pref)  # every row prefixed
+
+    # ----------------------- 2) MULTIPLETS -----------------------------
+    multi_ds = datasets.Dataset.from_dict(
+        {
+            "sample_idx": ["S4", "S5"],
+            "positive": ["T cell", "B cell"],
+            "negative0": ["Macrophage", "NK cell"],
+            "negative1": ["Neuron", "Astrocyte"],
+            "junk_col": ["x", "y"],  # must be dropped
+        }
+    )
+
+    proc_multi = enc.prefix_ds(
+        multi_ds,
+        cols_to_prefix="sample_idx",
+        positive_col="positive",
+        negative_prefix="negative",
+    )
+
+    # Only anchor + positive + all negatives kept
+    assert set(proc_multi.column_names) == {
+        "sample_idx",
+        "positive",
+        "negative0",
+        "negative1",
+    }
+    _check_prefixed(proc_multi["sample_idx"], pref)
+    _check_prefixed(proc_multi["positive"], "")  # captions stay raw
+    _check_prefixed(proc_multi["negative0"], "")  # negatives are text
+
+    # -------------- behavioural sanity: extra column really gone -------
+    assert "junk_col" not in proc_pair.column_names
+    assert "junk_col" not in proc_multi.column_names
+
+    # -------------- DatasetDict variant --------------------------------
+    ddict = datasets.DatasetDict(train=pair_ds, val=multi_ds)
+    proc_ddict = enc.prefix_ds(ddict, cols_to_prefix="sample_idx")
+
+    assert isinstance(proc_ddict, datasets.DatasetDict)
+    assert set(proc_ddict["train"].column_names) == {"sample_idx", "caption", "label"}
+    assert set(proc_ddict["val"].column_names) == {
+        "sample_idx",
+        "positive",
+        "negative0",
+        "negative1",
+    }
