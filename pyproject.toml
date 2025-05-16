@@ -130,6 +130,12 @@ lint.per-file-ignores."docs/*" = [ "I" ]
 lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
+[tool.flake8]
+ignore = [
+  "C408",  # ignore “Rewrite as literal” from flake8-comprehensions
+  "UP031",
+]
+
 [tool.pytest.ini_options]
 testpaths = [ "tests" ]
 xfail_strict = true
