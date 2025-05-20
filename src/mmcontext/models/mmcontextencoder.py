@@ -45,8 +45,8 @@ from mmcontext.file_utils import (
     download_and_extract_links,
 )
 
-from .Adapters import AdapterModule
-from .MiniOmicsEncoder import MiniOmicsModel
+from .adapters import AdapterModule
+from .omicsencoder import MiniOmicsModel
 from .onehot import OneHotTextEncoder
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ class MMContextProcessor:
     >>> batch = ["sample_idx:42", "A photo of a cat."]
     >>> enc = proc.tokenize(batch)
     >>> enc.keys()
-    dict_keys(['omics_ids', 'input_ids', 'attention_mask', 'omics_text_info'])
+    dict_keys(['pixel_values', 'input_ids', 'attention_mask', 'omics_text_info'])
     """
 
     def __init__(
@@ -160,7 +160,7 @@ class MMContextProcessor:
 
         ```
         input_ids, attention_mask,                  # ⟵ text part (if any)
-        omics_ids              (B, max_omics_len),  # ⟵ PAD-filled
+        pixel_values              (B, max_omics_len),  # ⟵ PAD-filled
         omics_attention_mask   (B, max_omics_len),  # 1 = real, 0 = PAD
         omics_text_info        (B,)                 # 1 = text, 0 = omics
         ```
@@ -260,7 +260,7 @@ class MMContextProcessor:
                     ids[i, : len(row)] = torch.tensor(row, dtype=torch.long)
                     mask[i, : len(row)] = True
 
-            batch["omics_ids"] = ids  # (B, max_len)
+            batch["pixel_values"] = ids  # (B, max_len)
             batch["omics_attention_mask"] = mask  # (B, max_len)
 
         # -------------- modality indicator -------------------------------
@@ -589,8 +589,8 @@ class MMContextEncoder(nn.Module):
             om_len = 1
             if "input_ids" in features:
                 txt_len = features["input_ids"].size(1)
-            if "omics_ids" in features:
-                om_len = features["omics_ids"].size(1)
+            if "pixel_values" in features:
+                om_len = features["pixel_values"].size(1)
             max_len = max(txt_len, om_len)
 
             tok_out = torch.zeros(batch_size, max_len, self._output_dim, device=dev, dtype=dtype)
@@ -637,7 +637,7 @@ class MMContextEncoder(nn.Module):
                 raise RuntimeError("Call `register_initial_embeddings()` first.")
 
             om_out = self.omics_encoder(  # (n, O, H)
-                input_ids=features["omics_ids"][omics_mask]
+                input_ids=features["pixel_values"][omics_mask]
             )
             sent_out[omics_mask] = self.omics_adapter(om_out.pooler_output.to(dtype))
 
@@ -1032,7 +1032,7 @@ class MMContextEncoder(nn.Module):
             will be materialised.
         extract_zip
             If *True* unpack Nextcloud ZIP downloads into ``chunk_<n>.zarr/``.
-            If *False* keep the ZIP and let Zarr’s *zip-store* backend read it
+            If *False* keep the ZIP and let Zarr's *zip-store* backend read it
             directly (requires Zarr ≥ 2.16).
         overwrite
             Re-download / re-extract even if the target already exists.
@@ -1080,11 +1080,12 @@ class MMContextEncoder(nn.Module):
         print("Use the returned DataFrame to register the embeddings with `register_initial_embeddings()`.")
         return full_df
 
-    def prefix_ds(
+    def prepare_ds(
         self,
         ds: HFDataset | DatasetDict,
-        cols_to_prefix: str | list[str],
+        cell_sentences_cols: str | list[str],
         *,  # keyword-only below
+        prefix: bool = True,
         caption_col: str = "caption",
         positive_col: str = "positive",
         label_col: str = "label",
@@ -1092,12 +1093,31 @@ class MMContextEncoder(nn.Module):
     ) -> HFDataset | DatasetDict:
         """Return a copy ready for SentenceTransformerTrainer.
 
-        * Adds ``self.processor.prefix`` once to every token string in *cols_to_prefix*.
-        * Detects *single*, *pairs*, *multiplets* by the presence of ``label`` /
-        ``positive`` columns and **removes all unused columns** accordingly.
+        Parameters
+        ----------
+        ds : HFDataset | DatasetDict
+            Input dataset to prepare
+        cell_sentences_cols : str | list[str]
+            Column(s) containing cell/sample identifiers. These will be the primary output columns.
+            If prefix=True, these will be prefixed with the processor's prefix.
+        prefix : bool, optional
+            Whether to add the processor's prefix to cell_sentences_cols. If False, only subsetting is performed.
+        caption_col : str, optional
+            Name of the caption column for pairs
+        positive_col : str, optional
+            Name of the positive column for multiplets
+        label_col : str, optional
+            Name of the label column for pairs
+        negative_prefix : str, optional
+            Prefix for negative columns in multiplets
+
+        Returns
+        -------
+        HFDataset | DatasetDict
+            Processed dataset with appropriate columns and optional prefixes
         """
-        if isinstance(cols_to_prefix, str):
-            cols_to_prefix = [cols_to_prefix]
+        if isinstance(cell_sentences_cols, str):
+            cell_sentences_cols = [cell_sentences_cols]
 
         def _add_prefix(tok: str) -> str:
             p = self.processor.prefix
@@ -1112,36 +1132,43 @@ class MMContextEncoder(nn.Module):
             is_pairs = label_col in split.column_names
             is_multiplets = positive_col in split.column_names
 
-            pref_cols = list(cols_to_prefix)
+            keep_cols = list(cell_sentences_cols)
 
             if is_multiplets:
-                keep_cols = []
-                keep_cols += pref_cols
                 keep_cols.append(positive_col)
                 keep_cols += [c for c in split.column_names if c.startswith(negative_prefix)]
             elif is_pairs:
-                keep_cols = pref_cols + [caption_col, label_col]
+                keep_cols += [caption_col, label_col]
             else:  # single – keep everything
                 keep_cols = list(split.column_names)
 
             # sanity checks --------------------------------------------------
-            missing = [c for c in pref_cols if c not in split.column_names]
+            missing = [c for c in cell_sentences_cols if c not in split.column_names]
             if missing:
                 raise TypeError(f"Columns {missing} missing from dataset split.")
 
-            for col in pref_cols:
+            for col in cell_sentences_cols:
                 if split.features[col].dtype != "string":
                     raise TypeError(f"Column '{col}' must contain strings.")
 
-            # prefix + drop unused columns ----------------------------------
-            proc = split.map(
-                lambda b: _pref(b, pref_cols),
-                batched=True,
-                desc=f"Prefixing {', '.join(pref_cols)}",
-            )
+            # prefix if requested + drop unused columns ----------------------
+            if prefix:
+                proc = split.map(
+                    lambda b: _pref(b, cell_sentences_cols),
+                    batched=True,
+                    desc=f"Prefixing {', '.join(cell_sentences_cols)}",
+                )
+            else:
+                proc = split
+
             drop_cols = [c for c in proc.column_names if c not in keep_cols]
             if drop_cols:
                 proc = proc.remove_columns(drop_cols)
+            if is_pairs:
+                proc = proc.rename_column(cell_sentences_cols[0], "sentence_1")
+                proc = proc.rename_column(caption_col, "sentence_2")
+            elif is_multiplets:
+                proc = proc.rename_column(cell_sentences_cols[0], "anchor")
             return proc
 
         if isinstance(ds, HFDataset):
@@ -1149,7 +1176,7 @@ class MMContextEncoder(nn.Module):
         elif isinstance(ds, DatasetDict):
             return DatasetDict({name: _process_split(s) for name, s in ds.items()})
         else:
-            raise TypeError("prefix_ds expects a datasets.Dataset or DatasetDict")
+            raise TypeError("prepare_ds expects a datasets.Dataset or DatasetDict")
 
     @property
     def registered_data_origin(self) -> str:
