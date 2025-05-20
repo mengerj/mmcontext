@@ -86,7 +86,7 @@ include-package-data = true
 where = [ "src" ]
 include = [ "mmcontext*" ]
 [tool.setuptools.package-data]
-"mmcontext.conf" = [ "*.json" ]
+#"mmcontext.conf" = [ "*.json" ]
 
 [tool.ruff]
 line-length = 120
@@ -129,6 +129,12 @@ lint.per-file-ignores."*/__init__.py" = [ "F401" ]
 lint.per-file-ignores."docs/*" = [ "I" ]
 lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
+
+[tool.flake8]
+ignore = [
+  "C408",  # ignore “Rewrite as literal” from flake8-comprehensions
+  "UP031",
+]
 
 [tool.pytest.ini_options]
 testpaths = [ "tests" ]

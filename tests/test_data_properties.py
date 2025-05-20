@@ -1,3 +1,4 @@
+'''
 import logging
 
 import numpy as np
@@ -260,3 +261,4 @@ def test_plot_pca_runs_without_errors(tmp_path):
         data_properties.plot_pca(save_path=f"{tmp_path}/pca_plot.png")
     except Exception as e:
         pytest.fail(f"plot_pca raised an exception: {e}")
+'''

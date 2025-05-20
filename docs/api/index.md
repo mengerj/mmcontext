@@ -10,5 +10,6 @@ import mmcontext
 :maxdepth: 2
 
 preprocessing
+models
 eval
 ```
