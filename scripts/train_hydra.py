@@ -156,10 +156,15 @@ def main(cfg: DictConfig):
     trainer.train()
 
     # Evaluate on test datasets
-    # for test_name, test_dataset in test_datasets.items():
-    #    test_config = next(t for t in cfg.test_datasets if t.name == test_name)
-    #    test_evaluator = get_evaluator(dataset_type=test_config.type, dataset=test_dataset)
-    #    test_evaluator(model)
+    for test_dataset_config in cfg.test_datasets:
+        test_dataset = test_datasets[test_dataset_config.name]
+        test_evaluator = get_evaluator(
+            dataset_type=test_dataset_config.type,
+            dataset=test_dataset,
+            batch_size=cfg.trainer.per_device_eval_batch_size,
+        )
+        test_results = test_evaluator(model)
+        logger.info(f"Test results for {test_dataset_config.name}: {test_results}")
 
     # -------------------------------------------------------------------------
     # 9. Save the model and run system monitor

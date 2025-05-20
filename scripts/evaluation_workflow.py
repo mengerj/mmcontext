@@ -443,7 +443,7 @@ def evaluate_dataset(model, text_model, dataset_config, cfg, output_dir, results
 
         #   a) visualize_embedding_clusters (method=umap and method=trimap)
         logger.info("Visualizing embedding clusters for the pair embeddings...")
-        for method in ["umap", "trimap"]:
+        for method in ["umap"]:  # , "trimap"]:
             visualize_embedding_clusters(
                 emb_pair_df,
                 method=method,
