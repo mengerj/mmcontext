@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from mmcontext.models.MMContextEncoder import MMContextEncoder, MMContextProcessor
+from mmcontext.models.mmcontextencoder import MMContextEncoder, MMContextProcessor
 
 
 # --- fixtures ---------------------------------------------------------
@@ -43,7 +43,7 @@ def test_masks_align_with_padding(processor):
     assert torch.all((txt_ids != 0) == txt_mask)
 
     # OMICS part --------------------------------------------------------
-    om_ids = feats["omics_ids"]
+    om_ids = feats["pixel_values"]
     om_mask = feats["omics_attention_mask"]
     assert om_ids.shape == om_mask.shape
     assert om_mask.dtype is torch.bool

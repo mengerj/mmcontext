@@ -7,7 +7,7 @@ import pytest
 import torch
 from sentence_transformers import SentenceTransformer
 
-from mmcontext.models.MMContextEncoder import MMContextEncoder, MMContextProcessor
+from mmcontext.models.mmcontextencoder import MMContextEncoder, MMContextProcessor
 
 
 # --------------------------------------------------------------------- #

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from mmcontext.models.MMContextEncoder import AdapterModule, MMContextEncoder
+from mmcontext.models.mmcontextencoder import AdapterModule, MMContextEncoder
 
 
 # --------------------------------------------------------------------- #
@@ -39,7 +39,9 @@ def test_bimodal_only_omics(bimodal_encoder):
     text = ["sample_idx: F1 F2"]
     features = bimodal_encoder.tokenize(text)
     # The features should contain two tokens
-    assert len(features["omics_ids"][0]) == 2
+    assert (
+        len(features["pixel_values"][0]) == 2
+    )  # These are omics IDs, but calling them pixel values is convinent for using pip release of sentence transformers
     bimodal_encoder.eval()
     output = bimodal_encoder(features)
     # Check the elements of the output
@@ -59,7 +61,7 @@ def test_bimodal_omics_and_text(bimodal_encoder):
     # Check that the features have the right keys
     assert "input_ids" in features
     assert "attention_mask" in features
-    assert "omics_ids" in features
+    assert "pixel_values" in features
     assert "omics_text_info" in features
     assert features["omics_text_info"][0] == 0  # Omics
     assert features["omics_text_info"][1] == 1  # Text
@@ -180,7 +182,7 @@ def test_adding_numeric_data(text_only_encoder, numeric_df, dummy_dataset_with_s
     # Register numeric data
     encoder.register_initial_embeddings(numeric_df, data_origin="pca")
 
-    registered_ds = encoder.prefix_ds(dummy_dataset_with_split, "omics_tokens")
+    registered_ds = encoder.prepare_ds(dummy_dataset_with_split, "omics_tokens")
 
     # Check that data was added correctly
     assert encoder._has_omics
@@ -192,11 +194,11 @@ def test_adding_numeric_data(text_only_encoder, numeric_df, dummy_dataset_with_s
     assert hasattr(encoder.omics_encoder.embeddings, "weight")
 
     # Now test with mixed input using the prefixed ID
-    sample_idx = registered_ds["train"]["omics_tokens"][0]
+    sample_idx = registered_ds["train"]["sentence_1"][0]
     features = encoder.tokenize([sample_idx, "This is a test"])
 
     # Check that the features have the right keys
-    assert "omics_ids" in features
+    assert "pixel_values" in features
     assert features["omics_text_info"][0] == 0  # Omics
     assert features["omics_text_info"][1] == 1  # Text
 
@@ -941,7 +943,7 @@ def test_identity_adapter_when_no_hidden_no_output(TextEncStub):
 
 
 # ---------------------------------------------------------------------
-# prefix_ds: single-pair & multi-pair datasets
+# prepare_ds: single-pair & multi-pair datasets
 # ---------------------------------------------------------------------
 
 
@@ -950,7 +952,7 @@ def _check_prefixed(col, pref):
     assert all(s.startswith(pref) for s in col)
 
 
-def test_prefix_ds_pairs_and_multiplets(text_only_encoder):
+def test_prepare_ds_pairs_and_multiplets(text_only_encoder):
     import datasets
 
     enc = text_only_encoder  # fixture – no omics registered
@@ -966,11 +968,11 @@ def test_prefix_ds_pairs_and_multiplets(text_only_encoder):
         }
     )
 
-    proc_pair = enc.prefix_ds(pair_ds, cols_to_prefix="sample_idx")
+    proc_pair = enc.prepare_ds(pair_ds, cell_sentences_cols="sample_idx")
 
     # Columns retained: anchor, caption, label
-    assert set(proc_pair.column_names) == {"sample_idx", "caption", "label"}
-    _check_prefixed(proc_pair["sample_idx"], pref)  # every row prefixed
+    assert set(proc_pair.column_names) == {"sentence_1", "sentence_2", "label"}
+    _check_prefixed(proc_pair["sentence_1"], pref)  # every row prefixed
 
     # ----------------------- 2) MULTIPLETS -----------------------------
     multi_ds = datasets.Dataset.from_dict(
@@ -983,21 +985,21 @@ def test_prefix_ds_pairs_and_multiplets(text_only_encoder):
         }
     )
 
-    proc_multi = enc.prefix_ds(
+    proc_multi = enc.prepare_ds(
         multi_ds,
-        cols_to_prefix="sample_idx",
+        cell_sentences_cols="sample_idx",
         positive_col="positive",
         negative_prefix="negative",
     )
 
     # Only anchor + positive + all negatives kept
     assert set(proc_multi.column_names) == {
-        "sample_idx",
+        "anchor",
         "positive",
         "negative0",
         "negative1",
     }
-    _check_prefixed(proc_multi["sample_idx"], pref)
+    _check_prefixed(proc_multi["anchor"], pref)
     _check_prefixed(proc_multi["positive"], "")  # captions stay raw
     _check_prefixed(proc_multi["negative0"], "")  # negatives are text
 
@@ -1007,12 +1009,12 @@ def test_prefix_ds_pairs_and_multiplets(text_only_encoder):
 
     # -------------- DatasetDict variant --------------------------------
     ddict = datasets.DatasetDict(train=pair_ds, val=multi_ds)
-    proc_ddict = enc.prefix_ds(ddict, cols_to_prefix="sample_idx")
+    proc_ddict = enc.prepare_ds(ddict, cell_sentences_cols="sample_idx")
 
     assert isinstance(proc_ddict, datasets.DatasetDict)
-    assert set(proc_ddict["train"].column_names) == {"sample_idx", "caption", "label"}
+    assert set(proc_ddict["train"].column_names) == {"sentence_1", "sentence_2", "label"}
     assert set(proc_ddict["val"].column_names) == {
-        "sample_idx",
+        "anchor",
         "positive",
         "negative0",
         "negative1",

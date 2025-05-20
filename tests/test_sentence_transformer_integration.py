@@ -17,7 +17,7 @@ from sentence_transformers import (
 )
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 
-from mmcontext.models.MMContextEncoder import MMContextEncoder, MMContextProcessor
+from mmcontext.models.mmcontextencoder import MMContextEncoder, MMContextProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ def test_training_text_only(st_text_encoder, dummy_dataset, tmp_path):
     train_loss = losses.CosineSimilarityLoss(st_text_encoder)
 
     # Create a simple evaluator
-    # without using .prefix_ds() on the ds, the omics_tokens will be treated as text input
+    # without using .prepare_ds() on the ds, the omics_tokens will be treated as text input
     evaluator = EmbeddingSimilarityEvaluator(
         dummy_dataset["omics_tokens"], dummy_dataset["caption"], dummy_dataset["label"]
     )
@@ -256,7 +256,7 @@ def test_training_bimodal(st_bimodal_encoder, dummy_dataset_with_split, tmp_path
         num_labels=2,
         concatenation_sent_rep=True,  # For single sentence
     )
-    ds = st_bimodal_encoder[0].prefix_ds(dummy_dataset_with_split, cols_to_prefix="omics_tokens")
+    ds = st_bimodal_encoder[0].prepare_ds(dummy_dataset_with_split, cell_sentences_cols="omics_tokens")
     # Create trainer with bimodal dataset
     trainer = SentenceTransformerTrainer(
         model=st_bimodal_encoder,
