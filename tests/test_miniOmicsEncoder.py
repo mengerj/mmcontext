@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch import nn
 
-from mmcontext.models.MiniOmicsEncoder import MiniOmicsModel
+from mmcontext.models.omicsencoder import MiniOmicsModel
 
 
 # ---------------------------------------------------------------------- #
