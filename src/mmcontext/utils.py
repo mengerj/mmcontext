@@ -374,14 +374,14 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None,
                 f"Evaluator '{evaluator_name}' is not supported for pairs dataset. Choose from {pairs_evaluators}"
             )
 
-        required_keys = {"data_representation", "caption", "label"}
+        required_keys = {"sentence_1", "sentence_2", "label"}
         if not required_keys.issubset(dataset.column_names):
             raise ValueError(f"Dataset for 'pairs' evaluator must contain keys: {required_keys}")
         try:
             EvaluatorClass = getattr(evaluation, evaluator_name)
             evaluator_obj = EvaluatorClass(
-                sentences1=dataset["data_representation"],
-                sentences2=dataset["caption"],
+                sentences1=dataset["sentence_1"],
+                sentences2=dataset["sentence_2"],
                 labels=dataset["label"],
                 batch_size=batch_size,
             )

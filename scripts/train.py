@@ -18,7 +18,7 @@ from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
-from mmcontext.models import MMContextEncoder
+from mmcontext.models.mmcontextencoder import MMContextEncoder
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
 from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf_dataset
@@ -56,18 +56,24 @@ def main(cfg: DictConfig):
         # Overwrite the model's embedding_dim with the mapped value
         cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
         precomputed_key = f"X_{chosen_method}"
-
-        bimodal_model = MMContextEncoder(
+        enc = MMContextEncoder(
             text_encoder_name=cfg.text_encoder.name,
-            omics_input_dim=cfg.adapter.omics_input_dim,
-            processor_obsm_key=precomputed_key,
-            freeze_text_encoder=cfg.text_encoder.freeze_text_encoder,
-            unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
             adapter_hidden_dim=cfg.adapter.hidden_dim,
             adapter_output_dim=cfg.adapter.output_dim,
+            output_token_embeddings=False,
+            freeze_text_encoder=cfg.text_encoder.freeze_text_encoder,
+            unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
+            train_lookup=False,
         )
-        modules = [bimodal_model]
-        model = SentenceTransformer(modules=modules)
+
+        # get the main cell sentence column
+        if cfg.gene_based_cell_sentence:
+            primary_cell_sentence = "cell_sentence_2"
+            layer_axis = "var"
+        else:
+            primary_cell_sentence = "cell_sentence_1"
+            layer_axis = "obs"
+        # Get the correct columns for the given data format
     # -------------------------------------------------------------------------
     # 2. Load multiple datasets
     # -------------------------------------------------------------------------
@@ -77,34 +83,52 @@ def main(cfg: DictConfig):
     evaluators = []
 
     for dataset_config in cfg.datasets:
+        if dataset_config.type == "pairs" or dataset_config.type == "single":
+            cell_sentences_cols = primary_cell_sentence
+        elif dataset_config.type == "multiplets":
+            cell_sentences_cols = [primary_cell_sentence, "negative_2"]
         dataset_name = f"{dataset_config.name}_{dataset_config.type}_{dataset_config.caption}"
         logger.info(f"Loading dataset: {dataset_name}")
 
         # Load the dataset
         dataset = load_dataset(f"jo-mengr/{dataset_name}")
+        if not cfg.text_only:
+            token_df = enc.get_initial_embeddings(
+                dataset, layer_key=precomputed_key, download_dir="../../data/from_nxtcloud", axis=layer_axis
+            )
+            enc.register_initial_embeddings(token_df, data_origin=chosen_method)
+        # Add the prefix expected by the model
+        dataset_ready = enc.prepare_ds(
+            dataset, cell_sentences_cols=cell_sentences_cols, prefix=not cfg.text_only
+        )  # ,"negative_2"])
 
         # Add train split to train_datasets dictionary
-        train_datasets[dataset_name] = dataset["train"]
+        train_datasets[dataset_name] = dataset_ready["train"]
 
         # Add validation split to val_datasets dictionary
-        val_datasets[dataset_name] = dataset["val"]
+        val_datasets[dataset_name] = dataset_ready["val"]
 
         # Create loss function for this dataset type
-        losses[dataset_name] = get_loss(dataset_type=dataset_config.type)(model)
+        losses[dataset_name] = get_loss(dataset_type=dataset_config.type)
 
         evaluator = get_evaluator(
-            dataset_type=dataset_config.type, dataset=dataset["val"], batch_size=cfg.trainer.per_device_eval_batch_size
+            dataset_type=dataset_config.type,
+            dataset=dataset_ready["val"],
+            batch_size=cfg.trainer.per_device_eval_batch_size,
         )
         evaluators.append(evaluator)
+    # Build the sentence Trasnformer model
+    modules = [enc]
+    model = SentenceTransformer(modules=modules)
     # Combine all evaluators into a single sequential evaluator
     dev_evaluator = SequentialEvaluator(evaluators)
 
     # -------------------------------------------------------------------------
     # 3. Load test datasets
     # -------------------------------------------------------------------------
-    test_datasets = {}
-    for test_config in cfg.test_datasets:
-        test_datasets[test_config.name] = load_dataset(test_config.name)["test"]
+    # test_datasets = {}
+    # for test_config in cfg.test_datasets:
+    #    test_datasets[test_config.name] = load_dataset(test_config.name)["test"]
 
     # -------------------------------------------------------------------------
     # 4. Compute the correct embedding dimension based on method
@@ -150,7 +174,6 @@ def main(cfg: DictConfig):
         eval_dataset=val_datasets,
         loss=losses,
         evaluator=dev_evaluator,  # Pass the sequential evaluator instead of the dictionary
-        extra_feature_keys=["omics_representation"],
         callbacks=[unfreeze_callback, WandbCallback()],
     )
     trainer.train()
@@ -164,7 +187,7 @@ def main(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 9. Save the model and run system monitor
     # -------------------------------------------------------------------------
-    model[0].processor.omics_processor.clear_cache()  # Important or you will save anndata objects stored in the cache
+    # model[0].processor.omics_processor.clear_cache()  # Important or you will save anndata objects stored in the cache
     model_dir = Path(hydra_run_dir, "model")
     os.makedirs(model_dir, exist_ok=True)
     model.save(model_dir)
