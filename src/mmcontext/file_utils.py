@@ -17,6 +17,7 @@ import h5py
 import numpy as np
 import pandas as pd
 import requests
+import scipy.sparse as sp
 import torch
 import torch.nn as nn
 import zarr
@@ -370,8 +371,8 @@ def collect_unique_links(
         splits = list(ds_dict.keys())
 
     all_links: OrderedDict[str, None] = OrderedDict()
-    for sp in splits:
-        ds: Dataset = ds_dict[sp]
+    for split in splits:
+        ds: Dataset = ds_dict[split]
         for link in ds[link_column]:
             if link not in all_links:
                 all_links[link] = None
@@ -518,7 +519,12 @@ def build_embedding_df(
             end = min(start + chunk_rows, n_rows)
             chunk = emb_matrix[start:end]
             for i, vec in enumerate(chunk):
-                rows.append({"token": tokens[start + i], "embedding": np.asarray(vec)})
+                # Convert to numpy array, handling both sparse matrices and regular lists
+                if isinstance(vec, sp.spmatrix):
+                    vec = np.asarray(vec.todense()).flatten()
+                else:
+                    vec = np.asarray(vec)
+                rows.append({"token": tokens[start + i], "embedding": vec})
         adata.file.close() if hasattr(adata, "file") else None  # close backing
 
     df = pd.DataFrame(rows, columns=["token", "embedding"])

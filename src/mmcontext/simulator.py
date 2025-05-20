@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable, Sequence
 
 import anndata as ad
@@ -5,6 +6,7 @@ import numpy as np
 import pandas as pd
 from datasets import Dataset, DatasetDict
 
+logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Default vocabularies
 # ---------------------------------------------------------------------------
@@ -73,6 +75,121 @@ LOSS_PRESETS: dict[str, dict] = {
 # -----------------------------------------------------------
 # helper: build a label-aware numeric vector sampler
 # -----------------------------------------------------------
+def make_cluster_sampler(
+    labels: Sequence[str | int],
+    batch_labels: Sequence[str | int] | None = None,
+    *,
+    noise: float = 0.05,
+    batch_shift: float = 0.2,
+    rng_seed: int = 0,
+) -> Callable[[int, int], np.ndarray]:
+    """
+    Build a sampler that adds **class** and **batch/assay** structure.
+
+    Each sample is drawn from
+
+    ``xᵢ = μ_class[labelᵢ] + γ_batch[batchᵢ] + εᵢ``
+    with εᵢ ∼ 𝒩(0, noise² I).
+
+    Parameters
+    ----------
+    labels
+        Per-sample class labels (e.g. ``adata.obs["cell_type"]``).
+    batch_labels
+        Per-sample batch/assay labels (e.g. ``adata.obs["assay"]``).
+        If *None* (default) the sampler assigns batches uniformly at random.
+    noise
+        Isotropic standard deviation of the residual noise ε.
+    batch_shift
+        Standard deviation of the batch shift vectors γ.
+    rng_seed
+        Seed passed to :pyclass:`numpy.random.default_rng` for reproducibility.
+
+    Returns
+    -------
+    sampler : Callable[[int, int], np.ndarray]
+        Function ``sampler(n, dim)``:
+
+        * If ``n == len(labels)`` it returns the *sample matrix*
+          (class + batch + noise).
+        * Otherwise (e.g. for a gene matrix) it returns i.i.d. 𝒩(0, 1).
+
+        The callable exposes
+        ``sampler.batch_index`` (array of batch IDs, ordered like *labels*).
+
+    Notes
+    -----
+    *Centroids* μ and *batch shifts* γ are created lazily the first time the
+    sample matrix is requested, so the routine stays highly efficient for
+    repeated calls with different dimensions.
+
+    Examples
+    --------
+    >>> sampler = make_cluster_sampler(
+    ...     labels=["T", "B", "T", "NK"],
+    ...     batch_labels=["10x", "10x", "Smart-seq", "10x"],
+    ...     rng_seed=42,
+    ... )
+    >>> X = sampler(4, 128)
+    >>> sampler.batch_index
+    array(['10x', '10x', 'Smart-seq', '10x'], dtype='<U9')
+    """
+    rng = np.random.default_rng(rng_seed)
+
+    labels = np.asarray(labels)
+    n_samples = len(labels)
+
+    # ------------------------------------------------------------------ #
+    # 1.  Batch assignments
+    # ------------------------------------------------------------------ #
+    if batch_labels is None:
+        batch_labels = rng.choice(["batch0", "batch1"], size=n_samples)
+        logger.info("No batch_labels provided – assigned %d random batches", 2)
+    else:
+        batch_labels = np.asarray(batch_labels)
+        if batch_labels.shape != (n_samples,):
+            raise ValueError("batch_labels must have the same length as labels")
+
+    uniq_labels = np.unique(labels)
+    uniq_batches = np.unique(batch_labels)
+
+    centroids: dict[str, np.ndarray] = {}  # class centroids (lazy)
+    batch_vectors: dict[str, np.ndarray] = {}  # batch shift vectors (lazy)
+
+    def _sampler(n: int, dim: int) -> np.ndarray:
+        nonlocal centroids, batch_vectors
+
+        # ----------------------- sample matrix ------------------------ #
+        if n == n_samples:
+            if not centroids:
+                logger.debug("Initialising %d class centroids in %d-D", len(uniq_labels), dim)
+                centroids = {lab: rng.standard_normal(dim).astype(np.float32) for lab in uniq_labels}
+
+            if not batch_vectors:
+                logger.debug(
+                    "Initialising %d batch vectors (shift σ = %.3f)",
+                    len(uniq_batches),
+                    batch_shift,
+                )
+                batch_vectors = {b: rng.standard_normal(dim).astype(np.float32) * batch_shift for b in uniq_batches}
+
+            out = np.empty((n, dim), dtype=np.float32)
+            for i, (lab, b) in enumerate(zip(labels, batch_labels, strict=True)):
+                μ = centroids[lab]
+                γ = batch_vectors[b]
+                ε = noise * rng.standard_normal(dim).astype(np.float32)
+                out[i] = μ + γ + ε
+            return out
+
+        # -------------------- everything else ------------------------- #
+        return rng.standard_normal((n, dim), dtype=np.float32)
+
+    # make batch labels available for diagnostics
+    _sampler.batch_index = batch_labels
+    return _sampler
+
+
+'''
 def make_cluster_sampler(labels, *, noise=0.05, rng_seed=0):
     """
     Sample a shifted normal distribution for each label.
@@ -90,7 +207,7 @@ def make_cluster_sampler(labels, *, noise=0.05, rng_seed=0):
 
     def _sampler(n, dim):
         nonlocal centroids
-        if n == len(labels):  # we’re sampling the *sample* matrix
+        if n == len(labels):  # we're sampling the *sample* matrix
             if not centroids:  # create fixed centres once
                 centroids = {lab: rng.standard_normal(dim) for lab in uniq}
 
@@ -103,6 +220,7 @@ def make_cluster_sampler(labels, *, noise=0.05, rng_seed=0):
             return rng.standard_normal((n, dim)).astype(np.float32)
 
     return _sampler
+'''
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +246,7 @@ class OmicsCaptionSimulator:
         numeric_sampler: Callable[[int, int], np.ndarray] | None = None,
         dim_sample: int = 32,
         dim_gene: int = 16,
+        use_gene_level: bool = False,
     ) -> None:
         self.n_samples = n_samples
         self.n_genes = n_genes
@@ -139,6 +258,7 @@ class OmicsCaptionSimulator:
         self.numeric_sampler = numeric_sampler or (lambda n, d: self.rng.standard_normal((n, d)).astype(np.float32))
         self.dim_sample = dim_sample
         self.dim_gene = dim_gene
+        self.use_gene_level = use_gene_level
 
         # placeholders filled by ``simulate``
         self.adata: ad.AnnData | None = None
@@ -224,43 +344,76 @@ class OmicsCaptionSimulator:
         gene_sents = [" ".join(self.rng.choice(gene_ids, 10, replace=False)) for _ in sample_ids]
 
         rows: list[dict] = []
-        for sid, _genes, _cap, ct in zip(sample_ids, gene_sents, captions, cell_types, strict=False):
-            # -------------- build one (or two) rows depending on preset ------
-            if preset == "pair-binary":  # (anchor,pos/neg)+binary label
-                rows.append(
-                    {
-                        "sentence1": f"sample_idx:{sid}",
-                        "sentence2": ct,
-                        "label": 1,
-                        "sample_idx": sid,  # <─ keep ID for splitting
-                    }
-                )
-                _wrong_cap = self.rng.choice(captions)
-                wrong_ct = self.rng.choice(cell_types)
-                rows.append(
-                    {
-                        "sentence1": f"sample_idx:{sid}",
-                        "sentence2": wrong_ct,
-                        "label": 0,
-                        "sample_idx": sid,
-                    }
-                )
-
-            elif preset == "triplet":  # (a,p,n)
-                neg_sid = self.rng.choice(sample_ids)
-                rows.append(
-                    {
-                        "anchor": f"sample_idx:{sid}",
-                        "positive": ct,
-                        "negative": f"sample_idx:{neg_sid}",
-                        "sample_idx": sid,
-                    }
-                )
-
-            else:  # single / single-class / pair
-                row = spec["build"](f"sample_idx:{sid}", ct, ct)
-                row["sample_idx"] = sid  # <─ always attach ID
-                rows.append(row)
+        if self.use_gene_level:
+            # Use gene sentences as primary data
+            for sid, genes, _cap, ct in zip(sample_ids, gene_sents, captions, cell_types, strict=False):
+                if preset == "pair-binary":  # (anchor,pos/neg)+binary label
+                    rows.append(
+                        {
+                            "sentence1": genes,
+                            "sentence2": ct,
+                            "label": 1,
+                            "sample_idx": sid,  # <─ keep ID for splitting
+                        }
+                    )
+                    wrong_ct = self.rng.choice(cell_types)
+                    rows.append(
+                        {
+                            "sentence1": genes,
+                            "sentence2": wrong_ct,
+                            "label": 0,
+                            "sample_idx": sid,
+                        }
+                    )
+                elif preset == "triplet":  # (a,p,n)
+                    neg_sid = self.rng.choice(sample_ids)
+                    rows.append(
+                        {
+                            "anchor": genes,
+                            "positive": ct,
+                            "negative": f"sample_idx:{neg_sid}",
+                            "sample_idx": sid,
+                        }
+                    )
+                else:  # single / single-class / pair
+                    row = spec["build"](genes, ct, ct)
+                    row["sample_idx"] = sid  # <─ always attach ID
+                    rows.append(row)
+        else:
+            # Use sample IDs as primary data (original behavior)
+            for sid, _genes, _cap, ct in zip(sample_ids, gene_sents, captions, cell_types, strict=False):
+                if preset == "pair-binary":  # (anchor,pos/neg)+binary label
+                    rows.append(
+                        {
+                            "sentence1": f"sample_idx:{sid}",
+                            "sentence2": ct,
+                            "label": 1,
+                            "sample_idx": sid,  # <─ keep ID for splitting
+                        }
+                    )
+                    wrong_ct = self.rng.choice(cell_types)
+                    rows.append(
+                        {
+                            "sentence1": f"sample_idx:{sid}",
+                            "sentence2": wrong_ct,
+                            "label": 0,
+                            "sample_idx": sid,
+                        }
+                    )
+                elif preset == "triplet":  # (a,p,n)
+                    neg_sid = self.rng.choice(sample_ids)
+                    rows.append(
+                        {
+                            "anchor": f"sample_idx:{sid}",
+                            "positive": ct,
+                            "negative": f"sample_idx:{neg_sid}",
+                            "sample_idx": sid,
+                        }
+                    )
+                else:  # single / single-class / pair
+                    row = spec["build"](f"sample_idx:{sid}", ct, ct)
+                    row["sample_idx"] = sid  # <─ always attach ID
+                    rows.append(row)
 
         ds_full = Dataset.from_list(rows)
 
@@ -279,15 +432,20 @@ class OmicsCaptionSimulator:
         ds_train = ds_full.filter(lambda r: r["sample_idx"] in train_ids)
         ds_val = ds_full.filter(lambda r: r["sample_idx"] in val_ids)
 
-        # remove helper column – no longer needed by the losses
-        # ds_train = ds_train.remove_columns("sample_idx")
-        # ds_val   = ds_val.remove_columns("sample_idx")
-
-        self.hf_dataset = DatasetDict(train=ds_train, validation=ds_val)
+        self.hf_dataset = DatasetDict(train=ds_train, val=ds_val)
 
     # -------------------------------------------------------------------
     # public getters
     # -------------------------------------------------------------------
+    def get_dataframe(self) -> pd.DataFrame:
+        """Return the numeric lookup table for the active level (gene or sample)."""
+        if self.use_gene_level:
+            return pd.DataFrame({"token": self.gene_embedding.index, "embedding": self.gene_embedding.values.tolist()})
+        else:
+            return pd.DataFrame(
+                {"token": self.sample_embedding.index, "embedding": self.sample_embedding.values.tolist()}
+            )
+
     def get_dataframes(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return numeric lookup tables (gene_df, sample_df)."""
         gene_df = pd.DataFrame({"token": self.gene_embedding.index, "embedding": self.gene_embedding.values.tolist()})

@@ -161,3 +161,44 @@ def stack_embeddings(df: pd.DataFrame, column: str = "embedding") -> np.ndarray:
         raise ValueError("Embeddings have inconsistent dimensions; make sure every row stores a list of equal length.")
 
     return arr
+
+
+def class_scatter(emb: np.ndarray, labels: np.ndarray) -> dict[str, float]:
+    """
+    Compute simple clustering diagnostics for an embedding.
+
+    Parameters
+    ----------
+    emb : np.ndarray of shape (n_samples, d)
+        The embedding vectors.
+    labels : array-like of length n_samples
+        Class labels.
+
+    Returns
+    -------
+    dict
+        * ``within_var``   – average squared distance to the class mean
+        * ``between_var``  – average squared distance between class means
+        * ``silhouette``   – sklearn’s silhouette coefficient
+    """
+    # means per class
+    uniq = np.unique(labels)
+    means = np.vstack([emb[labels == c].mean(0) for c in uniq])
+
+    # assign class mean to each sample
+    mean_per_sample = np.vstack([means[np.where(uniq == c)[0][0]] for c in labels])
+
+    within = np.mean(np.sum((emb - mean_per_sample) ** 2, axis=1))
+    # pair-wise mean distances
+    diffs = means[:, None, :] - means[None, :, :]
+    between = np.mean(np.sum(diffs**2, axis=-1)[np.triu_indices(len(uniq), 1)])
+
+    sil = silhouette_score(emb, labels, metric="euclidean")
+
+    print(
+        "scatter: within %.4f – between %.4f – silhouette %.3f",
+        within,
+        between,
+        sil,
+    )
+    return {"within_var": within, "between_var": between, "silhouette": sil}
