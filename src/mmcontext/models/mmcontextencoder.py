@@ -997,9 +997,9 @@ class MMContextEncoder(nn.Module):
     # ------------------------------------------------------------------
     # public helper -----------------------------------------------------
     # ------------------------------------------------------------------
+    @staticmethod
     def get_initial_embeddings(
-        self,
-        hf_dataset: DatasetDict,
+        hf_dataset: DatasetDict | HFDataset,
         *,
         layer_key: str,
         axis: Literal["obs", "var"] = "obs",
@@ -1063,6 +1063,8 @@ class MMContextEncoder(nn.Module):
         # --------------------------------------------------------------
         # 2) build per-split DataFrames, then concat
         # --------------------------------------------------------------
+        if isinstance(hf_dataset, HFDataset):
+            hf_dataset = DatasetDict({hf_dataset.split: hf_dataset})
         split_frames: list[pd.DataFrame] = []
         for split_name, ds in hf_dataset.items():
             # translate split-specific links → local paths
@@ -1090,6 +1092,7 @@ class MMContextEncoder(nn.Module):
         positive_col: str = "positive",
         label_col: str = "label",
         negative_prefix: str = "negative",
+        index_col: str = None,
     ) -> HFDataset | DatasetDict:
         """Return a copy ready for SentenceTransformerTrainer.
 
@@ -1110,6 +1113,8 @@ class MMContextEncoder(nn.Module):
             Name of the label column for pairs
         negative_prefix : str, optional
             Prefix for negative columns in multiplets
+        index_col : str, optional
+            Name of the index column for HFDataset. Only if index_col is provided, it will be left in the output.
 
         Returns
         -------
@@ -1139,8 +1144,11 @@ class MMContextEncoder(nn.Module):
                 keep_cols += [c for c in split.column_names if c.startswith(negative_prefix)]
             elif is_pairs:
                 keep_cols += [caption_col, label_col]
-            else:  # single – keep everything
-                keep_cols = list(split.column_names)
+            else:  # single – keep only the main column
+                keep_cols = cell_sentences_cols
+
+            if index_col:
+                keep_cols.append(index_col)
 
             # sanity checks --------------------------------------------------
             missing = [c for c in cell_sentences_cols if c not in split.column_names]
@@ -1166,7 +1174,8 @@ class MMContextEncoder(nn.Module):
                 proc = proc.remove_columns(drop_cols)
             if is_pairs:
                 proc = proc.rename_column(cell_sentences_cols[0], "sentence_1")
-                proc = proc.rename_column(caption_col, "sentence_2")
+                if caption_col:
+                    proc = proc.rename_column(caption_col, "sentence_2")
             elif is_multiplets:
                 proc = proc.rename_column(cell_sentences_cols[0], "anchor")
             return proc
