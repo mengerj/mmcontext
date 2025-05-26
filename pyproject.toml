@@ -49,6 +49,7 @@ dependencies = [
   "sentence-transformers>=4.1.0.dev0",
   "session-info>=1.0.1",
   "torch>=2.7",
+  "trimap>=1.1.4",
   "wandb>=0.19.11",
   "wordcloud>=1.9.4",
   "zarr>=2.18.3",

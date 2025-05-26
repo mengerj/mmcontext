@@ -168,6 +168,15 @@ wheels = [
 ]
 
 [[package]]
+name = "annoy"
+version = "1.17.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/38/e321b0e05d8cc068a594279fb7c097efb1df66231c295d482d7ad51b6473/annoy-1.17.3.tar.gz", hash = "sha256:9cbfebefe0a5f843eba29c6be4c84d601f4f41ad4ded0486f1b88c3b07739c15", size = 647460 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/59/c1/dafbf82add040db10e6663da2a719eea9b2ca7a3b4dc79dc42cc130b121b/annoy-1.17.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c33a5d4d344c136c84976bfb2825760142a8bb25335165e24e11c9afbfa8c2e9", size = 57745 },
+]
+
+[[package]]
 name = "antlr4-python3-runtime"
 version = "4.9.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1535,6 +1544,7 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "session-info" },
     { name = "torch" },
+    { name = "trimap" },
     { name = "wandb" },
     { name = "wordcloud" },
     { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1572,7 +1582,7 @@ requires-dist = [
     { name = "accelerate", specifier = ">=1.7" },
     { name = "anndata", specifier = ">=0.11.4" },
     { name = "coverage", marker = "extra == 'test'" },
-    { name = "datasets", specifier = ">=3.6.0" },
+    { name = "datasets", specifier = ">=3.6" },
     { name = "docutils", marker = "extra == 'doc'", specifier = ">=0.8,!=0.18.*,!=0.19.*" },
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "ipykernel", specifier = ">=6.29.5" },
@@ -1605,6 +1615,7 @@ requires-dist = [
     { name = "sphinxcontrib-bibtex", marker = "extra == 'doc'", specifier = ">=1" },
     { name = "sphinxext-opengraph", marker = "extra == 'doc'" },
     { name = "torch", specifier = ">=2.7" },
+    { name = "trimap", specifier = ">=1.1.4" },
     { name = "twine", marker = "extra == 'dev'" },
     { name = "wandb", specifier = ">=0.19.11" },
     { name = "wordcloud", specifier = ">=1.9.4" },
@@ -3782,6 +3793,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/07/42/271bcf364788337ac24e7f200005ac7142aaf022206bd6119d2daca22c04/transformers-4.52.3.tar.gz", hash = "sha256:2e1de29374f27920aaf6d589d4e6339f33def2fb08809e1a1d792e040e9fbce7", size = 8951324 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/36/f8/1f086942bc6a044e4e68dacf6de761a45367795efd5f57ad356765691c79/transformers-4.52.3-py3-none-any.whl", hash = "sha256:cd04059da50e7cf2a617ce3143ba8beffbf119f8c25a0717c3454fd9d0f19609", size = 10460322 },
+]
+
+[[package]]
+name = "trimap"
+version = "1.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annoy" },
+    { name = "numba" },
+    { name = "scikit-learn" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/2a/5bc48c9c4dbf0eef900d30fb3403aca452ae93babd42bcb70a7f2dcbda3a/trimap-1.1.4-py3-none-any.whl", hash = "sha256:ff9f0895fe99136af14b8bb4c9e717dfea5f0018ccbd16980daaed32703cf6ff", size = 15461 },
 ]
 
 [[package]]
