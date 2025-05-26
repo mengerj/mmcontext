@@ -97,6 +97,34 @@ def test_bimodal_encode_token_embeddings(numeric_df):
     assert embeddings[1].shape == (3, 4)  # Assuming 4 tokens for the omics ID
 
 
+def test_bimodal_no_adapter():
+    """Test that we can encode with bimodal model without adapter."""
+
+    def _rand_matrix(tokens, hidden=16, seed=0):
+        rng = np.random.default_rng(seed)
+        return {tok: rng.standard_normal(hidden).astype(np.float32) for tok in tokens}
+
+    mapping = _rand_matrix(
+        ["F1", "F2", "F3"], hidden=32
+    )  # make of same size as text encoder to avoid automatic adapter initialisation
+    inputs = ["This is a test sentence", "sample_idx:F2 F3 F1"]  # matches numeric_df from conftest
+    # Encode as tensor
+    encoder = MMContextEncoder(
+        text_encoder_name="bert-base-uncased",
+        output_token_embeddings=True,  # Ensure we get token embeddings
+        adapter_hidden_dim=None,
+        adapter_output_dim=None,
+    )
+    encoder.register_initial_embeddings(mapping, data_origin="pca")
+    st_encoder_bimodal = SentenceTransformer(modules=[encoder])
+    embeddings = st_encoder_bimodal.encode(inputs, output_value="token_embeddings")
+    # Check output shape and type
+    assert isinstance(embeddings[0], torch.Tensor | np.ndarray)
+    assert embeddings[0].shape == (8, 32)  # Assuming - will assign 8 tokens for each sentence
+    assert isinstance(embeddings[1], torch.Tensor | np.ndarray)
+    assert embeddings[1].shape == (3, 32)  # Assuming 4 tokens for the omics ID
+
+
 def test_batch_encoding(st_bimodal_encoder):
     """Test batch encoding with different batch sizes."""
     # Create a larger batch
@@ -172,8 +200,11 @@ def test_save_load_bimodal(st_bimodal_encoder, numeric_mapping, tmp_path):  # nu
     loaded_encoder = loaded_model._first_module()
     assert isinstance(loaded_encoder, MMContextEncoder)
 
+    # Saved version does not contain the initial encoder, as we dont want to save the initial tokens of the training data
+    assert loaded_model[0].omics_encoder is None
     # Re-register numeric data with the loaded model
-    loaded_encoder.register_initial_embeddings(numeric_mapping, data_origin="pca")
+    loaded_model[0].register_initial_embeddings(numeric_mapping, data_origin="pca")
+    assert loaded_model[0].omics_encoder is not None
 
     # Re-encode the same inputs with the loaded model
     loaded_embeddings = loaded_model.encode(inputs, convert_to_tensor=True)
@@ -196,7 +227,6 @@ def test_training_text_only(st_text_encoder, dummy_dataset, tmp_path):
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
         learning_rate=1e-4,
-        evaluation_strategy="steps",
         eval_steps=1,
         save_total_limit=1,
         no_cuda=True,  # Ensure we don't use CUDA for this test
@@ -243,7 +273,6 @@ def test_training_bimodal(st_bimodal_encoder, dummy_dataset_with_split, tmp_path
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
         learning_rate=1e-4,
-        evaluation_strategy="no",
         eval_steps=1,
         save_total_limit=1,
         no_cuda=True,  # Ensure we don't use CUDA for this test
