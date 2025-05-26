@@ -1,0 +1,33 @@
+# conf/dataset_list.yaml
+defaults: []
+
+datasets:
+  - name: pancreas_hub
+    source: jo-mengr/human_pancreas_norm_complexBatch_single_no_caption # hub repo
+    split: test
+    format: hub # hub | hf_disk | csv
+    main_col: cell_sentence_2
+    index_col: sample_idx
+    layer_key: X_pca
+    bio_label_list:
+      - celltype
+    batch_label_list:
+      - tech
+#  - name: pancreas_local
+#    source: /Users/mengerj/repos/adata_hf_datasets/data/hf_datasets/human_pancreas_norm_complexBatch            # local dir with arrow files
+#    split: test
+#    format: hf_disk
+#    main_col: cell_sentence_1
+#    index_col: sample_idx
+#   layer_key: X_pca
+#    bio_label_list:
+#      - celltype
+#    batch_label_list:
+#      - tech
+
+#  - name: lamanno_csv
+#    source: /Users/mengerj/repos/mmcontext/data/maria/test_scrna.csv        # local csv
+#    format: csv
+#    main_col: cell_sentence
+#    index_col: index
+#    layer_key: X_pca
