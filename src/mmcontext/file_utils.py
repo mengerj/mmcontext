@@ -334,7 +334,7 @@ ZARR_MAGIC = b"{"  # first byte of .zmetadata  (fallback)
 # 1) gather the links once
 # ---------------------------------------------------------------------
 def collect_unique_links(
-    ds_dict: DatasetDict,
+    ds_dict: Dataset | DatasetDict,
     split: str | None = None,
     link_column: str = "share_link",
 ) -> tuple[list[str], "pd.DataFrame"]:
@@ -367,6 +367,9 @@ def collect_unique_links(
 
     if split is not None:
         splits = [split]
+    elif isinstance(ds_dict, Dataset):
+        splits = [ds_dict.split]
+        ds_dict = {splits[0]: ds_dict}
     else:
         splits = list(ds_dict.keys())
 
@@ -414,7 +417,7 @@ def download_and_extract_links(
             continue  # ← skip download altogether
 
         already = target_dir / f"chunk_{idx}.zarr"
-        if already.exists() and (already / ".zmetadata").exists() and not overwrite:
+        if already.exists() and not overwrite:
             out_map[link] = already
             continue
         # ---- stream into tmp file -----------------------------------------
@@ -530,3 +533,80 @@ def build_embedding_df(
     df = pd.DataFrame(rows, columns=["token", "embedding"])
     logger.info("Built DataFrame with %d rows × %d-dim embeddings", len(df), len(df["embedding"].iloc[0]))
     return df
+
+
+def save_table(
+    df: pd.DataFrame, out_path: Path, fmt: Literal["csv", "parquet"] = "csv", *, index: bool = False
+) -> None:
+    """
+    Persist a DataFrame to disk.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Table to write.
+    out_path : Path
+        Full path, including the desired file name *without* extension.
+    fmt : {'csv', 'parquet'}, default 'csv'
+        File type.
+    index : bool, default False
+        Keep row index.
+
+    Notes
+    -----
+    For Parquet we use pyarrow with ZSTD compression if available.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "csv":
+        file = out_path.with_suffix(".csv")
+        df.to_csv(file, index=index)
+    elif fmt == "parquet":
+        file = out_path.with_suffix(".parquet")
+        df.to_parquet(file, index=index, compression="zstd")
+    else:
+        raise ValueError(f"Unsupported format '{fmt}'")
+    logger.info("Saved %s (%d rows) → %s", fmt.upper(), len(df), file)
+
+
+def copy_resolved_config(cfg, hydra_output_dir: Path, named_output_dir: Path) -> None:
+    """
+    Copy the resolved config to the output directory.
+
+    Serialize the *instantiated* Hydra config twice: once in the Hydra run
+    directory and once in the named output directory so downstream users can
+    locate it without knowing the run-dir.
+
+    The config is enriched with a few runtime fields first (git SHA, SLURM
+    job-ID, command line, etc.).
+    """
+    import subprocess
+
+    from hydra.utils import to_absolute_path
+    from omegaconf import OmegaConf
+
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+
+    # --- enrich with runtime metadata -------------------------------------
+    git_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    cfg_dict["_meta"] = {
+        "git_sha": git_sha,
+        "cmd": " ".join([to_absolute_path("main.py"), *os.sys.argv[1:]]),
+        "slurm_job_id": os.getenv("SLURM_JOB_ID") if cfg.slurm.store_id else None,
+    }
+
+    # -----------------------------------------------------------------------
+    for target_dir in (hydra_output_dir, named_output_dir):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        out = target_dir / "resolved_config.json"
+        with out.open("w") as fp:
+            json.dump(cfg_dict, fp, indent=2)
+        logger.info("Wrote resolved Hydra config → %s", out)
+
+    # Also copy *raw* yaml files for debugging
+    orig_conf_dir = Path("conf").absolute()
+    shutil.copytree(orig_conf_dir, named_output_dir / "conf_raw", dirs_exist_ok=True)
