@@ -21,6 +21,8 @@ docs/_build/
 docs/_autosummary/
 docs/generated/
 
+#runs
+/runs
 #model weights
 *.pth
 
@@ -89,3 +91,4 @@ build/
 #trained models
 models_trained/
 exploratory/notebooks/models
+exploratory/notebooks/eval

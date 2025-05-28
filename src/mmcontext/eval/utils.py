@@ -1,12 +1,32 @@
 import logging
 import os
 import random
+from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 
 logger = logging.getLogger(__name__)
+
+
+class LabelKind(str, Enum):
+    """Name for the kind of label."""
+
+    BIO = "bio"
+    BATCH = "batch"
+
+
+@dataclass
+class LabelSpec:
+    """Specification for a label column.
+
+    To be used with the BaseEvaluator derived class.
+    """
+
+    name: str  # column in adata.obs
+    kind: LabelKind  # 'bio' or 'batch'
 
 
 def load_evaluation_results(results_path: str) -> pd.DataFrame:

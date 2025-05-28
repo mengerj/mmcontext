@@ -47,7 +47,7 @@ class AdapterModule(nn.Module):
     ) -> None:
         super().__init__()
 
-        # ------- normalise “None / 0” -----------------------------------
+        # ------- normalise "None / 0" -----------------------------------
         hidden_dim = None if not hidden_dim else hidden_dim
         output_dim = input_dim if not output_dim else output_dim
 
