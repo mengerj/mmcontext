@@ -26,6 +26,76 @@ from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf
 logger = logging.getLogger(__name__)
 
 
+def generate_model_name(cfg: DictConfig, dataset_configs: list) -> str:
+    """
+    Generate a descriptive model name based on configuration.
+
+    Parameters
+    ----------
+    cfg : DictConfig
+        Configuration object containing model settings
+    dataset_configs : list
+        List of dataset configurations
+
+    Returns
+    -------
+    str
+        Generated model name
+    """
+    # Process dataset names
+    dataset_parts = []
+    captions = []
+
+    for dataset_config in dataset_configs:
+        # Get shortened dataset name by replacing specific parts
+        dataset_name = dataset_config.name
+        # Replace "cellxgene_pseudo_bulk" with "cg" while keeping any suffixes
+        if dataset_name.startswith("cellxgene_pseudo_bulk"):
+            shortened_name = dataset_name.replace("cellxgene_pseudo_bulk", "cg")
+        else:
+            shortened_name = dataset_name
+
+        dataset_parts.append(shortened_name)
+        captions.append(dataset_config.caption)
+
+    # Combine dataset names
+    datasets_str = "-".join(dataset_parts)
+
+    # Get unique captions
+    unique_captions = list(set(captions))
+    captions_str = "-".join(unique_captions)
+
+    # Get text encoder name (simplified)
+    text_encoder_name = cfg.text_encoder.name
+    if "pubmedbert" in text_encoder_name.lower():
+        encoder_str = "pubmedbert"
+    elif "biobert" in text_encoder_name.lower():
+        encoder_str = "biobert"
+    else:
+        # Take the last part after '/'
+        encoder_str = text_encoder_name.split("/")[-1]
+
+    # Get output dimension
+    output_dim = cfg.adapter.output_dim
+
+    # Get embedding method or text_only
+    if cfg.text_only:
+        method_str = "text_only"
+    else:
+        method_str = cfg.embedding_method
+
+    # Get cell sentence type
+    if cfg.gene_based_cell_sentence:
+        cell_sentence_str = "feat_cs"  # feature-based cell sentences (genes)
+    else:
+        cell_sentence_str = "sample_cs"  # sample-based cell sentences
+
+    # Construct the model name
+    model_name = f"mmcontext-{datasets_str}-{captions_str}-{encoder_str}-{output_dim}-{method_str}-{cell_sentence_str}"
+
+    return model_name
+
+
 @hydra.main(config_path="../conf", config_name="train_conf", version_base=None)
 def main(cfg: DictConfig):
     """
@@ -159,7 +229,7 @@ def main(cfg: DictConfig):
         save_steps=cfg.trainer.save_steps,
         save_total_limit=cfg.trainer.save_total_limit,
         logging_steps=cfg.trainer.logging_steps,
-        run_name=str(hydra_run_dir),
+        run_name=generate_model_name(cfg, cfg.datasets),
         dataloader_num_workers=cfg.trainer.dataloader_num_workers,
     )
 
@@ -196,6 +266,7 @@ def main(cfg: DictConfig):
     model_dir = Path(hydra_run_dir, "model")
     os.makedirs(model_dir, exist_ok=True)
     model.save(model_dir)
+    model.push_to_hub(f"jo-mengr/{generate_model_name(cfg, cfg.datasets)}")
 
     monitor.stop()
     monitor.save(hydra_run_dir)

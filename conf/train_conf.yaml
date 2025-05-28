@@ -7,7 +7,7 @@
 # Or you can override any other parameter by specifying its full path, e.g.:
 #   python train.py dataset.basename=my_awesome_dataset
 
-model: #if huggingface repo is provided, this model will be loaded and fine-tuned
+model: #if huggingface repo is provided, this model will be loaded and fine-tuned directly
 
 # Here are some defaults:
 embedding_method: "geneformer" #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
@@ -18,18 +18,18 @@ input_dim_map:
   scvi: 50
   geneformer: 512
 
-text_only: true #If you only want to process all input like text (cell sentences based on gene names)
+text_only: false #If you only want to process all input like text (cell sentences based on gene names)
 
-gene_based_cell_sentence: true # If true, use list of gene names as a representation of the cell
+gene_based_cell_sentence: false # If true, use list of gene names as a representation of the cell
 
 # Modified dataset configuration to support multiple datasets
 datasets:
   # - name: "cellxgene_pseudo_bulk_3_5k"
   # type: "multiplets"
   # caption: "natural_language_annotation"
-  - name: "cellxgene_pseudo_bulk_35k"
-    type: "pairs"
-    caption: "cell_type"
+  - name: "cellxgene_pseudo_bulk_350k"
+    type: "multiplets"
+    caption: "natural_language_annotation"
   # Add more datasets as needed
 
 test_datasets:
@@ -40,7 +40,7 @@ test_datasets:
 text_encoder:
   name: "NeuML/pubmedbert-base-embeddings"
   freeze_text_encoder: True
-  unfreeze_last_n_layers: 0
+  unfreeze_last_n_layers: 1
 
 #loss: "MultipleNegativesRankingLoss"
 #loss: "ContrastiveLoss"
@@ -52,21 +52,20 @@ adapter:
   output_dim: 2048
 
 trainer:
-  unfreeze_epoch: 2 #will unfreeze the whole text encoder
+  unfreeze_epoch: 4 #will unfreeze the whole text encoder
   output_dir: "../../models/trained"
   num_train_epochs: 4
-  per_device_train_batch_size: 128
-  per_device_eval_batch_size: 128
+  per_device_train_batch_size: 256
+  per_device_eval_batch_size: 256
   learning_rate: 5e-2
   warmup_ratio: 0.1
-  fp16: false
+  fp16: true
   bf16: false
   eval_strategy: "steps"
-  eval_steps: 100
+  eval_steps: 500
   save_strategy: "steps"
-  save_steps: 500
+  save_steps: 2000
   save_total_limit: 2
   logging_steps: 50
   logging_first_step: True
-  run_name: "mmcontext"
   dataloader_num_workers: 0
