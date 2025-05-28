@@ -395,10 +395,12 @@ def download_and_extract_links(
     extract: bool = True,  # NEW – choose A (False) or B (True)
 ) -> dict[str, Path]:
     """
-    Download every share-link.  If it is a ZIP (Nextcloud folder-download) either
+    Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either
 
     • keep the archive as ``chunk_<n>.zip``   (extract=False, default)  **OR**
     • extract *all* members to ``chunk_<n>.zarr/`` (extract=True).
+
+    For local paths, they are used directly without downloading or copying.
 
     Returns
     -------
@@ -409,7 +411,24 @@ def download_and_extract_links(
     tmp_root = Path(temp_dir or tempfile.gettempdir())
     out_map: dict[str, Path] = {}
 
-    for idx, link in enumerate(tqdm(links, desc="Download", unit="file")):
+    def _is_local_path(link: str) -> bool:
+        """Check if a link is a local file path rather than a URL."""
+        # Check if it's a valid local path that exists
+        try:
+            path = Path(link)
+            return path.exists() and (path.is_file() or path.is_dir())
+        except (OSError, ValueError):
+            return False
+
+    for idx, link in enumerate(tqdm(links, desc="Processing", unit="file")):
+        # Handle local paths directly
+        if _is_local_path(link):
+            local_path = Path(link).resolve()
+            logger.info(f"Using local path: {local_path}")
+            out_map[link] = local_path
+            continue
+
+        # For URLs, proceed with download logic
         # ------------------------- check if present----
         already = target_dir / f"chunk_{idx}.zip"
         if already.exists() and not overwrite:

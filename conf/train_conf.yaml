@@ -27,7 +27,7 @@ datasets:
   # - name: "cellxgene_pseudo_bulk_3_5k"
   # type: "multiplets"
   # caption: "natural_language_annotation"
-  - name: "cellxgene_pseudo_bulk_350k"
+  - name: "cellxgene_pseudo_bulk_35k"
     type: "multiplets"
     caption: "natural_language_annotation"
   # Add more datasets as needed
@@ -52,14 +52,14 @@ adapter:
   output_dim: 2048
 
 trainer:
-  unfreeze_epoch: 4 #will unfreeze the whole text encoder
+  unfreeze_epoch: 1 #will unfreeze the whole text encoder
   output_dir: "../../models/trained"
-  num_train_epochs: 4
-  per_device_train_batch_size: 256
-  per_device_eval_batch_size: 256
+  num_train_epochs: 1
+  per_device_train_batch_size: 512
+  per_device_eval_batch_size: 512
   learning_rate: 5e-2
   warmup_ratio: 0.1
-  fp16: true
+  fp16: false
   bf16: false
   eval_strategy: "steps"
   eval_steps: 500

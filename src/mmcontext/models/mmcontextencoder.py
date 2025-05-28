@@ -16,7 +16,8 @@ MMContextEncoder
 
     * text side   … any Hugging-Face AutoModel
     * omics side  … MiniOmicsModel (lookup-only)
-    * adapters    … feed-forward projection heads
+    * adapters    … feed-forward projection heads (applied at token level)
+    * pooling     … SentenceTransformers Pooling module for sentence embeddings
 
 """
 
@@ -37,6 +38,7 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
+from sentence_transformers.models import Pooling
 from transformers import AutoModel, AutoTokenizer
 
 from mmcontext.file_utils import (
@@ -284,6 +286,8 @@ class MMContextEncoder(nn.Module):
     3. Bimodal mode that will be completed later via register_initial_embeddings
 
     The adapter layers can be optionally included for dimensionality reduction.
+    Adapters are applied at the token level, and pooling is performed using
+    SentenceTransformers Pooling module for better compatibility.
 
     Parameters
     ----------
@@ -318,6 +322,9 @@ class MMContextEncoder(nn.Module):
     train_lookup : bool, optional
         Whether to train the lookup table. Defaults to False, as we have precomputed representations in the lookup,
         that we don't want to modify at this point.
+    pooling_mode : str, optional
+        Pooling strategy to use. Defaults to "mean". Options: "mean", "cls", "max", etc.
+        See SentenceTransformers Pooling documentation for all options.
     """
 
     VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "random"]
@@ -336,6 +343,7 @@ class MMContextEncoder(nn.Module):
         registered_input_dim: int | None = None,
         output_token_embeddings: bool = False,
         train_lookup: bool = False,
+        pooling_mode: str = "mean",
     ) -> None:
         super().__init__()
         if registered_data_origin not in self.VALID_DATA_ORIGINS:
@@ -353,6 +361,10 @@ class MMContextEncoder(nn.Module):
         self._registered_input_dim = registered_input_dim
         self.output_token_embeddings = output_token_embeddings
         self.train_lookup = train_lookup
+        self.pooling_mode = pooling_mode
+
+        # Determine if adapters should be used
+        self._use_adapters = adapter_hidden_dim is not None or adapter_output_dim is not None
 
         # ------------------------------------------------ text tower
         if isinstance(text_encoder_name, nn.Module):
@@ -365,31 +377,31 @@ class MMContextEncoder(nn.Module):
             )
         else:
             self.text_encoder = AutoModel.from_pretrained(text_encoder_name)
+
         text_hidden_dim = self.text_encoder.config.hidden_size
 
-        self._output_dim = adapter_output_dim if adapter_output_dim is not None else text_hidden_dim
-        # Setup adapters if requested
-        self.text_adapter = AdapterModule(
-            input_dim=text_hidden_dim,
-            hidden_dim=adapter_hidden_dim,
-            output_dim=adapter_output_dim,
-        )
-        # ------------------------------------------------------------------
-        # token-level projection layers (OPTIONAL)
-        # ------------------------------------------------------------------
-        self._proj_tokens = self.output_token_embeddings  # short flag
-
-        # ---- text branch -------------------------------------------------
-        if self._proj_tokens and self._output_dim != text_hidden_dim:
-            # only needed when token dim would mismatch the requested output dim
-            self.text_token_adapter = nn.Linear(text_hidden_dim, self._output_dim)
+        # Determine output dimension
+        if self._use_adapters:
+            self._output_dim = adapter_output_dim if adapter_output_dim is not None else text_hidden_dim
         else:
-            # either not requested or dims already match ⇒ no extra layer
-            self.text_token_adapter = None  # handled safely in forward
+            self._output_dim = text_hidden_dim
 
-        # ---- omics branch ------------------------------------------------
-        # (created later if/when an omics matrix is registered)
-        self.omics_token_adapter = None
+        # Setup text adapter if requested
+        if self._use_adapters:
+            self.text_adapter = AdapterModule(
+                input_dim=text_hidden_dim,
+                hidden_dim=adapter_hidden_dim,
+                output_dim=self._output_dim,
+            )
+        else:
+            self.text_adapter = None
+
+        # ------------------------------------------------ pooling layer
+        # Use SentenceTransformers Pooling for sentence embeddings
+        self.pooling = Pooling(
+            word_embedding_dimension=self._output_dim,
+            pooling_mode=pooling_mode,
+        )
 
         # ------------------------------------------------ omics tower
         if omics_embedding is not None:
@@ -397,15 +409,15 @@ class MMContextEncoder(nn.Module):
         elif registered_data_origin != "unregistered" and registered_input_dim:
             # Initialize adapter for registered data without embedding matrix
             self.omics_encoder = None
-            self.omics_adapter = AdapterModule(
-                input_dim=registered_input_dim,
-                hidden_dim=adapter_hidden_dim,
-                output_dim=self._output_dim,
-            )
+            if self._use_adapters:
+                self.omics_adapter = AdapterModule(
+                    input_dim=registered_input_dim,
+                    hidden_dim=adapter_hidden_dim,
+                    output_dim=self._output_dim,
+                )
+            else:
+                self.omics_adapter = None
             self._registered_input_dim = registered_input_dim
-            # token-projection layers only if we might need them
-            if self.output_token_embeddings:
-                self.omics_token_adapter = nn.Linear(registered_input_dim, adapter_output_dim)
         else:
             self.omics_encoder = None
             self.omics_adapter = None
@@ -457,29 +469,18 @@ class MMContextEncoder(nn.Module):
             Input dimension for the adapter
         """
         # If we already have an adapter, preserve it
-        has_adapter = False
-        has_token_adapter = False
-        if hasattr(self, "omics_adapter") and self.omics_adapter is not None:
-            has_adapter = True
-        if hasattr(self, "omics_token_adapter") and self.omics_token_adapter is not None:
-            has_token_adapter = True
-        if not has_adapter:
-            # Otherwise, create a new adapter
-            # if input_dim != self._output_dim:
+        has_adapter = hasattr(self, "omics_adapter") and self.omics_adapter is not None
+
+        if not has_adapter and self._use_adapters:
+            # Create a new adapter only if adapters are requested
             self.omics_adapter = AdapterModule(
                 input_dim=input_dim,
                 hidden_dim=self.adapter_hidden_dim,
                 output_dim=self._output_dim,
             )
-            # else:
-            #    raise ValueError(
-            #        f"Without adapters, omics dimension ({input_dim}) must match "
-            #        f"text encoder dimension ({self._output_dim})"
-            #    )
-        if not has_token_adapter:
-            # Create token projection layers if needed
-            if self._proj_tokens and self._output_dim != input_dim:
-                self.omics_token_adapter = nn.Linear(input_dim, self._output_dim)
+        elif not self._use_adapters:
+            # Ensure no adapter if not requested
+            self.omics_adapter = None
 
     def _manage_text_encoder_freezing(self):
         """Freezes all parameters in the text encoder if required, and optionally unfreezes the last n layers."""
@@ -503,17 +504,6 @@ class MMContextEncoder(nn.Module):
                 for layer in layers:
                     for param in layer.parameters():
                         param.requires_grad = True
-
-    def _safe_project(self, last_hidden, adapter, want_proj: bool):
-        """
-        Return token representations with an *optional* projection layer.
-
-        • If *want_proj* is False OR *adapter* is None  → just return `last_hidden`
-        • else                                         → run the adapter first
-        """
-        if not want_proj or adapter is None:
-            return last_hidden
-        return adapter(last_hidden)
 
     # ---------------------------------------------------------------------
     def tokenize(
@@ -551,6 +541,12 @@ class MMContextEncoder(nn.Module):
         """
         Embed a batch and maintain original ordering.
 
+        New architecture:
+        1. Get token embeddings from encoders
+        2. Apply adapters at token level (if enabled)
+        3. Use SentenceTransformers Pooling for sentence embeddings
+        4. Optionally return token embeddings
+
         Parameters
         ----------
         features : dict
@@ -560,8 +556,8 @@ class MMContextEncoder(nn.Module):
         Returns
         -------
         torch.Tensor or dict
-            If return_tensor=True in features, returns a returns tensor of sentence embeddings directly.
-            key. Otherwise, dict with 'sentence_embedding.
+            If return_tensor=True in features, returns a tensor of sentence embeddings directly.
+            Otherwise, dict with 'sentence_embedding' and optionally 'token_embeddings'.
 
         Raises
         ------
@@ -580,26 +576,26 @@ class MMContextEncoder(nn.Module):
             if torch.is_tensor(v):
                 features[k] = v.to(dev)
 
-        # ---- set up sentence-level outputs (always) -------------------------
         batch_size = features["omics_text_info"].size(0)
-        sent_out = torch.zeros(batch_size, self._output_dim, device=dev, dtype=dtype)
-        # ---- prepare token-level placeholders only if we need them ---------
-        if self.output_token_embeddings:
-            txt_len = 1
-            om_len = 1
-            if "input_ids" in features:
-                txt_len = features["input_ids"].size(1)
-            if "pixel_values" in features:
-                om_len = features["pixel_values"].size(1)
-            max_len = max(txt_len, om_len)
-
-            tok_out = torch.zeros(batch_size, max_len, self._output_dim, device=dev, dtype=dtype)
-            attn_out = torch.zeros(batch_size, max_len, device=dev, dtype=torch.long)
-            mod_out = torch.full((batch_size, max_len), 2, device=dev, dtype=torch.long)  # 2 = PAD
-            # 0 = text, 1 = omics, 2 = pad
-
         text_mask = features["omics_text_info"] == 1
         omics_mask = ~text_mask
+
+        # ------------------------------------------------------------------ #
+        # Prepare unified token embeddings tensor
+        # ------------------------------------------------------------------ #
+        # Determine maximum sequence length across modalities
+        txt_len = 1
+        om_len = 1
+        if "input_ids" in features:
+            txt_len = features["input_ids"].size(1)
+        if "pixel_values" in features:
+            om_len = features["pixel_values"].size(1)
+        max_len = max(txt_len, om_len)
+
+        # Initialize unified tensors
+        token_embeddings = torch.zeros(batch_size, max_len, self._output_dim, device=dev, dtype=dtype)
+        attention_mask = torch.zeros(batch_size, max_len, device=dev, dtype=torch.long)
+
         # ------------------------------------------------------------------ #
         # text branch
         # ------------------------------------------------------------------ #
@@ -614,61 +610,79 @@ class MMContextEncoder(nn.Module):
                 attention_mask=features["attention_mask"][text_mask],
                 token_type_ids=token_type_slice,
             )
-            # pooled sentence vector
-            sent_out[text_mask] = self.text_adapter(txt_out.pooler_output.to(dtype))
 
-            if self.output_token_embeddings:
-                txt_tokens = self._safe_project(
-                    txt_out.last_hidden_state.to(dtype),
-                    getattr(self, "text_token_adapter", None),
-                    self._proj_tokens,
-                )
-                L = txt_tokens.size(1)
-                tok_out[text_mask, :L] = txt_tokens
-                attn_out[text_mask, :L] = features["attention_mask"][text_mask]
-                mod_out[text_mask, :L] = 0  # text-modality id
+            # Get token embeddings and apply adapter if present
+            txt_tokens = txt_out.last_hidden_state.to(dtype)  # (n_text, L_txt, H)
+            if self.text_adapter is not None:
+                # Apply adapter to each token
+                B, L, H = txt_tokens.shape
+                txt_tokens = self.text_adapter(txt_tokens.view(-1, H)).view(B, L, self._output_dim)
+
+            # Place in unified tensor
+            L_txt = txt_tokens.size(1)
+            token_embeddings[text_mask, :L_txt] = txt_tokens
+            attention_mask[text_mask, :L_txt] = features["attention_mask"][text_mask]
 
         # ------------------------------------------------------------------ #
         # omics branch
         # ------------------------------------------------------------------ #
-        omics_mask = ~text_mask
         if omics_mask.any():
             if not self._has_omics:
                 raise RuntimeError("Call `register_initial_embeddings()` first.")
 
-            om_out = self.omics_encoder(  # (n, O, H)
+            om_out = self.omics_encoder(  # (n_omics, L_om, H)
                 input_ids=features["pixel_values"][omics_mask]
             )
-            sent_out[omics_mask] = self.omics_adapter(om_out.pooler_output.to(dtype))
 
-            if self.output_token_embeddings:
-                om_tokens = self._safe_project(
-                    om_out.last_hidden_state.to(dtype),
-                    getattr(self, "omics_token_adapter", None),
-                    self._proj_tokens,
-                )
-                L = om_tokens.size(1)
-                tok_out[omics_mask, :L] = om_tokens
-                attn_out[omics_mask, :L] = 1
-                mod_out[omics_mask, :L] = 1  # omics-modality id
+            # Get token embeddings and apply adapter if present
+            om_tokens = om_out.last_hidden_state.to(dtype)  # (n_omics, L_om, H)
+            if self.omics_adapter is not None:
+                # Apply adapter to each token
+                B, L, H = om_tokens.shape
+                om_tokens = self.omics_adapter(om_tokens.view(-1, H)).view(B, L, self._output_dim)
+
+            # IMPORTANT: Zero out padded positions after adapter application
+            # This ensures that padded tokens remain zero even after going through the adapter
+            omics_attn_mask = features["omics_attention_mask"][omics_mask]  # (n_omics, L_om)
+            om_tokens = om_tokens * omics_attn_mask.unsqueeze(-1).to(dtype)  # Broadcast and mask
+
+            # Place in unified tensor
+            L_om = om_tokens.size(1)
+            token_embeddings[omics_mask, :L_om] = om_tokens
+            attention_mask[omics_mask, :L_om] = omics_attn_mask.long()
+
+        # ------------------------------------------------------------------ #
+        # Apply pooling to get sentence embeddings
+        # ------------------------------------------------------------------ #
+        pooling_features = {
+            "token_embeddings": token_embeddings,
+            "attention_mask": attention_mask,
+        }
+        pooled_features = self.pooling(pooling_features)
+        sentence_embeddings = pooled_features["sentence_embedding"]
 
         # ------------------------------------------------------------------ #
         # pack up & return
         # ------------------------------------------------------------------ #
         if return_tensor:
-            return sent_out
-        features.update(
-            sentence_embedding=sent_out,
-        )
-        if self.output_token_embeddings:
-            features.update(
-                token_embeddings=tok_out,
-                attention_mask=attn_out,
-                modality_ids=mod_out,  # optional metadata
-            )
-        return features
+            return sentence_embeddings
 
-    def _get_sentence_embedding_dimension(self) -> int:
+        result = {
+            "sentence_embedding": sentence_embeddings,
+        }
+
+        if self.output_token_embeddings:
+            result["token_embeddings"] = token_embeddings
+            result["attention_mask"] = attention_mask
+            # Optional: add modality information
+            modality_ids = torch.full((batch_size, max_len), 2, device=dev, dtype=torch.long)  # 2 = PAD
+            modality_ids[text_mask, :txt_len] = 0  # text
+            modality_ids[omics_mask, :om_len] = 1  # omics
+            result["modality_ids"] = modality_ids
+
+        return result
+
+    def get_sentence_embedding_dimension(self) -> int:
         """
         Returns the dimension of the final sentence embedding.
 
@@ -678,6 +692,11 @@ class MMContextEncoder(nn.Module):
             The dimension of the final sentence embedding.
         """
         return self._output_dim
+
+    # Alias for SentenceTransformers compatibility
+    def _get_sentence_embedding_dimension(self) -> int:
+        """Alias for get_sentence_embedding_dimension for SentenceTransformers compatibility."""
+        return self.get_sentence_embedding_dimension()
 
     def _get_config_dict(self) -> dict:
         """
@@ -700,6 +719,7 @@ class MMContextEncoder(nn.Module):
             "registered_input_dim": self._registered_input_dim,
             "output_token_embeddings": self.output_token_embeddings,
             "train_lookup": self.train_lookup,
+            "pooling_mode": self.pooling_mode,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True) -> None:
@@ -737,6 +757,7 @@ class MMContextEncoder(nn.Module):
                 registered_input_dim=self._registered_input_dim,
                 output_token_embeddings=self.output_token_embeddings,
                 train_lookup=self.train_lookup,
+                pooling_mode=self.pooling_mode,
             )
             # Load the filtered state dict into the temporary model
             temp_model.load_state_dict(state, strict=False)
@@ -886,10 +907,10 @@ class MMContextEncoder(nn.Module):
                     raise ValueError(
                         f"Vector dimension mismatch: expected {self._registered_input_dim}, got {vec_dim}."
                     )
-                else:
-                    # first registration – remember expected dim
-                    self._registered_input_dim = vec_dim
-                    self._init_or_preserve_adapters(vec_dim)
+            else:
+                # first registration – remember expected dim
+                self._registered_input_dim = vec_dim
+                self._init_or_preserve_adapters(vec_dim)
             if tok in self._omics_lookup:  # already present → skip
                 skipped.append(tok)
                 continue
@@ -1006,20 +1027,21 @@ class MMContextEncoder(nn.Module):
         download_dir: str | Path = "../../data/downloaded_chunks",
         extract_zip: bool = True,
         overwrite: bool = False,
+        link_column: str = "share_link",
     ) -> pd.DataFrame:
         """
         Download all embedding chunks referenced in *hf_dataset* and return in a format suitable for registration.
 
-        This assumes the dataset has a column named ``"share_link"`` in each split,
-        which contains the share links to the Nextcloud files. The function will
-        download the files, extract them, and return a DataFrame with the
-        embeddings.
+        This assumes the dataset has a column (specified by link_column) in each split,
+        which contains either share links to Nextcloud files or local file paths.
+        For URLs, the function will download and optionally extract the files.
+        For local paths, they are used directly without downloading.
 
         Parameters
         ----------
         hf_dataset
             A Hugging Face :pyclass:`~datasets.DatasetDict` that contains one or
-            more splits *and* a ``"share_link"`` column in each split.
+            more splits *and* a link/path column in each split.
         layer_key
             Name of the embedding to pull –
             * ``.obsm[layer_key]`` if *axis="obs"*
@@ -1028,14 +1050,17 @@ class MMContextEncoder(nn.Module):
             ``"obs"`` → use ``adata.obs.index``
             ``"var"`` → use ``adata.var.index``.
         download_dir
-            Local root folder where the chunk files (ZIPs or extracted stores)
-            will be materialised.
+            Local root folder where downloaded chunk files (ZIPs or extracted stores)
+            will be materialized. Ignored for local paths.
         extract_zip
             If *True* unpack Nextcloud ZIP downloads into ``chunk_<n>.zarr/``.
             If *False* keep the ZIP and let Zarr's *zip-store* backend read it
-            directly (requires Zarr ≥ 2.16).
+            directly (requires Zarr ≥ 2.16). Only applies to downloaded files.
         overwrite
             Re-download / re-extract even if the target already exists.
+            Only applies to downloaded files.
+        link_column
+            Column name that stores the share links or local paths.
 
         Returns
         -------
@@ -1052,7 +1077,7 @@ class MMContextEncoder(nn.Module):
         # --------------------------------------------------------------
         # 1) collect & download unique share links
         # --------------------------------------------------------------
-        links, _ = collect_unique_links(hf_dataset)
+        links, _ = collect_unique_links(hf_dataset, link_column=link_column)
         path_map = download_and_extract_links(
             links,
             target_dir=download_dir,
