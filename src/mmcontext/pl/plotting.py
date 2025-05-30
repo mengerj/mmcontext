@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import seaborn as sns
-import trimap
+
+# import trimap
 import umap
 from anndata import AnnData
 from matplotlib.patches import Patch
@@ -779,14 +780,14 @@ def visualize_embedding_clusters(
     # Initialize reducer
     if method.lower() == "umap":
         reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, metric=metric, random_state=random_state)
-    elif method.lower() == "trimap":
-        reducer = trimap.TRIMAP(
-            n_inliers=n_neighbors,  # approx. analogous to neighbors in UMAP
-            n_random=n_neighbors,
-            distance=metric,
-        )
+    #    elif method.lower() == "trimap":
+    #        reducer = trimap.TRIMAP(
+    #            n_inliers=n_neighbors,  # approx. analogous to neighbors in UMAP#
+    #            n_random=n_neighbors,
+    #            distance=metric,
+    #        )
     else:
-        raise ValueError("Method must be 'umap' or 'trimap'.")
+        raise ValueError("Method must be 'umap'.")
 
     # Fit and transform
     logger.info(f"Applying {method.upper()} to subset of size={len(df_sub)} with metric={metric}...")
