@@ -3,7 +3,7 @@ models:
   #  - source: sentence-transformers/all-MiniLM-L6-v2
   #    text_only: true
 
-  - source: jo-mengr/mmcontext_cellxgene_35k_text_only_celltype #custom but on hf hub
+  - source: jo-mengr/mmcontext-cg_350k-natural_language_annotation-pubmedbert-2048-geneformer-sample_cs
     text_only: true
 #  - source: /Users/mengerj/repos/mmcontext/exploratory/notebooks/models/demo_sample_tokens/local_model
 #    text_only: false

@@ -6,13 +6,26 @@ datasets:
     source: jo-mengr/human_pancreas_norm_complexBatch_single_no_caption # hub repo
     split: test
     format: hub # hub | hf_disk | csv
-    main_col: cell_sentence_2
+    main_col: cell_sentence_1
     index_col: sample_idx
-    layer_key: X_pca
+    layer_key: X_geneformer
     bio_label_list:
       - celltype
     batch_label_list:
       - tech
+
+  - name: cg_350k_val
+    source: jo-mengr/cellxgene_pseudo_bulk_350k_multiplets_natural_language_annotation
+    split: val
+    format: hub # hub | hf_disk | csv
+    main_col: cell_sentence_1
+    index_col: sample_idx
+    layer_key: X_geneformer
+    bio_label_list:
+      - cell_type
+    batch_label_list:
+      - dataset_title
+      - assay
 #  - name: pancreas_local
 #    source: /Users/mengerj/repos/adata_hf_datasets/data/hf_datasets/human_pancreas_norm_complexBatch            # local dir with arrow files
 #    split: test
