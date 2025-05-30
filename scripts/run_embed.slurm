@@ -1,10 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=eval_mmcontext
-#SBATCH --output=eval_mmcontext.out
-#SBATCH --error=eval_mmcontext.err
-#SBATCH --time=24:00:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=64G
+#SBATCH --job-name=embed
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1            # Request amount of GPUs
+#SBATCH --mem=64G               # Request 64GB of host RAM, not GPU VRAM!
+#SBATCH --time=01:00:00         # Max job time of 1 hour
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0) Define a unified RUN_ID: real job ID under SLURM, or a timestamp locally
@@ -19,12 +18,12 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # 1) Prepare output directory and log redirects
 # ─────────────────────────────────────────────────────────────────────────────
-BASE_OUT="outputs/$(date +%Y-%m-%d)/evaluation/${RUN_ID}"
+BASE_OUT="outputs/$(date +%Y-%m-%d)/embeddings/${RUN_ID}"
 mkdir -p "$BASE_OUT"
 
 # Redirect logs to the output directory
-exec 1>"$BASE_OUT"/eval.out
-exec 2>"$BASE_OUT"/eval.err
+exec 1>"$BASE_OUT"/embed.out
+exec 2>"$BASE_OUT"/embed.err
 
 ###
 # 2. Set default overrides:
@@ -34,14 +33,14 @@ exec 2>"$BASE_OUT"/eval.err
 ###
 # 3. Activate environment
 ###
-echo "Starting evaluation job with RUN_ID: $RUN_ID"
+echo "Starting embedding job with RUN_ID: $RUN_ID"
 echo "Output directory: $BASE_OUT"
 source .venv/bin/activate
-echo "Virtual environment activated"
+echo "venv activated"
 
 ###
-# 4. Run your evaluation script with Hydra overrides
-###
+# 4. Run your training script with Hydra overrides
+##
 
-python scripts/eval.py \
+python3 scripts/embed.py \
     ++hydra.run.dir="$BASE_OUT"
