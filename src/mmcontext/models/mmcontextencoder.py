@@ -620,6 +620,8 @@ class MMContextEncoder(nn.Module):
 
             # Place in unified tensor
             L_txt = txt_tokens.size(1)
+            # Ensure dtype consistency for AMP compatibility
+            txt_tokens = txt_tokens.to(token_embeddings.dtype)
             token_embeddings[text_mask, :L_txt] = txt_tokens
             attention_mask[text_mask, :L_txt] = features["attention_mask"][text_mask]
 
@@ -648,6 +650,8 @@ class MMContextEncoder(nn.Module):
 
             # Place in unified tensor
             L_om = om_tokens.size(1)
+            # Ensure dtype consistency for AMP compatibility
+            om_tokens = om_tokens.to(token_embeddings.dtype)
             token_embeddings[omics_mask, :L_om] = om_tokens
             attention_mask[omics_mask, :L_om] = omics_attn_mask.long()
 
