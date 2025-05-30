@@ -137,9 +137,9 @@ def test_bimodal_omics_and_text_tokens(bimodal_encoder):
     # 4) Explicit numbers we expect for this particular batch:
     #    row-0 → 2   ("F1", "F2")
     #    row-1 → whatever the text tokenizer produced (e.g. 6-7 tokens)
-    #    row-2 → 2   ("S1" , "PAD -> adapter_layer")
+    #    row-2 → 1   ("S1" only, padding is correctly zeroed out)
     assert expected_n_tokens[0].item() == 2
-    assert expected_n_tokens[2].item() == 2
+    assert expected_n_tokens[2].item() == 1  # Fixed: S1 has only 1 token, not 2
     assert expected_n_tokens[1] >= 2  # caption has at least two tokens
 
 
@@ -710,7 +710,7 @@ def _single_text_feature():
 def test_text_token_embeddings_without_token_adapter(TextEncStub, TokStub):
     """If *output_token_embeddings* is *True* but *adapter_hidden_dim* is *None*,
     the encoder **must still** return per‑token vectors **without** requiring a
-    *text_token_adapter* layer – provided the text‑encoder’s hidden size is
+    *text_adapter* layer – provided the text‑encoder's hidden size is
     already equal to *encoder._output_dim*."""
 
     enc = MMContextEncoder(
@@ -720,8 +720,8 @@ def test_text_token_embeddings_without_token_adapter(TextEncStub, TokStub):
         output_token_embeddings=True,
     )
 
-    assert enc.text_token_adapter is None, (
-        "No *text_token_adapter* should be instantiated when *adapter_hidden_dim* "
+    assert enc.text_adapter is None, (
+        "No *text_adapter* should be instantiated when *adapter_hidden_dim* "
         "is None and *_output_dim* equals the hidden size."
     )
 
@@ -768,8 +768,8 @@ def test_bimodal_token_embeddings_without_token_adapter(TextEncStub, TokStub):
 
     enc.register_initial_embeddings(numeric_df, data_origin="pca")
 
-    # after registration dimensions match → omics_token_adapter *should not* exist
-    assert enc.text_token_adapter is None, "No *omics_token_adapter* should be built when adapter_hidden_dim is None"
+    # after registration dimensions match → omics_adapter *should not* exist
+    assert enc.text_adapter is None, "No *text_adapter* should be built when adapter_hidden_dim is None"
 
     # build a mixed batch (text + omics)
     prefixed = enc.processor.prefix + " " + "F1 F2"  # omics sample
@@ -785,7 +785,7 @@ def test_bimodal_token_embeddings_without_token_adapter(TextEncStub, TokStub):
 
 def test_bimodal_token_embeddings_omics_different_dim():
     """When the text encoder and omics matrix have different dimensions,
-    the *omics_token_adapter* should be instantiated to project to the
+    the *omics_adapter* should be instantiated to project to the
     text encoder's hidden size."""
 
     # --- build 32‑dim numeric embedding matrix -------------------------
@@ -803,13 +803,9 @@ def test_bimodal_token_embeddings_omics_different_dim():
 
     enc.register_initial_embeddings(numeric_df, data_origin="pca")
 
-    # after registration dimensions match → omics_token_adapter *should not* exist
-    assert enc.omics_token_adapter is not None, (
-        "We should have an *omics_token_adapter* when adapter_output_dim is set."
-    )
-    assert enc.text_token_adapter is None, (
-        "No *text_token_adapter* should be built when output dim is same as text encoders hidden dim."
-    )
+    # after registration dimensions match → omics_adapter *should* exist
+    assert enc.omics_adapter is not None, "We should have an *omics_adapter* when adapter_output_dim is set."
+    assert enc.text_adapter is not None, "We should have a *text_adapter* when adapter_output_dim is set."
 
     # build a mixed batch (text + omics)
     prefixed = enc.processor.prefix + " " + "F1 F2"  # omics sample
@@ -825,7 +821,7 @@ def test_bimodal_token_embeddings_omics_different_dim():
 
 def test_bimodal_token_embeddings_text_different_dim():
     """When the text encoder and omics matrix have different dimensions,
-    the *omics_token_adapter* should be instantiated to project to the
+    the *omics_adapter* should be instantiated to project to the
     text encoder's hidden size."""
 
     # --- build 32‑dim numeric embedding matrix -------------------------
@@ -843,13 +839,11 @@ def test_bimodal_token_embeddings_text_different_dim():
 
     enc.register_initial_embeddings(numeric_df, data_origin="pca")
 
-    # after registration dimensions match → omics_token_adapter *should not* exist
-    assert enc.text_token_adapter is not None, (
-        "We should have an *text_token_adapter* when adapter_output_dim is differnt than text hidden dim."
+    # after registration dimensions match → adapters should exist
+    assert enc.text_adapter is not None, (
+        "We should have a *text_adapter* when adapter_output_dim is different than text hidden dim."
     )
-    assert enc.omics_token_adapter is None, (
-        "No *omics_token_adapter* should be built when output dim is same as text encoders hidden dim."
-    )
+    assert enc.omics_adapter is not None, "We should have an *omics_adapter* when adapter_output_dim is set."
 
     # build a mixed batch (text + omics)
     prefixed = enc.processor.prefix + " " + "F1 F2"  # omics sample
@@ -935,7 +929,7 @@ def test_identity_adapter_when_no_hidden_no_output(TextEncStub):
         adapter_hidden_dim=None,
         adapter_output_dim=None,
     )
-    assert isinstance(enc.text_adapter.net, torch.nn.modules.linear.Identity)
+    assert enc.text_adapter is None, "No *text_adapter* should be built when adapter_hidden_dim is None"
 
     feats = enc.tokenize(_single_text_feature())
     out = enc(feats)
@@ -1019,3 +1013,43 @@ def test_prepare_ds_pairs_and_multiplets(text_only_encoder):
         "negative0",
         "negative1",
     }
+
+
+def test_model_amp_dtype_compatibility(
+    text_only_encoder,
+    numeric_df,
+):
+    """Test model compatibility with Automatic Mixed Precision (AMP) like HuggingFace's fp16 training."""
+    # Create dataset
+    encoder = text_only_encoder
+    encoder.register_initial_embeddings(numeric_df, data_origin="scvi_fm")
+
+    # Move to float32 initially
+    encoder = encoder.to(torch.float32)
+    encoder.eval()
+
+    # Create test inputs
+    sample_idx = f"sample_idx:{numeric_df['token'][0]}"
+    features = encoder.tokenize([sample_idx, "This is a test"])
+
+    # Test without autocast first (should work)
+    out_dict = encoder(features)
+    assert out_dict["sentence_embedding"].dtype == torch.float32
+
+    # Test with autocast enabled - this should work after the fix
+    # This simulates what HuggingFace's fp16=True training argument does
+    with torch.autocast(device_type="cpu", dtype=torch.float16, enabled=True):
+        out_dict = encoder(features)
+        # The model should handle mixed precision correctly
+        assert out_dict["sentence_embedding"] is not None
+
+    # Test with different precision settings
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=True):
+        out_dict = encoder(features)
+        assert out_dict["sentence_embedding"] is not None
+
+    # Test return_tensor=True case
+    features["return_tensor"] = True
+    with torch.autocast(device_type="cpu", dtype=torch.float16, enabled=True):
+        out_tensor = encoder(features)
+        assert out_tensor is not None
