@@ -168,11 +168,35 @@ def main(cfg: DictConfig):
                 cell_sentences_cols = primary_cell_sentence
             elif dataset_config.type == "multiplets":
                 cell_sentences_cols = [primary_cell_sentence, "negative_2"]
-            dataset_name = f"{dataset_config.name}_{dataset_config.type}_{dataset_config.caption}"
+
+            # Construct dataset name with optional cs_len suffix
+            base_name = dataset_config.name
+
+            dataset_name = f"{base_name}_{dataset_config.type}_{dataset_config.caption}"
+            if hasattr(dataset_config, "cs_len") and dataset_config.cs_len is not None:
+                dataset_name = f"{dataset_name}_cs{dataset_config.cs_len}"
             logger.info(f"Loading dataset: {dataset_name}")
 
             # Load the dataset
             dataset = load_dataset(f"jo-mengr/{dataset_name}")
+            logger.info(f"Raw dataset loaded - Keys: {list(dataset.keys())}")
+
+            # Log dataset splits and sizes
+            for split_name, split_data in dataset.items():
+                logger.info(f"  {split_name} split: {len(split_data)} samples")
+                if len(split_data) > 0:
+                    logger.info(f"    Columns: {list(split_data.column_names)}")
+                    # Log first sample for debugging
+                    sample = split_data[0]
+                    logger.info(f"    First sample keys: {list(sample.keys())}")
+                    # Log sample content (truncated for readability)
+                    for key, value in sample.items():
+                        if isinstance(value, str):
+                            preview = value[:100] + "..." if len(value) > 100 else value
+                            logger.info(f"      {key}: {preview}")
+                        else:
+                            logger.info(f"      {key}: {type(value)} - {value}")
+
             if not cfg.text_only:
                 token_df, _ = enc.get_initial_embeddings(
                     dataset,
@@ -195,6 +219,23 @@ def main(cfg: DictConfig):
             dataset_ready = enc.prepare_ds(
                 dataset, cell_sentences_cols=cell_sentences_cols, prefix=not cfg.text_only
             )  # ,"negative_2"])
+
+            # Log prepared dataset info
+            logger.info(f"Dataset prepared - Keys: {list(dataset_ready.keys())}")
+            for split_name, split_data in dataset_ready.items():
+                logger.info(f"  Prepared {split_name} split: {len(split_data)} samples")
+                if len(split_data) > 0:
+                    logger.info(f"    Prepared columns: {list(split_data.column_names)}")
+                    # Log first prepared sample
+                    prepared_sample = split_data[0]
+                    logger.info(f"    First prepared sample keys: {list(prepared_sample.keys())}")
+                    for key, value in prepared_sample.items():
+                        if isinstance(value, str):
+                            preview = value[:100] + "..." if len(value) > 100 else value
+                            logger.info(f"      {key}: {preview}")
+                        else:
+                            logger.info(f"      {key}: {type(value)}")
+            logger.info(f"Finished processing dataset: {dataset_name}\n")
 
             # Add train split to train_datasets dictionary
             train_datasets[dataset_name] = dataset_ready["train"]

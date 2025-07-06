@@ -24,23 +24,25 @@ gene_based_cell_sentence: false # If true, use list of gene names as a represent
 
 # Modified dataset configuration to support multiple datasets
 datasets:
-  # - name: "cellxgene_pseudo_bulk_3_5k"
-  # type: "multiplets"
-  # caption: "natural_language_annotation"
-  - name: "cellxgene_pseudo_bulk_35k"
+  #- name: "cellxgene_pseudo_bulk_35k"
+  #  type: "pairs"
+  #  caption: "natural_language_annotation"
+  #  cs_len: null  # Set to a number like 50 to append _cs50 to dataset name
+  - name: "geo_70k"
     type: "multiplets"
     caption: "natural_language_annotation"
+    cs_len: 50 # Set to a number like 50 to append _cs50 to dataset name
   # Add more datasets as needed
 
-test_datasets:
-  - name: "jo-mengr/bowel_disease_pairs_cluster_label"
-    type: "pairs"
+#test_datasets:
+#  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"
+#    type: "single"
 # Add more test datasets as needed
 
 text_encoder:
   name: "NeuML/pubmedbert-base-embeddings"
   freeze_text_encoder: True
-  unfreeze_last_n_layers: 1
+  unfreeze_last_n_layers: 2
 
 #loss: "MultipleNegativesRankingLoss"
 #loss: "ContrastiveLoss"
@@ -52,14 +54,14 @@ adapter:
   output_dim: 2048
 
 trainer:
-  unfreeze_epoch: 1 #will unfreeze the whole text encoder
+  unfreeze_epoch: 2 #will unfreeze the whole text encoder
   output_dir: "../../models/trained"
   num_train_epochs: 1
   per_device_train_batch_size: 512
   per_device_eval_batch_size: 512
   learning_rate: 5e-2
   warmup_ratio: 0.1
-  fp16: false
+  fp16: true
   bf16: false
   eval_strategy: "steps"
   eval_steps: 100
