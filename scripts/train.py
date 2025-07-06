@@ -26,7 +26,7 @@ from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf
 logger = logging.getLogger(__name__)
 
 
-def generate_model_name(cfg: DictConfig, dataset_configs: list) -> str:
+def generate_model_name(cfg: DictConfig, dataset_configs: list, cs_len: int = None) -> str:
     """
     Generate a descriptive model name based on configuration.
 
@@ -36,6 +36,8 @@ def generate_model_name(cfg: DictConfig, dataset_configs: list) -> str:
         Configuration object containing model settings
     dataset_configs : list
         List of dataset configurations
+    cs_len : int, optional
+        Length of cell sentences when text_only is True
 
     Returns
     -------
@@ -81,6 +83,12 @@ def generate_model_name(cfg: DictConfig, dataset_configs: list) -> str:
     # Get embedding method or text_only
     if cfg.text_only:
         method_str = "text_only"
+        if cs_len is not None:
+            method_str = f"text_only_{cs_len}"
+        if not cfg.gene_based_cell_sentence:
+            raise ValueError(
+                "text_only is true, but gene_based_cell_sentence is false. This will lead to training a text model on sample ids, which is not what you want."
+            )
     else:
         method_str = cfg.embedding_method
 
@@ -153,6 +161,7 @@ def main(cfg: DictConfig):
         val_datasets = {}
         losses = {}
         evaluators = []
+        cs_len = None
 
         for dataset_config in cfg.datasets:
             if dataset_config.type == "pairs" or dataset_config.type == "single":
@@ -165,10 +174,23 @@ def main(cfg: DictConfig):
             # Load the dataset
             dataset = load_dataset(f"jo-mengr/{dataset_name}")
             if not cfg.text_only:
-                token_df = enc.get_initial_embeddings(
-                    dataset, layer_key=precomputed_key, download_dir="../../data/from_nxtcloud", axis=layer_axis
+                token_df, _ = enc.get_initial_embeddings(
+                    dataset,
+                    layer_key=precomputed_key,
+                    download_dir=f"../../data/from_nxtcloud/{dataset_name}",
+                    axis=layer_axis,
                 )
                 enc.register_initial_embeddings(token_df, data_origin=chosen_method)
+            else:
+                # Get the length of the cell sentences and validate consistency
+                current_cs_len = len(dataset["train"][0][primary_cell_sentence].split(" "))
+                if cs_len is None:
+                    cs_len = current_cs_len
+                    logger.info(f"Cell sentence length for text_only mode: {cs_len}")
+                elif cs_len != current_cs_len:
+                    raise ValueError(
+                        f"Inconsistent cell sentence lengths across datasets: {cs_len} vs {current_cs_len} for dataset {dataset_name}"
+                    )
             # Add the prefix expected by the model
             dataset_ready = enc.prepare_ds(
                 dataset, cell_sentences_cols=cell_sentences_cols, prefix=not cfg.text_only
@@ -198,9 +220,9 @@ def main(cfg: DictConfig):
         # -------------------------------------------------------------------------
         # 3. Load test datasets
         # -------------------------------------------------------------------------
-        test_datasets = {}
-        for test_config in cfg.test_datasets:
-            test_datasets[test_config.name] = load_dataset(test_config.name)["test"]
+        # test_datasets = {}
+        # for test_config in cfg.test_datasets:
+        #    test_datasets[test_config.name] = load_dataset(test_config.name)["test"]
 
         # -------------------------------------------------------------------------
         # 4. Compute the correct embedding dimension based on method
@@ -225,7 +247,7 @@ def main(cfg: DictConfig):
             save_steps=cfg.trainer.save_steps,
             save_total_limit=cfg.trainer.save_total_limit,
             logging_steps=cfg.trainer.logging_steps,
-            run_name=generate_model_name(cfg, cfg.datasets),
+            run_name=generate_model_name(cfg, cfg.datasets, cs_len),
             dataloader_num_workers=cfg.trainer.dataloader_num_workers,
         )
 
@@ -247,7 +269,7 @@ def main(cfg: DictConfig):
         model_dir = Path(hydra_run_dir, "model")
         os.makedirs(model_dir, exist_ok=True)
         model.save(model_dir)
-        model.push_to_hub(f"jo-mengr/{generate_model_name(cfg, cfg.datasets)}")
+        model.push_to_hub(f"jo-mengr/{generate_model_name(cfg, cfg.datasets, cs_len)}")
     except Exception as e:
         logger.exception(e)
         raise e
