@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1            # Request amount of GPUs
 #SBATCH --mem=64G               # Request 64GB of host RAM, not GPU VRAM!
-#SBATCH --time=01:00:00         # Max job time of 1 hour
+#SBATCH --time=04:00:00         # Max job time of 4 hours
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0) Define a unified RUN_ID: real job ID under SLURM, or a timestamp locally
@@ -30,9 +30,9 @@ exec 2>"$BASE_OUT"/train.err
 #    These can be customized as needed
 ###
 EMBEDDING_METHOD="geneformer"
-TEXT_ONLY="false"
-GENE_BASED_CELL_SENTENCE="false"
-DATASET_NAME="cellxgene_pseudo_bulk_350k"
+TEXT_ONLY="true"
+GENE_BASED_CELL_SENTENCE="true"
+#DATASET_NAME="cellxgene_pseudo_bulk_3_5k"
 TRAINER_FP16="true"
 
 ###
@@ -51,13 +51,14 @@ echo "Running training script with parameters:"
 echo "  embedding_method: $EMBEDDING_METHOD"
 echo "  text_only: $TEXT_ONLY"
 echo "  gene_based_cell_sentence: $GENE_BASED_CELL_SENTENCE"
-echo "  dataset: $DATASET_NAME"
+#echo "  dataset: $DATASET_NAME"
 echo "  trainer.fp16: $TRAINER_FP16"
 
 python3 scripts/train.py \
     ++embedding_method="$EMBEDDING_METHOD" \
     ++text_only="$TEXT_ONLY" \
     ++gene_based_cell_sentence="$GENE_BASED_CELL_SENTENCE" \
-    ++datasets="[{name: $DATASET_NAME, type: multiplets, caption: natural_language_annotation}]" \
     ++trainer.fp16="$TRAINER_FP16" \
     ++hydra.run.dir="$BASE_OUT"
+
+#    ++datasets="[{name: $DATASET_NAME, type: multiplets, caption: natural_language_annotation}]" \
