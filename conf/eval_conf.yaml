@@ -4,8 +4,14 @@ defaults:
   - model_list
 
 eval:
-  suite: ["ARI", "LabelSimilarity"] # names in the registry
+  suite: ["LabelSimilarity", "scib", "UmapPlotter"] # names in the registry
   kmeans_k: 30 # will be forwarded via **kw
+
+  # UmapPlotter specific settings
+  save_format: "png" # Format for UMAP plots: "pdf", "png", "svg", etc.
+  figsize: [8, 8] # Figure size for UMAP plots
+  dpi: 300 # DPI for saved plots
+  point_size: null # Size of points in UMAP (null uses scanpy default)
 
 output:
   root: ${hydra:runtime.cwd}/out/embeddings

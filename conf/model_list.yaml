@@ -1,9 +1,14 @@
 defaults: []
 models:
-  #  - source: sentence-transformers/all-MiniLM-L6-v2
-  #    text_only: true
-
-  - source: jo-mengr/mmcontext-cg_350k-natural_language_annotation-pubmedbert-2048-geneformer-sample_cs
+  - source: NeuML/pubmedbert-base-embeddings
     text_only: true
+  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-geneformer-sample_cs
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-geneformer-sample_cs
+    text_only: false
+    layer_key: X_geneformer
+  # - source: jo-mengr/mmcontext-cg_3_5k-geo_7k-natural_language_annotation-pubmedbert-2048-text_only_50-feat_cs
+  #   text_only: true
 #  - source: /Users/mengerj/repos/mmcontext/exploratory/notebooks/models/demo_sample_tokens/local_model
 #    text_only: false
