@@ -39,11 +39,14 @@ def embed_pipeline(cfg) -> None:
             model_id = model_cfg.source
             text_only = model_cfg.get("text_only", False)
             st_model = load_st_model(model_id)
-
-            emb_df = prepare_model_and_embed(
+            if text_only:
+                main_col = "cell_sentence_2"
+            else:
+                main_col = "cell_sentence_1"
+            emb_df, path_map = prepare_model_and_embed(
                 st_model,
                 data=raw_ds,
-                main_col=ds_cfg.main_col,
+                main_col=main_col,
                 index_col=ds_cfg.index_col,
                 batch_size=cfg.run.batch_size,
                 num_workers=cfg.run.num_workers,
@@ -56,10 +59,26 @@ def embed_pipeline(cfg) -> None:
             if text_only:
                 model_id = model_id + "_text_only"
             if numeric_data_available:
-                adata_subset = collect_adata_subset(
-                    download_dir=adata_download_dir,
-                    sample_ids=emb_df["sample_idx"].tolist(),
-                )
+                # get sample_ids but without "sample_idx: prefix"
+                if "sample_idx:" in emb_df["sample_idx"][0]:
+                    sample_ids = [sid.split(":")[1] for sid in emb_df["sample_idx"].tolist()]
+                elif "sample_idx" in emb_df.columns:
+                    sample_ids = emb_df["sample_idx"].tolist()
+                else:
+                    raise ValueError(f"sample_idx column not found in emb_df: {emb_df.columns}")
+
+                # Use path mapping if available (for local datasets), otherwise fall back to download_dir
+                if path_map is not None:
+                    file_paths = list(path_map.values())
+                    adata_subset = collect_adata_subset(
+                        sample_ids=sample_ids,
+                        file_paths=file_paths,
+                    )
+                else:
+                    adata_subset = collect_adata_subset(
+                        download_dir=adata_download_dir,
+                        sample_ids=sample_ids,
+                    )
             else:
                 adata_subset = None
             out_dir = (

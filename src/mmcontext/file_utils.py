@@ -413,11 +413,20 @@ def download_and_extract_links(
 
     def _is_local_path(link: str) -> bool:
         """Check if a link is a local file path rather than a URL."""
-        # Check if it's a valid local path that exists
+        # Check if it's a URL scheme
+        if link.startswith(("http://", "https://", "ftp://", "ftps://")):
+            return False
+
+        # Check if it looks like a local path (absolute or relative)
         try:
             path = Path(link)
+            # If it's an absolute path or relative path, consider it local
+            # We don't require it to exist yet, as it might be created during processing
+            if path.is_absolute() or "/" in link or "\\" in link or "." in link:
+                return True
             return path.exists() and (path.is_file() or path.is_dir())
         except (OSError, ValueError):
+            # If path parsing fails, assume it's not a local path
             return False
 
     for idx, link in enumerate(tqdm(links, desc="Processing", unit="file")):

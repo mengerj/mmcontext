@@ -164,11 +164,6 @@ def main(cfg: DictConfig):
         cs_len = None
 
         for dataset_config in cfg.datasets:
-            if dataset_config.type == "pairs" or dataset_config.type == "single":
-                cell_sentences_cols = primary_cell_sentence
-            elif dataset_config.type == "multiplets":
-                cell_sentences_cols = [primary_cell_sentence, "negative_2"]
-
             # Construct dataset name with optional cs_len suffix
             base_name = dataset_config.name
 
@@ -217,7 +212,7 @@ def main(cfg: DictConfig):
                     )
             # Add the prefix expected by the model
             dataset_ready = enc.prepare_ds(
-                dataset, cell_sentences_cols=cell_sentences_cols, prefix=not cfg.text_only
+                dataset, primary_cell_sentence_col=primary_cell_sentence, prefix=not cfg.text_only
             )  # ,"negative_2"])
 
             # Log prepared dataset info

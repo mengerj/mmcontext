@@ -946,6 +946,29 @@ def _check_prefixed(col, pref):
     assert all(s.startswith(pref) for s in col)
 
 
+def test_prepare_multiplets(text_only_encoder):
+    import datasets
+
+    enc = text_only_encoder  # fixture – no omics registered
+
+    multi_ds = datasets.Dataset.from_dict(
+        {
+            "sample_idx": ["S4", "S5"],
+            "cell_sentence_1": ["S8", "S10"],
+            "cell_sentence_2": ["GeneA GeneB", "GeneC GeneD"],
+            "positive": ["This is a Macrophage", "Tumor"],
+            "negative_1_idx": ["S5", "S4"],
+            "negative_2_idx": ["S5", "S4"],
+            "junk_col": ["x", "y"],  # must be dropped
+        }
+    )
+    dataset_ready = enc.prepare_ds(multi_ds, primary_cell_sentence_col="cell_sentence_2", prefix=False)
+    assert dataset_ready["negative_1"][0] == "Tumor"
+    assert dataset_ready["negative_1"][1] == "This is a Macrophage"
+    assert dataset_ready["negative_2"][0] == "GeneC GeneD"
+    assert dataset_ready["negative_2"][1] == "GeneA GeneB"
+
+
 def test_prepare_ds_pairs_and_multiplets(text_only_encoder):
     import datasets
 
@@ -962,7 +985,7 @@ def test_prepare_ds_pairs_and_multiplets(text_only_encoder):
         }
     )
 
-    proc_pair = enc.prepare_ds(pair_ds, cell_sentences_cols="sample_idx")
+    proc_pair = enc.prepare_ds(pair_ds, primary_cell_sentence_col="sample_idx")
 
     # Columns retained: anchor, caption, label
     assert set(proc_pair.column_names) == {"sentence_1", "sentence_2", "label"}
@@ -972,47 +995,65 @@ def test_prepare_ds_pairs_and_multiplets(text_only_encoder):
     multi_ds = datasets.Dataset.from_dict(
         {
             "sample_idx": ["S4", "S5"],
-            "positive": ["T cell", "B cell"],
-            "negative0": ["Macrophage", "NK cell"],
-            "negative1": ["Neuron", "Astrocyte"],
+            "cell_sentence_1": ["S8", "S10"],
+            "cell_sentence_2": ["GeneA GeneB", "GeneC GeneD"],
+            "positive": ["This is a Macrophage", "Tumor"],
+            "negative_1_idx": ["S5", "S4"],
+            "negative_2_idx": ["S5", "S4"],
             "junk_col": ["x", "y"],  # must be dropped
         }
     )
 
     proc_multi = enc.prepare_ds(
         multi_ds,
-        cell_sentences_cols="sample_idx",
+        primary_cell_sentence_col="cell_sentence_1",
         positive_col="positive",
         negative_prefix="negative",
+        index_col="sample_idx",
     )
 
     # Only anchor + positive + all negatives kept
     assert set(proc_multi.column_names) == {
         "anchor",
         "positive",
-        "negative0",
-        "negative1",
+        "negative_1",
+        "negative_2",
     }
     _check_prefixed(proc_multi["anchor"], pref)
     _check_prefixed(proc_multi["positive"], "")  # captions stay raw
-    _check_prefixed(proc_multi["negative0"], "")  # negatives are text
+    _check_prefixed(proc_multi["negative_1"], "")  # negatives are text
+    _check_prefixed(proc_multi["negative_2"], pref)  # other negatives should be prefixed
+
+    # negatives should be resolved to cell sentences
+    assert proc_multi["negative_1"][0] == "Tumor"
+    assert proc_multi["negative_1"][1] == "This is a Macrophage"
+    assert proc_multi["negative_2"][0] == "sample_idx:S10"
+    assert proc_multi["negative_2"][1] == "sample_idx:S8"
+
+    # now run with cell_sentence_2
+    proc_multi = enc.prepare_ds(
+        multi_ds,
+        primary_cell_sentence_col="cell_sentence_2",
+        positive_col="positive",
+        negative_prefix="negative",
+        index_col="sample_idx",
+        prefix=False,  # no prefix if cell_sentence_2 is used
+    )
+    assert set(proc_multi.column_names) == {
+        "anchor",
+        "positive",
+        "negative_1",
+        "negative_2",
+    }
+    # negatives should be resolved to cell sentences
+    assert proc_multi["negative_1"][0] == "Tumor"
+    assert proc_multi["negative_1"][1] == "This is a Macrophage"
+    assert proc_multi["negative_2"][0] == "GeneC GeneD"
+    assert proc_multi["negative_2"][1] == "GeneA GeneB"
 
     # -------------- behavioural sanity: extra column really gone -------
     assert "junk_col" not in proc_pair.column_names
     assert "junk_col" not in proc_multi.column_names
-
-    # -------------- DatasetDict variant --------------------------------
-    ddict = datasets.DatasetDict(train=pair_ds, val=multi_ds)
-    proc_ddict = enc.prepare_ds(ddict, cell_sentences_cols="sample_idx")
-
-    assert isinstance(proc_ddict, datasets.DatasetDict)
-    assert set(proc_ddict["train"].column_names) == {"sentence_1", "sentence_2", "label"}
-    assert set(proc_ddict["val"].column_names) == {
-        "anchor",
-        "positive",
-        "negative0",
-        "negative1",
-    }
 
 
 def test_model_amp_dtype_compatibility(

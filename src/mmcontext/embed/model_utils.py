@@ -91,7 +91,7 @@ def prepare_model_and_embed(
     pin_memory: bool = torch.cuda.is_available(),
     axis: Literal["var", "obs"] = "obs",
     text_only: bool = False,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, Path] | None]:
     """
     Create embeddings using a Sentence-Transformer model, with some model-specific preparation.
 
@@ -127,8 +127,10 @@ def prepare_model_and_embed(
 
     Returns
     -------
-    DataFrame
-        Columns ``[index_col, "embedding"]`` where *embedding* is a list[float].
+    tuple[DataFrame, dict[str, Path] | None]
+        A tuple containing:
+        - DataFrame with columns ``[index_col, "embedding"]`` where *embedding* is a list[float].
+        - Path mapping from original links to actual file locations (None if no numeric data)
 
     Notes
     -----
@@ -145,10 +147,13 @@ def prepare_model_and_embed(
     has_numeric = (
         "share_link" in data.column_names
     )  # otherwise we cannot download the initial embeddings and register them with the model
+    path_map = None
     if data is not None and has_numeric:
         # If the dataset is available, download get the token_df, even if the models doesnt use it. Just so the data is downloaded and the adata subset can be created downstream
         logger.info("Extracting numeric intital embeddings from dataset via it's share_links …")
-        token_df = MMEnc.get_initial_embeddings(data, layer_key=layer_key, axis=axis, download_dir=adata_download_dir)  # type: ignore[arg-type]
+        token_df, path_map = MMEnc.get_initial_embeddings(
+            data, layer_key=layer_key, axis=axis, download_dir=adata_download_dir
+        )  # type: ignore[arg-type]
     else:
         logger.info("""While the model supports initial embeddings, the dataset does not provide them.
                     Therefore cell sentences will be analysed as texts.""")
@@ -165,6 +170,9 @@ def prepare_model_and_embed(
         )  # type: ignore[arg-type]
     else:
         ds = data
+    # If using a multiplets dataset, the column with the data representation is called "anchor". For the embedding workflow, only this data is embedded.
+    if "anchor" in ds.column_names:
+        main_col = "anchor"
     ###########################################################
     # --- sentence embeddings via encode() --------------------
     ###########################################################
@@ -206,7 +214,7 @@ def prepare_model_and_embed(
     # Create DataFrame using from_dict to avoid deprecation warning
     emb_df = pd.DataFrame.from_dict({"sample_idx": all_indices, "embedding": all_embeddings})
     logger.info("Generated %d embeddings", len(emb_df))
-    return emb_df
+    return emb_df, path_map
 
 
 def create_label_dataset(adata, label_col: str) -> HFDataset:
@@ -273,7 +281,7 @@ def embed_labels(
     label_ds = create_label_dataset(adata, label_col)
 
     # Use prepare_model_and_embed with text_only=True since we're just embedding text labels
-    emb_df = prepare_model_and_embed(
+    emb_df, _ = prepare_model_and_embed(
         st_model,
         data=label_ds,
         main_col="label",
