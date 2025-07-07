@@ -15,6 +15,7 @@ from sklearn.metrics import auc, roc_curve
 
 from .base import BaseEvaluator, EvalResult
 from .registry import register
+from .utils import LabelKind
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ class LabelSimilarity(BaseEvaluator):
         emb2: np.ndarray,
         labels: np.ndarray | list | pd.Series,
         label_key: str,
+        label_kind: LabelKind,
         **kw,
     ) -> EvalResult:
         """Compute similarity scores and ROC metrics for each unique label."""
@@ -104,8 +106,10 @@ class LabelSimilarity(BaseEvaluator):
             prefix = f"{v}"
             out[f"{prefix}/auc"] = float(roc_auc)
 
-        # Add mean AUC
+        # Add mean AUC and metadata
         out["mean_auc"] = float(np.mean(auc_scores))
+        out["label_kind"] = label_kind.value
+        out["n_labels"] = len(uniq)
         return EvalResult(**out)
 
     def plot(
@@ -116,6 +120,7 @@ class LabelSimilarity(BaseEvaluator):
         emb2: np.ndarray,
         labels: np.ndarray | list | pd.Series,
         label_key: str,
+        label_kind: LabelKind,
         **kw,
     ) -> None:
         """
@@ -163,7 +168,7 @@ class LabelSimilarity(BaseEvaluator):
             plt.ylim([0.0, 1.05])
             plt.xlabel("False Positive Rate")
             plt.ylabel("True Positive Rate")
-            plt.title(v)
+            plt.title(f"{v} ({label_kind.value})")
             plt.legend(loc="lower right")
             plt.tight_layout()
             plt.savefig(roc_dir / f"{safe_v}.png", dpi=300)
@@ -175,7 +180,7 @@ class LabelSimilarity(BaseEvaluator):
                 umap_emb[:, 0], umap_emb[:, 1], c=sim, cmap="RdBu_r", vmin=-1, vmax=1, s=10, alpha=0.6
             )
             plt.colorbar(scatter, label="Similarity Score")
-            plt.title(str(v))
+            plt.title(f"{v} ({label_kind.value})")
             plt.tight_layout()
             plt.savefig(umap_dir / f"{safe_v}.png", dpi=300)
             plt.close()
@@ -188,7 +193,7 @@ class LabelSimilarity(BaseEvaluator):
             plt.ylabel("density")
             plt.xlim(-1, 1)
             plt.legend(frameon=False, fontsize=12)
-            plt.title(str(v))
+            plt.title(f"{v} ({label_kind.value})")
             plt.tight_layout()
             plt.savefig(hist_dir / f"{safe_v}.png", dpi=300)
             plt.close()
@@ -206,7 +211,7 @@ class LabelSimilarity(BaseEvaluator):
         plt.title("Mean ROC Curve")
         plt.legend(loc="lower right")
         plt.tight_layout()
-        plt.savefig(roc_dir / "mean_roc.png", dpi=300)
+        plt.savefig(roc_dir / "00_mean_roc.png", dpi=300)
         plt.close()
 
     @staticmethod
