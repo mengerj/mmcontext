@@ -31,15 +31,59 @@ def run_eval_suite(cfg) -> None:
         ]
         for model_cfg in cfg.models:
             rows = []
+            scib_rows = []  # Separate storage for scIB results
             model_id = model_cfg.source
             text_only = model_cfg.get("text_only", False)
             if text_only:
                 model_id = model_id + "_text_only"
             emb_dir = Path(cfg.output.root) / ds_cfg.name / Path(model_id).name.replace("/", "_")
+
             # ── load shared artefacts *once* per model ───────────────────────
             emb_df = pd.read_parquet(emb_dir / "embeddings.parquet")
             E1 = np.vstack(emb_df["embedding"].to_numpy())
             adata = ad.read_zarr(emb_dir / "subset.zarr")
+
+            # ──── Run ScibBundle separately if in suite ──────────────────────
+            if "scib" in cfg.eval.suite:
+                print(f"Running ScibBundle for {ds_cfg.name}/{model_id}")
+                try:
+                    ScibClass = get_evaluator("scib")
+                    scib_evaluator = ScibClass()
+
+                    scib_results = scib_evaluator.compute_dataset_model(
+                        emb1=E1,
+                        adata=adata,
+                        dataset_name=ds_cfg.name,
+                        model_id=model_id,
+                        bio_labels=ds_cfg.bio_label_list,
+                        batch_labels=ds_cfg.batch_label_list,
+                        **cfg.eval,
+                    )
+
+                    scib_rows.extend(scib_results)
+                    print(f"✓ ScibBundle completed for {ds_cfg.name}/{model_id}")
+
+                except Exception as e:
+                    print(f"✗ ScibBundle failed for {ds_cfg.name}/{model_id}: {e}")
+                    # Add error entry
+                    scib_rows.append(
+                        {
+                            "dataset": ds_cfg.name,
+                            "model": model_id,
+                            "bio_label": "unknown",
+                            "batch_label": "unknown",
+                            "metric": "scib/error",
+                            "value": str(e),
+                            "data_id": "",
+                            "hvg": "",
+                            "type": "",
+                        }
+                    )
+
+            # ──── Run regular evaluators (excluding scib) ────────────────────
+            # Filter out scib from regular evaluators
+            regular_evaluators = [ev_name for ev_name in cfg.eval.suite if ev_name != "scib"]
+
             # try to load label embeddings only once
             label_emb_cache = {}  # (kind, name) → ndarray | None
             # ------------- ITERATE over labels AND evaluators --------------
@@ -56,7 +100,8 @@ def run_eval_suite(cfg) -> None:
                     else:
                         label_emb_cache[(label_spec.kind, label_spec.name)] = None
                 E2 = label_emb_cache[(label_spec.kind, label_spec.name)]
-                for ev_name in cfg.eval.suite:
+
+                for ev_name in regular_evaluators:
                     EvClass = get_evaluator(ev_name)
                     ev = EvClass()
 
@@ -103,6 +148,14 @@ def run_eval_suite(cfg) -> None:
                             **cfg.eval,  # forward any extra Hydra knobs
                         )
 
-            # ---------- write one metrics.parquet per (ds,model) -------
-            out_df = pd.DataFrame(rows)
-            save_table(out_df, emb_dir / "eval/metrics", fmt="csv")
+            # ──── Save results ────────────────────────────────────────────────
+            # Save regular evaluator results
+            if rows:
+                out_df = pd.DataFrame(rows)
+                save_table(out_df, emb_dir / "eval/metrics", fmt="csv")
+
+            # Save ScibBundle results separately
+            if scib_rows:
+                scib_df = pd.DataFrame(scib_rows)
+                save_table(scib_df, emb_dir / "eval/scib_metrics", fmt="csv")
+                print(f"✓ ScibBundle results saved to {emb_dir / 'eval/scib_metrics.csv'}")

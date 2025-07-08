@@ -1026,7 +1026,7 @@ class MMContextEncoder(nn.Module):
     def get_initial_embeddings(
         hf_dataset: DatasetDict | HFDataset,
         *,
-        layer_key: str,
+        layer_key: str | None = None,
         axis: Literal["obs", "var"] = "obs",
         download_dir: str | Path = "../../data/downloaded_chunks",
         extract_zip: bool = True,
@@ -1085,6 +1085,10 @@ class MMContextEncoder(nn.Module):
             extract=extract_zip,
             overwrite=overwrite,
         )
+        # if the layer key is none, this means that only the download step was needed. The model will be used as text only without initial embeddings.
+        if layer_key is None:
+            logger.info("No layer key provided, get_initial_embeddings() is returning empty DataFrame and path map.")
+            return None, path_map
 
         # --------------------------------------------------------------
         # 2) build per-split DataFrames, then concat
@@ -1119,6 +1123,7 @@ class MMContextEncoder(nn.Module):
         label_col: str = "label",
         negative_prefix: str = "negative",
         index_col: str = "sample_idx",
+        keep_index_col: bool = False,
     ) -> HFDataset | DatasetDict:
         """Return a copy ready for SentenceTransformerTrainer.
 
@@ -1143,6 +1148,8 @@ class MMContextEncoder(nn.Module):
             Prefix for negative columns in multiplets
         index_col : str, optional
             Name of the index column for HFDataset. Only if index_col is provided, it will be left in the output.
+        keep_index_col : bool, optional
+            Whether to keep the index column in the output. Defaults to False. Is needed for the embedding workflow.
 
         Returns
         -------
@@ -1237,8 +1244,8 @@ class MMContextEncoder(nn.Module):
             else:  # single – keep only the main column
                 keep_cols = [primary_cell_sentence_col]
 
-            # if index_col:
-            #    keep_cols.append(index_col)
+            if keep_index_col:
+                keep_cols.append(index_col)
 
             # sanity checks --------------------------------------------------
             if primary_cell_sentence_col not in split.column_names:

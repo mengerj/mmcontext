@@ -50,7 +50,7 @@ def embed_pipeline(cfg) -> None:
                 index_col=ds_cfg.index_col,
                 batch_size=cfg.run.batch_size,
                 num_workers=cfg.run.num_workers,
-                layer_key=ds_cfg.layer_key,
+                layer_key=getattr(model_cfg, "layer_key", None),  # For text only models, layer_key is not needed.
                 text_only=text_only,
                 adata_download_dir=adata_download_dir,
             )

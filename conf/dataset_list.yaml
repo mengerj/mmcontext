@@ -3,22 +3,19 @@ defaults: []
 
 datasets:
   - name: pancreas_hub
-    source: jo-mengr/human_pancreas_norm_complexBatch_single_no_caption # hub repo
+    source: jo-mengr/human_pancreas_single_no_caption # hub repo
     split: test
     format: hub # hub | hf_disk | csv
-    main_col: cell_sentence_1
     index_col: sample_idx
     layer_key: X_geneformer
     bio_label_list:
       - celltype
     batch_label_list:
       - tech
-
-  - name: cg_350k_val
-    source: jo-mengr/cellxgene_pseudo_bulk_350k_multiplets_natural_language_annotation
+  - name: cg_35k_val
+    source: jo-mengr/cellxgene_pseudo_bulk_35k_multiplets_natural_language_annotation_local
     split: val
     format: hub # hub | hf_disk | csv
-    main_col: cell_sentence_1
     index_col: sample_idx
     layer_key: X_geneformer
     bio_label_list:
@@ -26,17 +23,27 @@ datasets:
     batch_label_list:
       - dataset_title
       - assay
-#  - name: pancreas_local
-#    source: /Users/mengerj/repos/adata_hf_datasets/data/hf_datasets/human_pancreas_norm_complexBatch            # local dir with arrow files
-#    split: test
-#    format: hf_disk
-#    main_col: cell_sentence_1
-#    index_col: sample_idx
-#   layer_key: X_pca
-#    bio_label_list:
-#      - celltype
-#    batch_label_list:
-#      - tech
+  - name: human_disease_single_no_caption_cs50
+    source: jo-mengr/human_disease_single_no_caption_cs50
+    split: test
+    format: hub
+    index_col: sample_idx
+    layer_key: X_geneformer
+    bio_label_list:
+      - Disease
+    batch_label_list:
+      - "sra_study_acc"
+  # - name: tabula_sapiens_bone_marrow_single_no_caption
+  #   source: jo-mengr/tabula_sapiens_bone_marrow_single_no_caption          # local dir with arrow files
+  #   split: test
+  #   format: hub
+  #   main_col: cell_sentence_1
+  #   index_col: sample_idx
+  #   layer_key: X_geneformer
+  #   bio_label_list:
+  #     - cell_type
+  #   batch_label_list:
+#      - _scvi_batch
 
 #  - name: lamanno_csv
 #    source: /Users/mengerj/repos/mmcontext/data/maria/test_scrna.csv        # local csv

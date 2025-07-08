@@ -166,7 +166,12 @@ def prepare_model_and_embed(
     if hasattr(impl, "prepare_ds"):
         logger.info("Calling prepare_ds on model-specific module …")
         ds = impl.prepare_ds(
-            ds=data, cell_sentences_cols=[main_col], caption_col=caption_col, prefix=not text_only, index_col=index_col
+            ds=data,
+            primary_cell_sentence_col=main_col,
+            caption_col=caption_col,
+            prefix=not text_only,
+            index_col=index_col,
+            keep_index_col=True,
         )  # type: ignore[arg-type]
     else:
         ds = data
