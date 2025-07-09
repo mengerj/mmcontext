@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=embed
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:1            # Request amount of GPUs
+#SBATCH --partition=slurm
 #SBATCH --mem=64G               # Request 64GB of host RAM, not GPU VRAM!
 #SBATCH --time=01:00:00         # Max job time of 1 hour
 
