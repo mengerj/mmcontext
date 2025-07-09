@@ -207,8 +207,11 @@ class LabelSimilarity(BaseEvaluator):
         Generate plots for each unique label
 
         Plots:
-        - ROC curves
-        - UMAP visualizations
+        - ROC curves (individual and mean)
+        - UMAP visualizations:
+          * True labels coloring
+          * Predicted labels coloring
+          * Per-label similarity score coloring
         - Similarity score histograms
         """
         labels = np.asarray(labels)
@@ -224,6 +227,87 @@ class LabelSimilarity(BaseEvaluator):
 
         for d in [roc_dir, umap_dir, hist_dir]:
             d.mkdir(parents=True, exist_ok=True)
+
+        # Compute predicted labels for the additional UMAP plots
+        similarity_matrix = np.zeros((len(emb1), len(uniq)))
+        for i, v in enumerate(uniq):
+            mask = labels == v
+            label_vec = emb2[mask][0]
+            similarity_matrix[:, i] = self._pair_sim(emb1, label_vec)
+
+        predicted_indices = np.argmax(similarity_matrix, axis=1)
+        predicted_labels = uniq[predicted_indices]
+
+        # Plot UMAP colored by true labels
+        plt.figure(figsize=(8, 6))
+        # Use seaborn/scanpy style colors instead of Set3
+        unique_labels = np.unique(labels)
+        colors = sns.color_palette("husl", len(unique_labels))
+        color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
+        point_colors = [color_map[label] for label in labels]
+
+        # Create plot without frame
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        scatter = plt.scatter(umap_emb[:, 0], umap_emb[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.title(f"UMAP - True Labels ({label_kind.value})", fontweight="bold")
+        plt.xticks([])
+        plt.yticks([])
+
+        # Create cleaner legend
+        legend_elements = [
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=color_map[label],
+                markersize=6,
+                label=str(label),
+                markeredgecolor="none",
+            )
+            for label in unique_labels
+        ]
+        plt.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=10, frameon=False)
+        plt.tight_layout()
+        plt.savefig(umap_dir / "true_labels.png", dpi=300, bbox_inches="tight")
+        plt.close()
+
+        # Plot UMAP colored by predicted labels
+        plt.figure(figsize=(8, 6))
+        pred_color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
+        pred_point_colors = [pred_color_map[label] for label in predicted_labels]
+
+        # Create plot without frame
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        scatter = plt.scatter(umap_emb[:, 0], umap_emb[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.title(f"UMAP - Predicted Labels ({label_kind.value})", fontweight="bold")
+        plt.xticks([])
+        plt.yticks([])
+
+        # Create cleaner legend
+        legend_elements = [
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=pred_color_map[label],
+                markersize=6,
+                label=str(label),
+                markeredgecolor="none",
+            )
+            for label in unique_labels
+        ]
+        plt.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=10, frameon=False)
+        plt.tight_layout()
+        plt.savefig(umap_dir / "predicted_labels.png", dpi=300, bbox_inches="tight")
+        plt.close()
 
         # Plot mean ROC curve
         plt.figure(figsize=(6, 6))
@@ -256,11 +340,18 @@ class LabelSimilarity(BaseEvaluator):
 
             # Plot UMAP
             plt.figure(figsize=(8, 6))
+            # Create plot without frame
+            ax = plt.gca()
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
             scatter = plt.scatter(
-                umap_emb[:, 0], umap_emb[:, 1], c=sim, cmap="RdBu_r", vmin=-1, vmax=1, s=10, alpha=0.6
+                umap_emb[:, 0], umap_emb[:, 1], c=sim, cmap="RdBu_r", vmin=-1, vmax=1, s=5, alpha=0.7, edgecolors="none"
             )
             plt.colorbar(scatter, label="Similarity Score")
-            plt.title(f"{v} ({label_kind.value})")
+            plt.title(f"{v} ({label_kind.value})", fontweight="bold")
+            plt.xticks([])
+            plt.yticks([])
             plt.tight_layout()
             plt.savefig(umap_dir / f"{safe_v}.png", dpi=300)
             plt.close()
