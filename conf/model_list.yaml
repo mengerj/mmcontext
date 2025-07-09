@@ -1,16 +1,38 @@
 defaults: []
 models:
-  - source: NeuML/pubmedbert-base-embeddings
-    text_only: true
+
+  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-pca-sample_cs
+    text_only: false
+    layer_key: X_pca
+  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-pca-sample_cs
+    text_only: false
+    layer_key: X_pca
+
+  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-hvg-sample_cs
+    text_only: false
+    layer_key: X_hvg
+  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-hvg-sample_cs
+    text_only: false
+    layer_key: X_hvg
+
   - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-geneformer-sample_cs
     text_only: false
     layer_key: X_geneformer
   - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-geneformer-sample_cs
     text_only: false
     layer_key: X_geneformer
+
+  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-scvi_fm-sample_cs
+    text_only: false
+    layer_key: X_scvi_fm
+  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-scvi_fm-sample_cs
+    text_only: false
+    layer_key: X_scvi_fm
+
+  - source: NeuML/pubmedbert-base-embeddings
+    text_only: true
+
   - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-None-text_only_50-feat_cs
     text_only: true
-  # - source: jo-mengr/mmcontext-cg_3_5k-geo_7k-natural_language_annotation-pubmedbert-2048-text_only_50-feat_cs
-  #   text_only: true
-#  - source: /Users/mengerj/repos/mmcontext/exploratory/notebooks/models/demo_sample_tokens/local_model
-#    text_only: false
+  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-None-text_only_50-feat_cs
+    text_only: true

@@ -43,8 +43,8 @@ DATASETS=(
 )
 
 # Adapter dimensions
-ADAPTER_HIDDEN_DIM="null"    # Can be "null" or a number like 1024
-ADAPTER_OUTPUT_DIM="2048"    # Usually 2048, 1024, etc.
+ADAPTER_HIDDEN_DIM="128"    # Can be "null" or a number like 1024
+ADAPTER_OUTPUT_DIM="64"    # Usually 2048, 1024, etc.
 
 # Learning rate and other trainer params
 LEARNING_RATE="2e-4"        # Changed from 0.05 to avoid NaN issues

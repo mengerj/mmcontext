@@ -2,22 +2,29 @@
 defaults: []
 
 datasets:
+  - name: tabula_sapiens_10k
+    source: jo-mengr/tabula_sapiens_10k_single_no_caption_cs50
+    split: test
+    format: hub
+    index_col: sample_idx
+    bio_label_list:
+      - cell_ontology_class
+    batch_label_list:
+      - donor
   - name: pancreas_hub
     source: jo-mengr/human_pancreas_single_no_caption # hub repo
     split: test
     format: hub # hub | hf_disk | csv
     index_col: sample_idx
-    layer_key: X_geneformer
     bio_label_list:
       - celltype
     batch_label_list:
       - tech
-  - name: cg_35k_val
-    source: jo-mengr/cellxgene_pseudo_bulk_35k_multiplets_natural_language_annotation_local
+  - name: cg_100k_val
+    source: jo-mengr/cellxgene_pseudo_bulk_100k_multiplets_natural_language_annotation_cs50
     split: val
     format: hub # hub | hf_disk | csv
     index_col: sample_idx
-    layer_key: X_geneformer
     bio_label_list:
       - cell_type
     batch_label_list:
@@ -28,26 +35,7 @@ datasets:
     split: test
     format: hub
     index_col: sample_idx
-    layer_key: X_geneformer
     bio_label_list:
       - Disease
     batch_label_list:
       - "sra_study_acc"
-  # - name: tabula_sapiens_bone_marrow_single_no_caption
-  #   source: jo-mengr/tabula_sapiens_bone_marrow_single_no_caption          # local dir with arrow files
-  #   split: test
-  #   format: hub
-  #   main_col: cell_sentence_1
-  #   index_col: sample_idx
-  #   layer_key: X_geneformer
-  #   bio_label_list:
-  #     - cell_type
-  #   batch_label_list:
-#      - _scvi_batch
-
-#  - name: lamanno_csv
-#    source: /Users/mengerj/repos/mmcontext/data/maria/test_scrna.csv        # local csv
-#    format: csv
-#    main_col: cell_sentence
-#    index_col: index
-#    layer_key: X_pca
