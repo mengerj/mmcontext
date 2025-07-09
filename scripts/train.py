@@ -5,6 +5,7 @@ from pathlib import Path
 
 import hydra
 from datasets import load_dataset
+from huggingface_hub import HfApi, HfFolder
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from sentence_transformers import (
@@ -24,6 +25,81 @@ from mmcontext.models.mmcontextencoder import MMContextEncoder
 from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf_dataset
 
 logger = logging.getLogger(__name__)
+
+
+def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
+    """
+    Check if a model already exists on Hugging Face Hub.
+
+    Parameters
+    ----------
+    model_name : str
+        Name of the model to check
+    username : str, optional
+        Username/organization on Hugging Face Hub (default: "jo-mengr")
+
+    Returns
+    -------
+    bool
+        True if the model exists, False otherwise
+    """
+    try:
+        api = HfApi()
+        full_model_name = f"{username}/{model_name}"
+        # Try to get model info - if it exists, this won't raise an error
+        api.model_info(full_model_name)
+        return True
+    except Exception:
+        # If any error occurs (404, auth, etc.), assume model doesn't exist
+        return False
+
+
+def generate_unique_model_name(
+    cfg: DictConfig, dataset_configs: list, cs_len: int = None, username: str = "jo-mengr"
+) -> str:
+    """
+    Generate a unique model name, appending version numbers if needed.
+
+    Parameters
+    ----------
+    cfg : DictConfig
+        Configuration object containing model settings
+    dataset_configs : list
+        List of dataset configurations
+    cs_len : int, optional
+        Length of cell sentences when text_only is True
+    username : str, optional
+        Username/organization on Hugging Face Hub (default: "jo-mengr")
+
+    Returns
+    -------
+    str
+        Unique model name that doesn't conflict with existing models
+    """
+    # Generate base model name
+    base_name = generate_model_name(cfg, dataset_configs, cs_len)
+
+    # Check if base name is available
+    if not check_model_exists(base_name, username):
+        logger.info(f"Model name '{base_name}' is available")
+        return base_name
+
+    # If base name exists, try with version numbers
+    version = 2
+    while True:
+        versioned_name = f"{base_name}-v{version}"
+        if not check_model_exists(versioned_name, username):
+            logger.info(f"Model name '{base_name}' exists, using '{versioned_name}' instead")
+            return versioned_name
+        version += 1
+
+        # Safety check to prevent infinite loop
+        if version > 10:
+            logger.warning(f"Reached version {version} for model {base_name}. Using timestamp suffix.")
+            import time
+
+            timestamp = int(time.time())
+            return f"{base_name}-{timestamp}"
 
 
 def generate_model_name(cfg: DictConfig, dataset_configs: list, cs_len: int = None) -> str:
@@ -268,6 +344,10 @@ def main(cfg: DictConfig):
         # 6. Set up training arguments
         # -------------------------------------------------------------------------
 
+        # Generate unique model name to avoid conflicts
+        unique_model_name = generate_unique_model_name(cfg, cfg.datasets, cs_len)
+        logger.info(f"Using model name: {unique_model_name}")
+
         args = SentenceTransformerTrainingArguments(
             output_dir=hydra_run_dir,
             num_train_epochs=cfg.trainer.num_train_epochs,
@@ -283,7 +363,7 @@ def main(cfg: DictConfig):
             save_steps=cfg.trainer.save_steps,
             save_total_limit=cfg.trainer.save_total_limit,
             logging_steps=cfg.trainer.logging_steps,
-            run_name=generate_model_name(cfg, cfg.datasets, cs_len),
+            run_name=unique_model_name,
             dataloader_num_workers=cfg.trainer.dataloader_num_workers,
         )
 
@@ -305,7 +385,7 @@ def main(cfg: DictConfig):
         model_dir = Path(hydra_run_dir, "model")
         os.makedirs(model_dir, exist_ok=True)
         model.save(model_dir)
-        model.push_to_hub(f"jo-mengr/{generate_model_name(cfg, cfg.datasets, cs_len)}")
+        model.push_to_hub(f"jo-mengr/{unique_model_name}")
     except Exception as e:
         logger.exception(e)
         raise e
