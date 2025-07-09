@@ -4,7 +4,7 @@ defaults:
   - model_list
 
 eval:
-  suite: ["LabelSimilarity", "scib", "UmapPlotter"] # names in the registry
+  suite: ["LabelSimilarity","UmapPlotter"] # names in the registry
   n_top_genes: 5000 # For scib
 
   # UmapPlotter specific settings

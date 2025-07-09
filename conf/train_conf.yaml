@@ -15,7 +15,7 @@ embedding_method: "geneformer" #This refers to the precomputed "embeddings" in .
 input_dim_map:
   hvg: 512
   pca: 50
-  scvi: 50
+  scvi_fm: 50
   geneformer: 512
 
 text_only: true #If you only want to process all input like text (cell sentences based on gene names)
@@ -54,7 +54,7 @@ adapter:
   output_dim: null
 
 trainer:
-  unfreeze_epoch: 2 #will unfreeze the whole text encoder
+  unfreeze_epoch: 16 #will unfreeze the whole text encoder
   output_dir: "../../models/trained"
   num_train_epochs: 1
   per_device_train_batch_size: 128
