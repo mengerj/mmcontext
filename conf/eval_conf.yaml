@@ -4,14 +4,30 @@ defaults:
   - model_list
 
 eval:
-  suite: ["LabelSimilarity","UmapPlotter"] # names in the registry
+  suite: ["LabelSimilarity", "UmapPlotter"] # names in the registry
   n_top_genes: 5000 # For scib
 
-  # UmapPlotter specific settings
-  save_format: "png" # Format for UMAP plots: "pdf", "png", "svg", etc.
-  figsize: [8, 8] # Figure size for UMAP plots
+  # Plot configuration parameters
+  save_format: "png" # Format for plots: "pdf", "png", "svg", etc.
+  figsize: [4, 4] # Figure size for plots
   dpi: 300 # DPI for saved plots
-  point_size: null # Size of points in UMAP (null uses scanpy default)
+  point_size: null # Size of points in scatter plots (null uses default)
+
+  # Font and text styling
+  font_size: 16 # General font size
+  font_style: "normal" # Font style: "normal", "italic", "oblique"
+  font_weight: "normal" # Font weight: "normal", "bold", "light", "heavy"
+
+  # Legend styling
+  legend_fontsize: 16 # Font size for legends
+  #legend_loc: "right margin" # Legend location
+
+  # Axis styling
+  axis_label_size: 16 # Size of axis labels
+  axis_tick_size: 14 # Size of axis tick labels
+
+  # Additional plot parameters
+  frameon: false # Whether to show frame around plots
 
 output:
   root: ${hydra:runtime.cwd}/out/embeddings

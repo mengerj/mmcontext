@@ -201,6 +201,16 @@ class LabelSimilarity(BaseEvaluator):
         labels: np.ndarray | list | pd.Series,
         label_key: str,
         label_kind: LabelKind,
+        save_format: str = "png",
+        figsize: tuple = (6, 6),
+        dpi: int = 300,
+        font_size: int = 12,
+        font_style: str = "normal",
+        font_weight: str = "normal",
+        legend_fontsize: int = 10,
+        axis_label_size: int = 12,
+        axis_tick_size: int = 10,
+        frameon: bool = False,
         **kw,
     ) -> None:
         """
@@ -210,9 +220,64 @@ class LabelSimilarity(BaseEvaluator):
         - ROC curves
         - UMAP visualizations
         - Similarity score histograms
+
+        Parameters
+        ----------
+        emb1 : np.ndarray
+            Cell embeddings
+        out_dir : Path
+            Output directory for plots
+        emb2 : np.ndarray
+            Label embeddings
+        labels : np.ndarray | list | pd.Series
+            Ground truth labels
+        label_key : str
+            Key for the labels
+        label_kind : LabelKind
+            Type of label (bio or batch)
+        save_format : str, optional
+            Format to save plots (default: "png")
+        figsize : tuple, optional
+            Figure size (default: (6, 6))
+        dpi : int, optional
+            DPI for saved plots (default: 300)
+        font_size : int, optional
+            General font size (default: 12)
+        font_style : str, optional
+            Font style (default: "normal")
+        font_weight : str, optional
+            Font weight (default: "normal")
+        legend_fontsize : int, optional
+            Font size for legends (default: 10)
+        axis_label_size : int, optional
+            Size of axis labels (default: 12)
+        axis_tick_size : int, optional
+            Size of axis tick labels (default: 10)
+        frameon : bool, optional
+            Whether to show frame around plots (default: False)
+        **kw
+            Additional keyword arguments
         """
+        frameon = True  # hardcode for these plots for now
         labels = np.asarray(labels)
         uniq = np.unique(labels)
+
+        # Configure matplotlib with the provided parameters
+        plt.rcParams.update(
+            {
+                "font.size": font_size,
+                "font.weight": font_weight,
+                "font.style": font_style,
+                "axes.labelsize": axis_label_size,
+                "xtick.labelsize": axis_tick_size,
+                "ytick.labelsize": axis_tick_size,
+                "legend.fontsize": legend_fontsize,
+                "axes.spines.left": frameon,
+                "axes.spines.bottom": frameon,
+                "axes.spines.top": frameon,
+                "axes.spines.right": frameon,
+            }
+        )
 
         # Compute UMAP once for all plots
         umap_emb = self._compute_umap(emb1)
@@ -226,7 +291,7 @@ class LabelSimilarity(BaseEvaluator):
             d.mkdir(parents=True, exist_ok=True)
 
         # Plot mean ROC curve
-        plt.figure(figsize=(6, 6))
+        plt.figure(figsize=figsize, dpi=dpi)
         mean_tpr = np.zeros(100)
         mean_fpr = np.linspace(0, 1, 100)
 
@@ -241,9 +306,9 @@ class LabelSimilarity(BaseEvaluator):
 
             # Plot individual ROC
             safe_v = re.sub(r"[^\w\d\-\.]", "_", str(v))
-            plt.figure(figsize=(6, 6))
-            plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.3f}")
-            plt.plot([0, 1], [0, 1], "k--")
+            plt.figure(figsize=figsize, dpi=dpi)
+            plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.3f}", linewidth=2)
+            plt.plot([0, 1], [0, 1], "k--", alpha=0.5)
             plt.xlim([0.0, 1.0])
             plt.ylim([0.0, 1.05])
             plt.xlabel("False Positive Rate")
@@ -251,39 +316,41 @@ class LabelSimilarity(BaseEvaluator):
             plt.title(f"{v} ({label_kind.value})")
             plt.legend(loc="lower right")
             plt.tight_layout()
-            plt.savefig(roc_dir / f"{safe_v}.png", dpi=300)
+            plt.savefig(roc_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
             # Plot UMAP
-            plt.figure(figsize=(8, 6))
+            plt.figure(figsize=figsize, dpi=dpi)
             scatter = plt.scatter(
                 umap_emb[:, 0], umap_emb[:, 1], c=sim, cmap="RdBu_r", vmin=-1, vmax=1, s=10, alpha=0.6
             )
             plt.colorbar(scatter, label="Similarity Score")
             plt.title(f"{v} ({label_kind.value})")
+            plt.xlabel("UMAP 1")
+            plt.ylabel("UMAP 2")
             plt.tight_layout()
-            plt.savefig(umap_dir / f"{safe_v}.png", dpi=300)
+            plt.savefig(umap_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
             # Plot histogram with consistent scale
-            plt.figure(figsize=(6, 4))
+            plt.figure(figsize=figsize, dpi=dpi)
             plt.hist(sim[~mask], bins=self.bins, alpha=0.5, label="other", density=True, range=(-1, 1))
             plt.hist(sim[mask], bins=self.bins, alpha=0.7, label=str(v), density=True, range=(-1, 1))
-            plt.xlabel(self.similarity)
-            plt.ylabel("density")
+            plt.xlabel(f"{self.similarity.title()} Similarity")
+            plt.ylabel("Density")
             plt.xlim(-1, 1)
-            plt.legend(frameon=False, fontsize=12)
+            plt.legend(frameon=frameon)
             plt.title(f"{v} ({label_kind.value})")
             plt.tight_layout()
-            plt.savefig(hist_dir / f"{safe_v}.png", dpi=300)
+            plt.savefig(hist_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
         # Plot mean ROC curve
         mean_tpr /= len(uniq)
         mean_auc = auc(mean_fpr, mean_tpr)
-        plt.figure(figsize=(6, 6))
-        plt.plot(mean_fpr, mean_tpr, label=f"Mean AUC = {mean_auc:.3f}")
-        plt.plot([0, 1], [0, 1], "k--")
+        plt.figure(figsize=figsize, dpi=dpi)
+        plt.plot(mean_fpr, mean_tpr, label=f"Mean AUC = {mean_auc:.3f}", linewidth=2)
+        plt.plot([0, 1], [0, 1], "k--", alpha=0.5)
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
         plt.xlabel("False Positive Rate")
@@ -291,8 +358,11 @@ class LabelSimilarity(BaseEvaluator):
         plt.title("Mean ROC Curve")
         plt.legend(loc="lower right")
         plt.tight_layout()
-        plt.savefig(roc_dir / "00_mean_roc.png", dpi=300)
+        plt.savefig(roc_dir / f"00_mean_roc.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
+
+        # Reset matplotlib parameters to default
+        plt.rcParams.update(plt.rcParamsDefault)
 
     @staticmethod
     def _cohens_d(x: np.ndarray, y: np.ndarray) -> float:

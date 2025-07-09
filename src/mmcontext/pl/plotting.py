@@ -38,6 +38,10 @@ def plot_umap(
     font_weight: str = "bold",
     legend_loc: str = "right margin",
     save_format: str = "png",
+    font_size: int = 12,
+    font_style: str = "normal",
+    axis_label_size: int = 12,
+    axis_tick_size: int = 10,
     **kwargs,
 ):
     """Plot a umap with custom options.
@@ -79,6 +83,14 @@ def plot_umap(
         Location of the legend. Defaults to "right margin". For no legend, set to None.
     save_format : str, optional
         Format to save the plot (e.g., "png", "pdf"). Defaults to "png".
+    font_size : int, optional
+        General font size. Defaults to 12.
+    font_style : str, optional
+        Font style. Defaults to "normal".
+    axis_label_size : int, optional
+        Size of axis labels. Defaults to 12.
+    axis_tick_size : int, optional
+        Size of axis tick labels. Defaults to 10.
     **kwargs : dict
         Additional keyword arguments passed to ``sc.pp.neighbors`` if new neighbors
         need to be computed (for example, specifying ``n_neighbors=20``).
@@ -142,6 +154,13 @@ def plot_umap(
         plt.figure(figsize=figsize)
         if "cell_type_colors" in adata.uns:
             del adata.uns["cell_type_colors"]
+
+        # Apply font properties globally
+        plt.rc("font", size=font_size, weight=font_weight, style=font_style)
+        plt.rc("axes", labelsize=axis_label_size)
+        plt.rc("xtick", labelsize=axis_tick_size)
+        plt.rc("ytick", labelsize=axis_tick_size)
+
         sc.pl.umap(
             adata,
             color=color_key,
@@ -153,9 +172,6 @@ def plot_umap(
             legend_fontsize=legend_fontsize,
             legend_loc=legend_loc,
         )
-
-        # Apply font properties globally
-        plt.rc("font", size=legend_fontsize, weight=font_weight)
 
         # Save or show the plot
         if save_plot:
