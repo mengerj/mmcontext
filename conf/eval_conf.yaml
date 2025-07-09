@@ -4,8 +4,12 @@ defaults:
   - model_list
 
 eval:
-  suite: ["LabelSimilarity", "UmapPlotter"] # names in the registry
+  suite: ["LabelSimilarity"] # names in the registry
   n_top_genes: 5000 # For scib
+
+  # Parallelization settings
+  enable_parallel: true # Enable parallel processing of dataset/model combinations
+  max_workers: null # Maximum number of parallel workers (null = auto-detect CPU count)
 
   # Plot configuration parameters
   save_format: "png" # Format for plots: "pdf", "png", "svg", etc.
