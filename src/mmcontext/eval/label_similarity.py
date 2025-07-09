@@ -37,10 +37,19 @@ class LabelSimilarity(BaseEvaluator):
         • Create UMAP visualization colored by similarity scores
         • Plot similarity score distributions
 
+    Additionally computes:
+        • Accuracy by finding the label with highest similarity for each cell
+        • Baseline random accuracy based on label distribution
+        • Standard deviation of AUC scores
+
     Returns
     -------
         - AUC score for each label
         - Mean AUC across all labels
+        - Standard deviation of AUC scores
+        - Accuracy score (ratio of correct assignments)
+        - Random baseline accuracy
+        - Accuracy over random baseline ratio
 
     Produces:
         - ROC curve plots
@@ -78,6 +87,69 @@ class LabelSimilarity(BaseEvaluator):
         roc_auc = auc(fpr, tpr)
         return fpr, tpr, roc_auc
 
+    def _compute_accuracy(self, emb1: np.ndarray, emb2: np.ndarray, labels: np.ndarray, uniq: np.ndarray) -> float:
+        """
+        Compute accuracy by finding the label with highest similarity for each cell.
+
+        Parameters
+        ----------
+        emb1 : np.ndarray
+            Cell embeddings (N x D)
+        emb2 : np.ndarray
+            Label embeddings (M x D)
+        labels : np.ndarray
+            True labels for each cell (N,)
+        uniq : np.ndarray
+            Unique labels
+
+        Returns
+        -------
+        float
+            Accuracy score (ratio of correct assignments)
+        """
+        # Create a similarity matrix: cells x labels
+        similarity_matrix = np.zeros((len(emb1), len(uniq)))
+
+        # Get label prototype for each unique label
+        label_prototypes = {}
+        for i, v in enumerate(uniq):
+            mask = labels == v
+            label_prototypes[v] = emb2[mask][0]  # first row for that value
+            similarity_matrix[:, i] = self._pair_sim(emb1, label_prototypes[v])
+
+        # Find the label with highest similarity for each cell
+        predicted_indices = np.argmax(similarity_matrix, axis=1)
+        predicted_labels = uniq[predicted_indices]
+
+        # Compute accuracy
+        correct = np.sum(predicted_labels == labels)
+        accuracy = correct / len(labels)
+
+        return accuracy
+
+    def _compute_random_baseline_accuracy(self, labels: np.ndarray) -> float:
+        """
+        Compute baseline random accuracy based on label distribution.
+
+        For random assignment, accuracy equals the sum of squared proportions
+        of each label (probability of correct assignment by chance).
+
+        Parameters
+        ----------
+        labels : np.ndarray
+            True labels
+
+        Returns
+        -------
+        float
+            Baseline random accuracy
+        """
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        proportions = counts / len(labels)
+        # Random baseline accuracy is sum of squared proportions
+        random_accuracy = np.sum(proportions**2)
+        return random_accuracy
+
     def compute(
         self,
         emb1: np.ndarray,
@@ -106,8 +178,16 @@ class LabelSimilarity(BaseEvaluator):
             prefix = f"{v}"
             out[f"{prefix}/auc"] = float(roc_auc)
 
-        # Add mean AUC and metadata
+        # Compute accuracy metrics
+        accuracy = self._compute_accuracy(emb1, emb2, labels, uniq)
+        random_baseline = self._compute_random_baseline_accuracy(labels)
+
+        # Add mean AUC, standard deviation, and accuracy metrics
         out["mean_auc"] = float(np.mean(auc_scores))
+        out["std_auc"] = float(np.std(auc_scores))
+        out["accuracy"] = float(accuracy)
+        out["random_baseline_accuracy"] = float(random_baseline)
+        out["accuracy_over_random"] = float(accuracy / random_baseline) if random_baseline > 0 else 0.0
         out["label_kind"] = label_kind.value
         out["n_labels"] = len(uniq)
         return EvalResult(**out)
