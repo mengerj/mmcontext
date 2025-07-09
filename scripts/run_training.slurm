@@ -30,7 +30,7 @@ exec 2>"$BASE_OUT"/train.err
 # ─────────────────────────────────────────────────────────────────────────────
 
 # General training parameters
-EMBEDDING_METHOD="hvg"
+EMBEDDING_METHOD="scvi_fm"
 TEXT_ONLY="false"
 GENE_BASED_CELL_SENTENCE="false"
 TRAINER_FP16="true"
@@ -39,8 +39,7 @@ TRAINER_FP16="true"
 # You can define multiple datasets - each one will be added to the list
 # Format: "name,type,caption,cs_len" (cs_len can be "null" or a number)
 DATASETS=(
-    "cellxgene_pseudo_bulk_100k,multiplets,natural_language_annotation,50"
-    "geo_70k,multiplets,natural_language_annotation,50"
+    "cellxgene_pseudo_bulk_100k,multiplets,cell_type,50"
 )
 
 # Adapter dimensions
@@ -49,8 +48,8 @@ ADAPTER_OUTPUT_DIM="2048"    # Usually 2048, 1024, etc.
 
 # Learning rate and other trainer params
 LEARNING_RATE="2e-4"        # Changed from 0.05 to avoid NaN issues
-BATCH_SIZE="512"
-EVAL_BATCH_SIZE="512"
+BATCH_SIZE="128"
+EVAL_BATCH_SIZE="128"
 NUM_EPOCHS="4"
 WARMUP_RATIO="0.1"
 
