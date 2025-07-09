@@ -5,6 +5,8 @@ defaults:
 
 eval:
   suite: ["LabelSimilarity", "scib", "UmapPlotter"] # names in the registry
+  n_top_genes: 5000 # For scib
+
   # UmapPlotter specific settings
   save_format: "png" # Format for UMAP plots: "pdf", "png", "svg", etc.
   figsize: [8, 8] # Figure size for UMAP plots
