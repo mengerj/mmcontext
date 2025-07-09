@@ -76,26 +76,29 @@ class ScibBundle(BaseEvaluator):
                     )
 
                     df = evaluator.evaluate()  # original return type
-                    result_dict = df.iloc[0].to_dict()
 
-                    # Convert each metric to a separate row
-                    for metric_name, value in result_dict.items():
-                        if metric_name in ["data_id", "hvg", "type"]:
-                            continue  # Skip metadata columns
+                    # Process all rows in the DataFrame, not just the first one
+                    for _, row in df.iterrows():
+                        result_dict = row.to_dict()
 
-                        results.append(
-                            {
-                                "dataset": dataset_name,
-                                "model": model_id,
-                                "bio_label": bio_label,
-                                "batch_label": batch_label,
-                                "metric": f"scib/{metric_name}",
-                                "value": value,
-                                "data_id": result_dict.get("data_id", ""),
-                                "hvg": result_dict.get("hvg", ""),
-                                "type": result_dict.get("type", ""),
-                            }
-                        )
+                        # Convert each metric to a separate row
+                        for metric_name, value in result_dict.items():
+                            if metric_name in ["data_id", "hvg", "type"]:
+                                continue  # Skip metadata columns
+
+                            results.append(
+                                {
+                                    "dataset": dataset_name,
+                                    "model": model_id,
+                                    "bio_label": bio_label,
+                                    "batch_label": batch_label,
+                                    "metric": f"scib/{metric_name}",
+                                    "value": value,
+                                    "data_id": result_dict.get("data_id", ""),
+                                    "hvg": result_dict.get("hvg", ""),
+                                    "type": result_dict.get("type", ""),
+                                }
+                            )
 
                 except Exception as e:
                     print(f"Error running scIB for {bio_label}/{batch_label}: {e}")
