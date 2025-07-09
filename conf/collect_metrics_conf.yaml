@@ -10,6 +10,9 @@ collect_metrics:
   # Output directory for collected metrics
   output_dir: "${hydra:runtime.cwd}/out/collected_metrics"
 
+  # Visualization settings
+  plot_format: "png" # Options: "png", "pdf", "svg"
+
   # ScIB type handling
   scib_types_as_models:
     ["raw", "embedding_X_geneformer", "embedding_X_hvg", "embedding_X_pca"]
