@@ -11,6 +11,30 @@ from mmcontext.file_utils import save_table
 logger = logging.getLogger(__name__)
 
 
+def check_required_files_exist(out_dir: Path, output_format: str) -> bool:
+    """
+    Check if required embedding files already exist in the output directory.
+
+    Parameters
+    ----------
+    out_dir : Path
+        Output directory path
+    output_format : str
+        Output format (e.g., 'parquet', 'csv')
+
+    Returns
+    -------
+    bool
+        True if required files exist, False otherwise
+    """
+    # Check for main embeddings file
+    embeddings_file = out_dir / f"embeddings.{output_format}"
+    meta_file = out_dir / "meta.yaml"
+
+    # Consider the output complete if both embeddings and meta files exist
+    return embeddings_file.exists() and meta_file.exists()
+
+
 def embed_pipeline(cfg) -> None:
     """
     Orchestrate an end-to-end embedding generation run.
@@ -38,6 +62,29 @@ def embed_pipeline(cfg) -> None:
         for model_cfg in cfg.models:
             model_id = model_cfg.source
             text_only = model_cfg.get("text_only", False)
+
+            # add a small string to the model indicating if it was used as text-only
+            if text_only:
+                model_id_for_path = model_id + "_text_only"
+            else:
+                model_id_for_path = model_id
+
+            # Determine output directory
+            out_dir = (
+                Path(cfg.output.root)
+                / ds_cfg.name  # <— dataset-specific folder
+                / Path(model_id_for_path).name.replace("/", "_")
+            )
+
+            # Check if files already exist and skip if overwrite is False
+            if not cfg.run.overwrite and check_required_files_exist(out_dir, cfg.output.format):
+                logger.info(
+                    f"Embeddings already exist for {ds_cfg.name} + {model_id_for_path}. Skipping. Use overwrite=true to force regeneration."
+                )
+                continue
+
+            logger.info(f"Processing {ds_cfg.name} + {model_id_for_path}")
+
             st_model = load_st_model(model_id)
             if text_only:
                 main_col = "cell_sentence_2"
@@ -55,9 +102,6 @@ def embed_pipeline(cfg) -> None:
                 adata_download_dir=adata_download_dir,
             )
 
-            # add a small string to the model indicating if it was used as text-only
-            if text_only:
-                model_id = model_id + "_text_only"
             if numeric_data_available:
                 # get sample_ids but without "sample_idx: prefix"
                 if "sample_idx:" in emb_df["sample_idx"][0]:
@@ -81,11 +125,6 @@ def embed_pipeline(cfg) -> None:
                     )
             else:
                 adata_subset = None
-            out_dir = (
-                Path(cfg.output.root)
-                / ds_cfg.name  # <— dataset-specific folder
-                / Path(model_id).name.replace("/", "_")
-            )
             # save the embeddings
             save_table(
                 emb_df,
@@ -126,4 +165,6 @@ def embed_pipeline(cfg) -> None:
                 subset_out = out_dir / "subset.zarr"
                 adata_subset.write_zarr(subset_out)
                 logger.info("Wrote subset AnnData → %s", subset_out)
-            (out_dir / "meta.yaml").write_text(f"model: {model_id}\ndataset: {ds_cfg.name}\nrows: {len(emb_df)}\n")
+            (out_dir / "meta.yaml").write_text(
+                f"model: {model_id_for_path}\ndataset: {ds_cfg.name}\nrows: {len(emb_df)}\n"
+            )

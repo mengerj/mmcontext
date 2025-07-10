@@ -27,6 +27,7 @@ exec 2>"$BASE_OUT"/embed.err
 ###
 # 2. Set default overrides:
 #    These can be customized as needed
+#    Example: to force overwrite existing embeddings, add: run.overwrite=true
 ###
 
 ###
@@ -43,3 +44,5 @@ echo "venv activated"
 
 python3 scripts/embed.py \
     ++hydra.run.dir="$BASE_OUT"
+    # Add run.overwrite=true to force overwrite existing embeddings
+    # Example: run.overwrite=true

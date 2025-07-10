@@ -7,6 +7,7 @@ run:
   n_rows: 5_000 # rows per dataset split
   batch_size: 128
   num_workers: 4
+  overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
 
 output:
   adata_cache: ${hydra:runtime.cwd}/data/from_nxtcloud
