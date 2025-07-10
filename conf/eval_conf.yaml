@@ -4,12 +4,20 @@ defaults:
   - model_list
 
 eval:
-  suite: ["LabelSimilarity"] # names in the registry
+  suite: ["LabelSimilarity", "UmapPlotter", "scib"] # Standard evaluators + scib (handled separately)
   n_top_genes: 5000 # For scib
+
+  # Evaluation mode settings
+  plot_only: false # If true, skip computation and only regenerate plots from cached data
+  skip_missing_cache: true # If true, skip datasets/models without cache when plot_only=true
 
   # Parallelization settings
   enable_parallel: true # Enable parallel processing of dataset/model combinations
   max_workers: null # Maximum number of parallel workers (null = auto-detect CPU count)
+  task_timeout: 3600 # Maximum time (seconds) per dataset/model combination (1 hour default)
+
+  # ScIB specific settings
+  skip_scib_on_error: true # Skip ScIB evaluation if it encounters errors instead of failing entire task
 
   # Plot configuration parameters
   save_format: "png" # Format for plots: "pdf", "png", "svg", etc.
