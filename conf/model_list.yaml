@@ -1,6 +1,5 @@
 defaults: []
 models:
-
   - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-pca-sample_cs
     text_only: false
     layer_key: X_pca
