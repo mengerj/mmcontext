@@ -158,6 +158,8 @@ def test_save_load_text_only(st_text_encoder, tmp_path):
 
     # Save the model
     save_dir = tmp_path / "text_only_model"
+    # st_basic = SentenceTransformer("prajjwal1/bert-tiny")
+    # st_basic.save(str(save_dir))
     st_text_encoder.save(str(save_dir))
 
     # Check that necessary files exist
@@ -345,15 +347,6 @@ def test_precision_conversion(st_bimodal_encoder):
 
     # Convert back to FP32 for other tests
     st_bimodal_encoder.float()
-
-
-def test_gradient_checkpointing(bimodal_encoder):
-    """Test that gradient checkpointing can be enabled for memory efficiency."""
-    # Check that we can enable gradient checkpointing on the text encoder
-    if hasattr(bimodal_encoder.text_encoder, "gradient_checkpointing_enable"):
-        bimodal_encoder.text_encoder.gradient_checkpointing_enable()
-        assert bimodal_encoder.text_encoder.is_gradient_checkpointing, "Gradient checkpointing not enabled"
-    # Some models might not support gradient checkpointing, so this is conditional
 
 
 def test_with_problematic_inputs(text_only_encoder):

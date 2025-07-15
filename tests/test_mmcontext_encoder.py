@@ -502,7 +502,7 @@ def test_adapter_weights_preserved(text_only_encoder, tmp_path):
 # --------------------------------------------------------------------- #
 def test_full_freezing(TextEncStub, TokStub):
     """Test that freezing the text encoder works correctly."""
-    enc_stub = TextEncStub(model_type="bert")
+    enc_stub = TextEncStub()
     # Create a fresh stub and verify its parameters are initially trainable
     for p in enc_stub.parameters():
         assert p.requires_grad, "Stub parameters should start with requires_grad=True"

@@ -47,7 +47,7 @@ dependencies = [
   "scib>=1.1.7",
   "scikit-learn>=1.5.2",
   "seaborn>=0.13.2",
-  "sentence-transformers>=4.1.0.dev0",
+  "sentence-transformers>=5",
   "session-info>=1.0.1",
   "torch>=2.7",
   "wandb>=0.19.11",
@@ -165,4 +165,4 @@ skip = [
 ]
 
 [tool.uv.sources]
-sentence-transformers = { git = "https://github.com/mengerj/sentence-transformers.git", rev = "master" }
+#sentence-transformers = { git = "https://github.com/mengerj/sentence-transformers.git", rev = "master" }
