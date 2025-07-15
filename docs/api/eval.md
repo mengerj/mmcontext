@@ -42,7 +42,7 @@ The class {class}`mmcontext.eval.query_annotate.OmicsQueryAnnotator` can be used
     :toctree: ../generated/
     :nosignatures:
     eval.query_annotate.OmicsQueryAnnotator
-    eval.query_annotate.label_similarity.LabelSimilarity
+    eval.label_similarity.LabelSimilarity
     pl.plotting.plot_query_scores_with_labels_umap
 ```
 
