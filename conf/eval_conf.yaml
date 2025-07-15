@@ -4,7 +4,7 @@ defaults:
   - model_list
 
 eval:
-  suite: ["LabelSimilarity", "UmapPlotter", "scib"] # Standard evaluators + scib (handled separately)
+  suite: ["LabelSimilarity"] # Standard evaluators + scib (handled separately)
   n_top_genes: 5000 # For scib
 
   # Evaluation mode settings
