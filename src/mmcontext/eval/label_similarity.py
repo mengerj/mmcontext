@@ -75,6 +75,7 @@ class LabelSimilarity(BaseEvaluator):
     umap_min_dist: float = 0.1
     umap_random_state: int = 42
     cache_results: bool = True  # Enable caching of similarity matrices
+    skip_plotting: bool = False  # Skip all plotting for faster evaluation
 
     def _compute_similarity_matrix(
         self, emb1: np.ndarray, emb2: np.ndarray, labels: np.ndarray, uniq: np.ndarray
@@ -126,6 +127,109 @@ class LabelSimilarity(BaseEvaluator):
             n_neighbors=self.umap_n_neighbors, min_dist=self.umap_min_dist, random_state=self.umap_random_state
         )
         return reducer.fit_transform(emb1)
+
+    def _add_non_overlapping_annotations(self, points: np.ndarray, labels: list, fontsize: int = 8) -> None:
+        """
+        Add text annotations with arrows to avoid overlap.
+
+        Parameters
+        ----------
+        points : np.ndarray
+            Array of (x, y) coordinates for label positions
+        labels : list
+            List of label strings
+        fontsize : int
+            Font size for the text
+        """
+        # Get plot bounds for relative offset calculation
+        ax = plt.gca()
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        x_range = xlim[1] - xlim[0]
+        y_range = ylim[1] - ylim[0]
+
+        # Much larger offset distance to avoid crowding
+        base_offset = 0.25  # Increased from 0.15
+        x_offset_base = base_offset * x_range
+        y_offset_base = base_offset * y_range
+
+        # Store chosen positions to avoid overlap
+        chosen_positions = []
+
+        # Define more angles for better distribution
+        angles = np.linspace(0, 2 * np.pi, 16, endpoint=False)  # 16 directions instead of 8
+
+        for i, (point, label) in enumerate(zip(points, labels, strict=False)):
+            # Add subtle dot at actual position - much smaller and less prominent
+            plt.scatter(point[0], point[1], c="red", s=8, alpha=0.8, zorder=15, edgecolors="white", linewidths=0.5)
+
+            best_pos = None
+            max_min_distance = 0  # Find position with maximum minimum distance to others
+
+            # Try different offset distances and angles
+            for distance_multiplier in [1.0, 1.5, 2.0, 2.5]:  # Try multiple distances
+                for angle in angles:
+                    # Calculate offset position
+                    x_offset = x_offset_base * distance_multiplier * np.cos(angle)
+                    y_offset = y_offset_base * distance_multiplier * np.sin(angle)
+                    test_pos = (point[0] + x_offset, point[1] + y_offset)
+
+                    # Calculate minimum distance to all previously chosen positions
+                    if chosen_positions:
+                        min_dist_to_chosen = min(
+                            np.sqrt((test_pos[0] - pos[0]) ** 2 + (test_pos[1] - pos[1]) ** 2)
+                            for pos in chosen_positions
+                        )
+                    else:
+                        min_dist_to_chosen = float("inf")
+
+                    # Also check distance to original points
+                    min_dist_to_points = (
+                        min(
+                            np.sqrt((test_pos[0] - other_point[0]) ** 2 + (test_pos[1] - other_point[1]) ** 2)
+                            for j, other_point in enumerate(points)
+                            if i != j
+                        )
+                        if len(points) > 1
+                        else float("inf")
+                    )
+
+                    # Use the minimum of the two distances
+                    min_dist = min(min_dist_to_chosen, min_dist_to_points)
+
+                    # Keep the position with the largest minimum distance
+                    if min_dist > max_min_distance:
+                        max_min_distance = min_dist
+                        best_pos = test_pos
+
+            # Fallback if no good position found - use systematic distribution
+            if best_pos is None:
+                angle = (i / len(labels)) * 2 * np.pi
+                x_offset = x_offset_base * 2.0 * np.cos(angle)  # Use larger multiplier
+                y_offset = y_offset_base * 2.0 * np.sin(angle)
+                best_pos = (point[0] + x_offset, point[1] + y_offset)
+
+            chosen_positions.append(best_pos)
+
+            # Add very subtle annotation - minimal visual impact
+            plt.annotate(
+                str(label),
+                xy=(point[0], point[1]),  # Point to annotate
+                xytext=best_pos,  # Text position
+                fontsize=max(4, int(fontsize * 0.4)),  # Much smaller: 40% of legend font
+                ha="center",
+                va="center",
+                weight="normal",
+                bbox={
+                    "boxstyle": "round,pad=0.05",
+                    "facecolor": "white",
+                    "alpha": 0.85,
+                    "edgecolor": "gray",
+                    "linewidth": 0.3,
+                },  # Minimal box
+                arrowprops={"arrowstyle": "-", "color": "gray", "lw": 0.6, "alpha": 0.7},  # Subtle line
+                zorder=20,
+            )
 
     def _compute_roc(self, scores: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
         """Compute ROC curve and AUC for a set of scores and true labels."""
@@ -203,6 +307,8 @@ class LabelSimilarity(BaseEvaluator):
         uniq: np.ndarray,
         umap_emb: np.ndarray,
         results: dict,
+        label_embeddings: np.ndarray = None,
+        combined_umap: np.ndarray = None,
     ) -> None:
         """Save computed results to cache for faster plotting."""
         if not self.cache_results:
@@ -221,6 +327,8 @@ class LabelSimilarity(BaseEvaluator):
                 "min_dist": self.umap_min_dist,
                 "random_state": self.umap_random_state,
             },
+            "label_embeddings": label_embeddings,
+            "combined_umap": combined_umap,
         }
 
         # Create cache directory
@@ -267,9 +375,14 @@ class LabelSimilarity(BaseEvaluator):
         label_key: str,
         label_kind: LabelKind,
         out_dir: Path = None,
+        skip_plotting: bool = None,
         **kw,
     ) -> EvalResult:
         """Compute similarity scores and ROC metrics for each unique label."""
+        # Override class attribute if parameter is provided
+        if skip_plotting is not None:
+            self.skip_plotting = skip_plotting
+
         labels = np.asarray(labels)
         uniq = np.unique(labels)
 
@@ -317,7 +430,21 @@ class LabelSimilarity(BaseEvaluator):
         if cache_path is not None:
             # Also compute UMAP for caching
             umap_emb = self._compute_umap(emb1)
-            self._save_cache(cache_path, similarity_matrix, labels, uniq, umap_emb, out)
+
+            # Also cache label embeddings and combined UMAP for text annotations
+            unique_labels = np.unique(labels)
+            label_embeddings = np.zeros((len(unique_labels), emb2.shape[1]))
+            for i, label in enumerate(unique_labels):
+                label_mask = labels == label
+                label_embeddings[i] = emb2[label_mask][0]
+
+            # Compute combined UMAP
+            combined_embeddings = np.vstack([emb1, label_embeddings])
+            combined_umap = self._compute_umap(combined_embeddings)
+
+            self._save_cache(
+                cache_path, similarity_matrix, labels, uniq, umap_emb, out, label_embeddings, combined_umap
+            )
 
         return EvalResult(**out)
 
@@ -340,9 +467,18 @@ class LabelSimilarity(BaseEvaluator):
         axis_label_size: int = 12,
         axis_tick_size: int = 10,
         frameon: bool = False,
+        skip_plotting: bool = None,
         **kw,
     ) -> None:
         """Generate plots for each unique label using cached similarity matrix if available."""
+        # Override class attribute if parameter is provided
+        if skip_plotting is not None:
+            self.skip_plotting = skip_plotting
+
+        if self.skip_plotting:
+            logger.info("Skipping plotting due to skip_plotting flag.")
+            return
+
         frameon = True  # hardcode for these plots for now
         labels = np.asarray(labels)
         uniq = np.unique(labels)
@@ -384,7 +520,20 @@ class LabelSimilarity(BaseEvaluator):
                 out["label_kind"] = label_kind.value
                 out["n_labels"] = len(uniq)
 
-                self._save_cache(cache_path, similarity_matrix, labels, uniq, umap_emb, out)
+                # Also cache label embeddings and combined UMAP for text annotations
+                unique_labels = np.unique(labels)
+                label_embeddings = np.zeros((len(unique_labels), emb2.shape[1]))
+                for i, label in enumerate(unique_labels):
+                    label_mask = labels == label
+                    label_embeddings[i] = emb2[label_mask][0]
+
+                # Compute combined UMAP
+                combined_embeddings = np.vstack([emb1, label_embeddings])
+                combined_umap = self._compute_umap(combined_embeddings)
+
+                self._save_cache(
+                    cache_path, similarity_matrix, labels, uniq, umap_emb, out, label_embeddings, combined_umap
+                )
 
         # Configure matplotlib with the provided parameters
         plt.rcParams.update(
@@ -415,25 +564,80 @@ class LabelSimilarity(BaseEvaluator):
         predicted_indices = np.argmax(similarity_matrix, axis=1)
         predicted_labels = uniq[predicted_indices]
 
-        # Plot UMAP colored by true labels
-        plt.figure(figsize=(8, 6))
-        # Use seaborn/scanpy style colors instead of Set3
+        # Plot UMAP colored by true labels (with and without text annotations)
         unique_labels = np.unique(labels)
-        colors = sns.color_palette("husl", len(unique_labels))
+
+        # Use categorical color palettes for better distinction
+        if len(unique_labels) <= 10:
+            colors = sns.color_palette("tab10", len(unique_labels))
+        elif len(unique_labels) <= 20:
+            colors = sns.color_palette("tab20", len(unique_labels))
+        else:
+            # For more than 20 classes, combine multiple categorical palettes
+            colors = (sns.color_palette("tab20", 20) + sns.color_palette("tab20b", min(len(unique_labels) - 20, 20)))[
+                : len(unique_labels)
+            ]
+
         color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
         point_colors = [color_map[label] for label in labels]
 
-        # Create plot without frame
+        # Get label embeddings for each unique label
+        label_embeddings = np.zeros((len(unique_labels), emb2.shape[1]))
+        for i, label in enumerate(unique_labels):
+            label_mask = labels == label
+            label_embeddings[i] = emb2[label_mask][0]  # first embedding for that label
+
+        # Compute UMAP on combined cell + label embeddings
+        combined_embeddings = np.vstack([emb1, label_embeddings])
+        combined_umap = self._compute_umap(combined_embeddings)
+
+        # Split back into cell and label coordinates
+        cell_umap = combined_umap[: len(emb1)]
+        label_umap = combined_umap[len(emb1) :]
+
+        # Version 1: Without text annotations (using cell_umap which has label positions)
+        plt.figure(figsize=figsize, dpi=dpi)
         ax = plt.gca()
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(umap_emb[:, 0], umap_emb[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
-        plt.title(f"UMAP - True Labels ({label_kind.value})", fontweight="bold")
+        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
+        plt.tight_layout()
 
-        # Create cleaner legend
+        plt.savefig(umap_dir / f"00_true_labels.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Version 2: With text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
+
+        # Fix axis limits before adding annotations to prevent plot area from expanding
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+
+        # Add text annotations with arrows to avoid overlap
+        self._add_non_overlapping_annotations(label_umap, unique_labels, fontsize=max(6, legend_fontsize - 2))
+
+        # Restore original axis limits to maintain consistent plot size
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+        plt.xticks([])
+        plt.yticks([])
+        plt.tight_layout()
+
+        plt.savefig(umap_dir / f"00_true_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Create and save separate legend
+        fig_legend, ax_legend = plt.subplots(figsize=(min(len(unique_labels) * 1.2, 12), 1), dpi=dpi)
+        ax_legend.axis("off")
         legend_elements = [
             plt.Line2D(
                 [0],
@@ -441,33 +645,71 @@ class LabelSimilarity(BaseEvaluator):
                 marker="o",
                 color="w",
                 markerfacecolor=color_map[label],
-                markersize=6,
+                markersize=8,
                 label=str(label),
                 markeredgecolor="none",
             )
             for label in unique_labels
         ]
-        plt.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=10, frameon=False)
+        ax_legend.legend(
+            handles=legend_elements,
+            loc="center",
+            fontsize=legend_fontsize,
+            frameon=False,
+            ncol=min(len(unique_labels), 6),
+            bbox_to_anchor=(0.5, 0.5),
+        )
         plt.tight_layout()
-        plt.savefig(umap_dir / "true_labels.png", dpi=300, bbox_inches="tight")
+        plt.savefig(umap_dir / f"00_true_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
-        # Plot UMAP colored by predicted labels
-        plt.figure(figsize=(8, 6))
+        # Plot UMAP colored by predicted labels (with and without text annotations)
         pred_color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
         pred_point_colors = [pred_color_map[label] for label in predicted_labels]
 
-        # Create plot without frame
+        # Version 1: Without text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
         ax = plt.gca()
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(umap_emb[:, 0], umap_emb[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
-        plt.title(f"UMAP - Predicted Labels ({label_kind.value})", fontweight="bold")
+        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
+        plt.tight_layout()
 
-        # Create cleaner legend
+        plt.savefig(umap_dir / f"01_predicted_labels.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Version 2: With text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
+
+        # Fix axis limits before adding annotations to prevent plot area from expanding
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+
+        # Add text annotations with arrows to avoid overlap
+        self._add_non_overlapping_annotations(label_umap, unique_labels, fontsize=max(6, legend_fontsize - 2))
+
+        # Restore original axis limits to maintain consistent plot size
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+        plt.xticks([])
+        plt.yticks([])
+        plt.tight_layout()
+
+        plt.savefig(umap_dir / f"01_predicted_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Create and save separate legend (same as true labels since they use the same color scheme)
+        fig_legend, ax_legend = plt.subplots(figsize=(min(len(unique_labels) * 1.2, 12), 1), dpi=dpi)
+        ax_legend.axis("off")
         legend_elements = [
             plt.Line2D(
                 [0],
@@ -475,15 +717,22 @@ class LabelSimilarity(BaseEvaluator):
                 marker="o",
                 color="w",
                 markerfacecolor=pred_color_map[label],
-                markersize=6,
+                markersize=8,
                 label=str(label),
                 markeredgecolor="none",
             )
             for label in unique_labels
         ]
-        plt.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=10, frameon=False)
+        ax_legend.legend(
+            handles=legend_elements,
+            loc="center",
+            fontsize=legend_fontsize,
+            frameon=False,
+            ncol=min(len(unique_labels), 6),
+            bbox_to_anchor=(0.5, 0.5),
+        )
         plt.tight_layout()
-        plt.savefig(umap_dir / "predicted_labels.png", dpi=300, bbox_inches="tight")
+        plt.savefig(umap_dir / f"01_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
         # Plot mean ROC curve
@@ -510,27 +759,98 @@ class LabelSimilarity(BaseEvaluator):
             plt.xlabel("False Positive Rate")
             plt.ylabel("True Positive Rate")
             plt.title(f"{v} ({label_kind.value})")
-            plt.legend(loc="lower right")
             plt.tight_layout()
             plt.savefig(roc_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
+            # Create and save separate legend for ROC curve
+            fig_legend, ax_legend = plt.subplots(figsize=(3, 1), dpi=dpi)
+            ax_legend.axis("off")
+            legend_elements = [plt.Line2D([0], [0], color="tab:blue", linewidth=2, label=f"AUC = {roc_auc:.3f}")]
+            ax_legend.legend(
+                handles=legend_elements,
+                loc="center",
+                fontsize=legend_fontsize,
+                frameon=False,
+                bbox_to_anchor=(0.5, 0.5),
+            )
+            plt.tight_layout()
+            plt.savefig(roc_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
             # Plot UMAP
-            plt.figure(figsize=(8, 6))
+            plt.figure(figsize=figsize, dpi=dpi)
             # Create plot without frame
             ax = plt.gca()
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
+            # Create linewidths to highlight true label cells with borders
+            linewidths = np.where(mask, 0.3, 0.0)
+
             scatter = plt.scatter(
-                umap_emb[:, 0], umap_emb[:, 1], c=sim, cmap="RdBu_r", vmin=-1, vmax=1, s=5, alpha=0.7, edgecolors="none"
+                umap_emb[:, 0],
+                umap_emb[:, 1],
+                c=sim,
+                cmap="RdBu_r",
+                vmin=-1,
+                vmax=1,
+                s=5,
+                alpha=0.7,
+                edgecolors="black",
+                linewidths=linewidths,
             )
-            plt.colorbar(scatter, label="Similarity Score")
-            plt.title(f"{v} ({label_kind.value})", fontweight="bold")
+            cbar = plt.colorbar(scatter, label="Similarity Score")
+            cbar.set_ticks([-1, 0, 1])
+
             plt.xticks([])
             plt.yticks([])
             plt.tight_layout()
+
+            # Save plot without legend
             plt.savefig(umap_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
+            # Create and save separate legend for border meaning
+            fig_legend, ax_legend = plt.subplots(figsize=(3, 1.5), dpi=dpi)
+            ax_legend.axis("off")
+            legend_elements = [
+                plt.Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    color="w",
+                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    markersize=8,
+                    label=f"True {v}",
+                    linestyle="None",
+                ),
+                plt.Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    color="w",
+                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
+                    markeredgecolor="none",
+                    markersize=8,
+                    label="Other cells",
+                    linestyle="None",
+                ),
+            ]
+            ax_legend.legend(
+                handles=legend_elements,
+                loc="center",
+                frameon=True,
+                fancybox=True,
+                shadow=True,
+                fontsize=legend_fontsize,
+                ncol=1,
+                bbox_to_anchor=(0.5, 0.5),
+            )
+            plt.tight_layout()
+            plt.savefig(umap_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
             # Plot histogram with consistent scale
@@ -540,10 +860,27 @@ class LabelSimilarity(BaseEvaluator):
             plt.xlabel(f"{self.similarity.title()} Similarity")
             plt.ylabel("Density")
             plt.xlim(-1, 1)
-            plt.legend(frameon=frameon)
             plt.title(f"{v} ({label_kind.value})")
             plt.tight_layout()
             plt.savefig(hist_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
+            # Create and save separate legend for histogram
+            fig_legend, ax_legend = plt.subplots(figsize=(3, 1), dpi=dpi)
+            ax_legend.axis("off")
+            legend_elements = [
+                plt.Rectangle((0, 0), 1, 1, facecolor="tab:blue", alpha=0.5, label="other"),
+                plt.Rectangle((0, 0), 1, 1, facecolor="tab:orange", alpha=0.7, label=str(v)),
+            ]
+            ax_legend.legend(
+                handles=legend_elements,
+                loc="center",
+                fontsize=legend_fontsize,
+                frameon=False,
+                bbox_to_anchor=(0.5, 0.5),
+            )
+            plt.tight_layout()
+            plt.savefig(hist_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
         # Plot mean ROC curve
@@ -557,9 +894,19 @@ class LabelSimilarity(BaseEvaluator):
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
         plt.title("Mean ROC Curve")
-        plt.legend(loc="lower right")
         plt.tight_layout()
         plt.savefig(roc_dir / f"00_mean_roc.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Create and save separate legend for mean ROC curve
+        fig_legend, ax_legend = plt.subplots(figsize=(3, 1), dpi=dpi)
+        ax_legend.axis("off")
+        legend_elements = [plt.Line2D([0], [0], color="tab:blue", linewidth=2, label=f"Mean AUC = {mean_auc:.3f}")]
+        ax_legend.legend(
+            handles=legend_elements, loc="center", fontsize=legend_fontsize, frameon=False, bbox_to_anchor=(0.5, 0.5)
+        )
+        plt.tight_layout()
+        plt.savefig(roc_dir / f"00_mean_roc_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
         # Reset matplotlib parameters to default
@@ -581,6 +928,7 @@ class LabelSimilarity(BaseEvaluator):
         axis_label_size: int = 12,
         axis_tick_size: int = 10,
         frameon: bool = False,
+        skip_plotting: bool = None,
         **kw,
     ) -> None:
         """
@@ -589,6 +937,14 @@ class LabelSimilarity(BaseEvaluator):
         This method allows you to regenerate plots without recomputing embeddings or similarity matrices.
         Useful for adjusting plot parameters or formats without rerunning the expensive computation.
         """
+        # Override class attribute if parameter is provided
+        if skip_plotting is not None:
+            self.skip_plotting = skip_plotting
+
+        if self.skip_plotting:
+            logger.info("Skipping plotting due to skip_plotting flag.")
+            return
+
         # Load cached data
         cache_path = out_dir / "label_similarity_cache.pkl"
         cache_data = self._load_cache(cache_path)
@@ -637,25 +993,80 @@ class LabelSimilarity(BaseEvaluator):
         predicted_indices = np.argmax(similarity_matrix, axis=1)
         predicted_labels = uniq[predicted_indices]
 
-        # Plot UMAP colored by true labels
-        plt.figure(figsize=(8, 6))
-        # Use seaborn/scanpy style colors instead of Set3
+        # Plot UMAP colored by true labels (with and without text annotations)
         unique_labels = np.unique(labels)
-        colors = sns.color_palette("husl", len(unique_labels))
+
+        # Use categorical color palettes for better distinction
+        if len(unique_labels) <= 10:
+            colors = sns.color_palette("tab10", len(unique_labels))
+        elif len(unique_labels) <= 20:
+            colors = sns.color_palette("tab20", len(unique_labels))
+        else:
+            # For more than 20 classes, combine multiple categorical palettes
+            colors = (sns.color_palette("tab20", 20) + sns.color_palette("tab20b", min(len(unique_labels) - 20, 20)))[
+                : len(unique_labels)
+            ]
+
         color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
         point_colors = [color_map[label] for label in labels]
 
-        # Create plot without frame
+        # Get cached label embeddings and combined UMAP if available
+        # cached_label_embeddings = cache_data.get("label_embeddings")
+        cached_combined_umap = cache_data.get("combined_umap")
+
+        if cached_combined_umap is not None:
+            # Use cached combined UMAP coordinates
+            cell_umap = cached_combined_umap[: len(labels)]
+            label_umap = cached_combined_umap[len(labels) :]
+        else:
+            # Fallback to original UMAP (no text annotations possible)
+            cell_umap = umap_emb
+            label_umap = None
+
+        # Version 1: Without text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
         ax = plt.gca()
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(umap_emb[:, 0], umap_emb[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
-        plt.title(f"UMAP - True Labels ({label_kind.value})", fontweight="bold")
+        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
+        plt.tight_layout()
 
-        # Create cleaner legend
+        plt.savefig(umap_dir / f"00_true_labels.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Version 2: With text annotations (if cached data is available)
+        if label_umap is not None:
+            plt.figure(figsize=figsize, dpi=dpi)
+            ax = plt.gca()
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+            scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
+
+            # Fix axis limits before adding annotations to prevent plot area from expanding
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+
+            # Add text annotations with arrows to avoid overlap
+            self._add_non_overlapping_annotations(label_umap, unique_labels, fontsize=max(6, legend_fontsize - 2))
+
+            # Restore original axis limits to maintain consistent plot size
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+
+            plt.xticks([])
+            plt.yticks([])
+            plt.tight_layout()
+
+            plt.savefig(umap_dir / f"00_true_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
+        # Create and save separate legend
+        fig_legend, ax_legend = plt.subplots(figsize=(min(len(unique_labels) * 1.2, 12), 1), dpi=dpi)
+        ax_legend.axis("off")
         legend_elements = [
             plt.Line2D(
                 [0],
@@ -663,33 +1074,74 @@ class LabelSimilarity(BaseEvaluator):
                 marker="o",
                 color="w",
                 markerfacecolor=color_map[label],
-                markersize=6,
+                markersize=8,
                 label=str(label),
                 markeredgecolor="none",
             )
             for label in unique_labels
         ]
-        plt.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=10, frameon=False)
+        ax_legend.legend(
+            handles=legend_elements,
+            loc="center",
+            fontsize=legend_fontsize,
+            frameon=False,
+            ncol=min(len(unique_labels), 6),
+            bbox_to_anchor=(0.5, 0.5),
+        )
         plt.tight_layout()
-        plt.savefig(umap_dir / "true_labels.png", dpi=300, bbox_inches="tight")
+        plt.savefig(umap_dir / f"00_true_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
-        # Plot UMAP colored by predicted labels
-        plt.figure(figsize=(8, 6))
+        # Plot UMAP colored by predicted labels (with and without text annotations)
         pred_color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
         pred_point_colors = [pred_color_map[label] for label in predicted_labels]
 
-        # Create plot without frame
+        # Version 1: Without text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
         ax = plt.gca()
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(umap_emb[:, 0], umap_emb[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
-        plt.title(f"UMAP - Predicted Labels ({label_kind.value})", fontweight="bold")
+        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
+        plt.tight_layout()
 
-        # Create cleaner legend
+        plt.savefig(umap_dir / f"01_predicted_labels.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Version 2: With text annotations (if cached data is available)
+        if label_umap is not None:
+            plt.figure(figsize=figsize, dpi=dpi)
+            ax = plt.gca()
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+            scatter = plt.scatter(
+                cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none"
+            )
+
+            # Fix axis limits before adding annotations to prevent plot area from expanding
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+
+            # Add text annotations with arrows to avoid overlap
+            self._add_non_overlapping_annotations(label_umap, unique_labels, fontsize=max(6, legend_fontsize - 2))
+
+            # Restore original axis limits to maintain consistent plot size
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+
+            plt.xticks([])
+            plt.yticks([])
+            plt.tight_layout()
+
+            plt.savefig(umap_dir / f"01_predicted_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
+        # Create and save separate legend (same as true labels since they use the same color scheme)
+        _fig_legend, ax_legend = plt.subplots(figsize=(min(len(unique_labels) * 1.2, 12), 1), dpi=dpi)
+        ax_legend.axis("off")
         legend_elements = [
             plt.Line2D(
                 [0],
@@ -697,15 +1149,22 @@ class LabelSimilarity(BaseEvaluator):
                 marker="o",
                 color="w",
                 markerfacecolor=pred_color_map[label],
-                markersize=6,
+                markersize=8,
                 label=str(label),
                 markeredgecolor="none",
             )
             for label in unique_labels
         ]
-        plt.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=10, frameon=False)
+        ax_legend.legend(
+            handles=legend_elements,
+            loc="center",
+            fontsize=legend_fontsize,
+            frameon=False,
+            ncol=min(len(unique_labels), 6),
+            bbox_to_anchor=(0.5, 0.5),
+        )
         plt.tight_layout()
-        plt.savefig(umap_dir / "predicted_labels.png", dpi=300, bbox_inches="tight")
+        plt.savefig(umap_dir / f"01_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
         # Plot mean ROC curve
@@ -732,27 +1191,98 @@ class LabelSimilarity(BaseEvaluator):
             plt.xlabel("False Positive Rate")
             plt.ylabel("True Positive Rate")
             plt.title(f"{v} ({label_kind.value})")
-            plt.legend(loc="lower right")
             plt.tight_layout()
             plt.savefig(roc_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
+            # Create and save separate legend for ROC curve
+            fig_legend, ax_legend = plt.subplots(figsize=(3, 1), dpi=dpi)
+            ax_legend.axis("off")
+            legend_elements = [plt.Line2D([0], [0], color="tab:blue", linewidth=2, label=f"AUC = {roc_auc:.3f}")]
+            ax_legend.legend(
+                handles=legend_elements,
+                loc="center",
+                fontsize=legend_fontsize,
+                frameon=False,
+                bbox_to_anchor=(0.5, 0.5),
+            )
+            plt.tight_layout()
+            plt.savefig(roc_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
             # Plot UMAP
-            plt.figure(figsize=(8, 6))
+            plt.figure(figsize=figsize, dpi=dpi)
             # Create plot without frame
             ax = plt.gca()
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
+            # Create linewidths to highlight true label cells with borders
+            linewidths = np.where(mask, 0.3, 0.0)
+
             scatter = plt.scatter(
-                umap_emb[:, 0], umap_emb[:, 1], c=sim, cmap="RdBu_r", vmin=-1, vmax=1, s=5, alpha=0.7, edgecolors="none"
+                umap_emb[:, 0],
+                umap_emb[:, 1],
+                c=sim,
+                cmap="RdBu_r",
+                vmin=-1,
+                vmax=1,
+                s=5,
+                alpha=0.7,
+                edgecolors="black",
+                linewidths=linewidths,
             )
-            plt.colorbar(scatter, label="Similarity Score")
-            plt.title(f"{v} ({label_kind.value})", fontweight="bold")
+            cbar = plt.colorbar(scatter, label="Similarity Score")
+            cbar.set_ticks([-1, 0, 1])
+
             plt.xticks([])
             plt.yticks([])
             plt.tight_layout()
+
+            # Save plot without legend
             plt.savefig(umap_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
+            # Create and save separate legend for border meaning
+            fig_legend, ax_legend = plt.subplots(figsize=(3, 1.5), dpi=dpi)
+            ax_legend.axis("off")
+            legend_elements = [
+                plt.Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    color="w",
+                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    markersize=16,
+                    label=f"True {v}",
+                    linestyle="None",
+                ),
+                plt.Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    color="w",
+                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
+                    markeredgecolor="none",
+                    markersize=16,
+                    label="Other cells",
+                    linestyle="None",
+                ),
+            ]
+            ax_legend.legend(
+                handles=legend_elements,
+                loc="center",
+                frameon=True,
+                fancybox=True,
+                shadow=True,
+                fontsize=legend_fontsize,
+                ncol=1,
+                bbox_to_anchor=(0.5, 0.5),
+            )
+            plt.tight_layout()
+            plt.savefig(umap_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
             # Plot histogram with consistent scale
@@ -762,10 +1292,27 @@ class LabelSimilarity(BaseEvaluator):
             plt.xlabel(f"{self.similarity.title()} Similarity")
             plt.ylabel("Density")
             plt.xlim(-1, 1)
-            plt.legend(frameon=frameon)
             plt.title(f"{v} ({label_kind.value})")
             plt.tight_layout()
             plt.savefig(hist_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
+            # Create and save separate legend for histogram
+            fig_legend, ax_legend = plt.subplots(figsize=(3, 1), dpi=dpi)
+            ax_legend.axis("off")
+            legend_elements = [
+                plt.Rectangle((0, 0), 1, 1, facecolor="tab:blue", alpha=0.5, label="other"),
+                plt.Rectangle((0, 0), 1, 1, facecolor="tab:orange", alpha=0.7, label=str(v)),
+            ]
+            ax_legend.legend(
+                handles=legend_elements,
+                loc="center",
+                fontsize=legend_fontsize,
+                frameon=False,
+                bbox_to_anchor=(0.5, 0.5),
+            )
+            plt.tight_layout()
+            plt.savefig(hist_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
         # Plot mean ROC curve
@@ -779,9 +1326,19 @@ class LabelSimilarity(BaseEvaluator):
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
         plt.title("Mean ROC Curve")
-        plt.legend(loc="lower right")
         plt.tight_layout()
         plt.savefig(roc_dir / f"00_mean_roc.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Create and save separate legend for mean ROC curve
+        fig_legend, ax_legend = plt.subplots(figsize=(3, 1), dpi=dpi)
+        ax_legend.axis("off")
+        legend_elements = [plt.Line2D([0], [0], color="tab:blue", linewidth=2, label=f"Mean AUC = {mean_auc:.3f}")]
+        ax_legend.legend(
+            handles=legend_elements, loc="center", fontsize=legend_fontsize, frameon=False, bbox_to_anchor=(0.5, 0.5)
+        )
+        plt.tight_layout()
+        plt.savefig(roc_dir / f"00_mean_roc_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
         # Reset matplotlib parameters to default
