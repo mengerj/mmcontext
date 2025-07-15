@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+from pathlib import Path
 from typing import Optional
 
 import anndata
@@ -19,6 +20,367 @@ from sklearn.metrics.pairwise import cosine_similarity
 from wordcloud import WordCloud
 
 logger = logging.getLogger(__name__)
+
+
+def plot_query_scores_with_labels_umap(
+    adata: anndata.AnnData,
+    queries: list[str],
+    labels: list[str],
+    label_key: str,
+    embedding_key: str = "X_umap",
+    emb_key: str = "mmcontext_emb",
+    save_plot: bool = True,
+    save_dir: str | None = None,
+    nametag: str | None = None,
+    figsize: tuple = (6, 6),
+    dpi: int = 300,
+    point_size: int = 5,
+    frameon: bool = False,
+    legend_fontsize: int = 10,
+    font_weight: str = "normal",
+    font_style: str = "normal",
+    font_size: int = 12,
+    axis_label_size: int = 12,
+    axis_tick_size: int = 10,
+    save_format: str = "png",
+    umap_n_neighbors: int = 15,
+    umap_min_dist: float = 0.1,
+    umap_random_state: int = 42,
+    **kwargs,
+):
+    """
+    Plot UMAPs colored by query similarity scores with label highlighting.
+
+    This function creates UMAP plots where:
+    1. Points are colored by similarity scores for each query
+    2. Points corresponding to specific labels are highlighted with borders
+    3. Query strings are saved as titles in separate plots
+    4. Verification is performed to ensure labels match queries and exist in adata.obs
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        AnnData object containing query_scores in .obs and embeddings in .obsm
+    queries : list[str]
+        List of query strings to plot. Must match keys in adata.obs["query_scores"]
+    labels : list[str]
+        List of label names, one per query (same length as queries)
+    label_key : str
+        Key in adata.obs containing the label information
+    embedding_key : str, optional
+        Key in adata.obsm containing UMAP coordinates. If not present, UMAP will be computed.
+        Defaults to "X_umap"
+    emb_key : str, optional
+        Key in adata.obsm containing embeddings for UMAP computation. Defaults to "mmcontext_emb"
+    save_plot : bool, optional
+        Whether to save plots. Defaults to True
+    save_dir : str, optional
+        Directory to save plots. Defaults to None
+    nametag : str, optional
+        Additional tag for saved files. Defaults to None
+    figsize : tuple, optional
+        Figure size (width, height). Defaults to (6, 6)
+    dpi : int, optional
+        DPI for saved plots. Defaults to 300
+    point_size : int, optional
+        Size of scatter plot points. Defaults to 5
+    frameon : bool, optional
+        Whether to show plot frame. Defaults to False
+    legend_fontsize : int, optional
+        Font size for legends. Defaults to 10
+    font_weight : str, optional
+        Font weight. Defaults to "normal"
+    font_style : str, optional
+        Font style. Defaults to "normal"
+    font_size : int, optional
+        General font size. Defaults to 12
+    axis_label_size : int, optional
+        Axis label font size. Defaults to 12
+    axis_tick_size : int, optional
+        Axis tick font size. Defaults to 10
+    save_format : str, optional
+        Format for saved plots. Defaults to "png"
+    umap_n_neighbors : int, optional
+        Number of neighbors for UMAP computation. Defaults to 15
+    umap_min_dist : float, optional
+        Minimum distance for UMAP computation. Defaults to 0.1
+    umap_random_state : int, optional
+        Random state for UMAP computation. Defaults to 42
+    **kwargs
+        Additional keyword arguments
+
+    Returns
+    -------
+    None
+        Saves or displays UMAP plots
+
+    Raises
+    ------
+    ValueError
+        If validation checks fail
+
+    Examples
+    --------
+    >>> plot_query_scores_with_labels_umap(
+    ...     adata=adata,
+    ...     queries=["T cell", "B cell"],
+    ...     labels=["T_cell", "B_cell"],
+    ...     label_key="cell_type",
+    ...     save_dir="plots/query_analysis",
+    ... )
+    """
+    logger.info("Starting query scores UMAP plotting with label highlighting")
+
+    # Validation checks
+    if "query_scores" not in adata.obs:
+        raise ValueError("`adata.obs['query_scores']` not found. Run query annotation first.")
+
+    if len(queries) != len(labels):
+        raise ValueError(f"Number of queries ({len(queries)}) must match number of labels ({len(labels)})")
+
+    if label_key not in adata.obs:
+        raise ValueError(f"Label key '{label_key}' not found in adata.obs")
+
+    # Check if all labels exist in adata.obs[label_key]
+    available_labels = set(adata.obs[label_key].unique())
+    missing_labels = [label for label in labels if label not in available_labels]
+    if missing_labels:
+        raise ValueError(f"Labels {missing_labels} not found in adata.obs['{label_key}']")
+
+    # Verify queries exist in query_scores
+    if len(adata.obs["query_scores"]) == 0:
+        raise ValueError("query_scores is empty")
+
+    first_scores = adata.obs["query_scores"].iloc[0]
+    if not isinstance(first_scores, dict):
+        raise ValueError("query_scores must contain dictionaries")
+
+    available_queries = set(first_scores.keys())
+    missing_queries = [query for query in queries if query not in available_queries]
+    if missing_queries:
+        raise ValueError(f"Queries {missing_queries} not found in query_scores")
+
+    logger.info(f"Validation passed. Processing {len(queries)} queries with corresponding labels")
+
+    # Prepare UMAP embedding
+    if embedding_key not in adata.obsm:
+        logger.info(f"Computing UMAP embedding using {emb_key}")
+        if emb_key not in adata.obsm:
+            raise ValueError(f"Embedding key '{emb_key}' not found in adata.obsm")
+
+        # Compute UMAP
+        reducer = umap.UMAP(n_neighbors=umap_n_neighbors, min_dist=umap_min_dist, random_state=umap_random_state)
+        umap_embedding = reducer.fit_transform(adata.obsm[emb_key])
+        adata.obsm[embedding_key] = umap_embedding
+
+    umap_coords = adata.obsm[embedding_key]
+
+    # Set up saving directory
+    if save_plot and save_dir:
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        # Create subdirectories
+        plots_dir = save_path / "query_plots"
+        titles_dir = save_path / "query_titles"
+        plots_dir.mkdir(exist_ok=True)
+        titles_dir.mkdir(exist_ok=True)
+
+    # Configure matplotlib
+    plt.rcParams.update(
+        {
+            "font.size": font_size,
+            "font.weight": font_weight,
+            "font.style": font_style,
+            "axes.labelsize": axis_label_size,
+            "xtick.labelsize": axis_tick_size,
+            "ytick.labelsize": axis_tick_size,
+            "legend.fontsize": legend_fontsize,
+            "axes.spines.left": frameon,
+            "axes.spines.bottom": frameon,
+            "axes.spines.top": frameon,
+            "axes.spines.right": frameon,
+        }
+    )
+
+    # Process each query-label pair
+    for i, (query, label) in enumerate(zip(queries, labels, strict=False)):
+        logger.info(f"Processing query '{query}' with label '{label}' ({i + 1}/{len(queries)})")
+
+        # Extract similarity scores for this query
+        query_scores = []
+        for score_dict in adata.obs["query_scores"]:
+            if query not in score_dict:
+                raise ValueError(f"Query '{query}' not found in query_scores entry")
+            query_scores.append(score_dict[query])
+
+        query_scores = np.array(query_scores)
+
+        # Normalize similarity scores to -1 to 1 range
+        query_scores_min = query_scores.min()
+        query_scores_max = query_scores.max()
+        if query_scores_max > query_scores_min:
+            query_scores_normalized = 2 * (query_scores - query_scores_min) / (query_scores_max - query_scores_min) - 1
+        else:
+            query_scores_normalized = np.zeros_like(query_scores)
+
+        # Create mask for the target label
+        label_mask = adata.obs[label_key] == label
+
+        # Create linewidths for borders (highlight target label)
+        linewidths = np.where(label_mask, 0.3, 0.0)
+
+        # Create main UMAP plot
+        plt.figure(figsize=figsize, dpi=dpi)
+        ax = plt.gca()
+
+        # Remove spines if frameon is False
+        if not frameon:
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+        # Create scatter plot with normalized similarity scores as colors
+        scatter = plt.scatter(
+            umap_coords[:, 0],
+            umap_coords[:, 1],
+            c=query_scores_normalized,
+            cmap="RdBu_r",
+            s=point_size,
+            alpha=0.7,
+            edgecolors="black",
+            linewidths=linewidths,
+            vmin=-1,
+            vmax=1,
+        )
+
+        # Add colorbar with specific ticks
+        cbar = plt.colorbar(scatter, label="Similarity Score")
+        cbar.set_ticks([-1, 0, 1])
+
+        # Remove ticks
+        plt.xticks([])
+        plt.yticks([])
+
+        plt.tight_layout()
+
+        # Save main plot
+        if save_plot and save_dir:
+            query_safe = query.replace(" ", "_").replace("/", "_")
+            plot_filename = f"query_{i:02d}_{query_safe}.{save_format}"
+            if nametag:
+                plot_filename = f"{nametag}_{plot_filename}"
+
+            plt.savefig(plots_dir / plot_filename, dpi=dpi, bbox_inches="tight")
+            logger.info(f"Saved plot: {plots_dir / plot_filename}")
+
+        if not save_plot:
+            plt.show()
+        else:
+            plt.close()
+
+        # Create separate title plot
+        fig_title, ax_title = plt.subplots(figsize=(max(len(query) * 0.15, 6), 1.5), dpi=dpi)
+        ax_title.axis("off")
+
+        # Add title text
+        ax_title.text(
+            0.5,
+            0.7,
+            f"Query: {query}",
+            ha="center",
+            va="center",
+            fontsize=font_size + 2,
+            weight="bold",
+            transform=ax_title.transAxes,
+        )
+        ax_title.text(
+            0.5,
+            0.3,
+            f"Highlighted label: {label}",
+            ha="center",
+            va="center",
+            fontsize=font_size,
+            style="italic",
+            transform=ax_title.transAxes,
+        )
+
+        plt.tight_layout()
+
+        # Save title plot
+        if save_plot and save_dir:
+            title_filename = f"query_{i:02d}_{query_safe}_title.{save_format}"
+            if nametag:
+                title_filename = f"{nametag}_{title_filename}"
+
+            plt.savefig(titles_dir / title_filename, dpi=dpi, bbox_inches="tight")
+            logger.info(f"Saved title: {titles_dir / title_filename}")
+
+        if not save_plot:
+            plt.show()
+        else:
+            plt.close()
+
+        # Create legend plot showing what the borders mean
+        fig_legend, ax_legend = plt.subplots(figsize=(4, 1.5), dpi=dpi)
+        ax_legend.axis("off")
+
+        legend_elements = [
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=(0.7, 0.7, 0.7, 0.6),
+                markeredgecolor="black",
+                markeredgewidth=1,
+                markersize=16,
+                label=f"Target: {label}",
+                linestyle="None",
+            ),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=(0.7, 0.7, 0.7, 0.6),
+                markeredgecolor="none",
+                markersize=16,
+                label="Other cells",
+                linestyle="None",
+            ),
+        ]
+
+        ax_legend.legend(
+            handles=legend_elements,
+            loc="center",
+            frameon=True,
+            fancybox=True,
+            shadow=True,
+            fontsize=legend_fontsize,
+            ncol=1,
+            bbox_to_anchor=(0.5, 0.5),
+        )
+
+        plt.tight_layout()
+
+        # Save legend plot
+        if save_plot and save_dir:
+            legend_filename = f"query_{i:02d}_{query_safe}_legend.{save_format}"
+            if nametag:
+                legend_filename = f"{nametag}_{legend_filename}"
+
+            plt.savefig(plots_dir / legend_filename, dpi=dpi, bbox_inches="tight")
+            logger.info(f"Saved legend: {plots_dir / legend_filename}")
+
+        if not save_plot:
+            plt.show()
+        else:
+            plt.close()
+
+    # Reset matplotlib parameters
+    plt.rcParams.update(plt.rcParamsDefault)
+
+    logger.info(f"Completed plotting for {len(queries)} queries")
 
 
 def plot_umap(
