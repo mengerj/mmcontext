@@ -1132,7 +1132,8 @@ class MMContextEncoder(nn.Module):
         ds : HFDataset | DatasetDict
             Input dataset to prepare
         primary_cell_sentence_col : str
-            Column containing cell/sample representations. References one of the cell_sentence_cols in the dataset, that you want to process.
+            Column containing cell/sample representations. References one of the cell_sentence columns in the dataset, that you want to process.
+            These will be tokenized by the omics part of the model, if prefix=True, or by the text part of the model, if prefix=False.
             These will be the primary output columns. For multiplets, negative samples will be chosen from this column, if they are sample indices. Other negatives
             are captions and are not modified.
             If prefix=True, these will be prefixed with the processor's prefix.
