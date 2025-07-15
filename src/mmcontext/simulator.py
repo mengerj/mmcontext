@@ -269,11 +269,11 @@ class OmicsCaptionSimulator:
     # -------------------------------------------------------------------
     # main
     # -------------------------------------------------------------------
-    def simulate(self) -> "OmicsCaptionSimulator":
+    def simulate(self, preset: str = "pair-binary") -> "OmicsCaptionSimulator":
         """Run the complete simulation pipeline."""
         self._build_anndata()
         self._build_embeddings()
-        self._build_hf_dataset()
+        self._build_hf_dataset(preset=preset)
         return self
 
     # -------------------------------------------------------------------
@@ -330,7 +330,8 @@ class OmicsCaptionSimulator:
         """
         spec = LOSS_PRESETS[preset]  # raises KeyError if bad
         needs_cls = spec["needs_class"]
-
+        logging.info(f"Building HF dataset with preset: {preset}")
+        logging.info("Available presets: %s", ", ".join(LOSS_PRESETS.keys()))
         # ------------------------------------------------ raw strings --------
         obs = self.adata.obs
         sample_ids = obs.index.tolist()  # S1 … SN
