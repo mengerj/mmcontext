@@ -285,7 +285,7 @@ def test_training_bimodal(st_bimodal_encoder, dummy_dataset_with_split, tmp_path
         num_labels=2,
         concatenation_sent_rep=True,  # For single sentence
     )
-    ds = st_bimodal_encoder[0].prepare_ds(dummy_dataset_with_split, cell_sentences_cols="omics_tokens")
+    ds = st_bimodal_encoder[0].prepare_ds(dummy_dataset_with_split, primary_cell_sentence_col="omics_tokens")
     # Create trainer with bimodal dataset
     trainer = SentenceTransformerTrainer(
         model=st_bimodal_encoder,
