@@ -13,6 +13,12 @@ collect_metrics:
   # Visualization settings
   plot_format: "png" # Options: "png", "pdf", "svg"
 
+  # Plot appearance settings
+  vertical_plots: true # Use vertical orientation (model names on y-axis)
+  font_size: 50 # Font size for labels and titles
+  fig_width: 20 # Figure width per subplot
+  fig_height: 20 # Figure height per subplot
+
   # ScIB type handling
   scib_types_as_models:
     ["raw", "embedding_X_geneformer", "embedding_X_hvg", "embedding_X_pca"]
@@ -22,13 +28,14 @@ collect_metrics:
   # Metrics to include from regular evaluations
   regular_metrics:
     - "LabelSimilarity/mean_auc"
+    - "LabelSimilarity/accuracy_over_random"
     # Add more as needed
 
   # Metrics to include from scib evaluations
   scib_metrics:
     - "scib/Overall_Score"
-    - "scib/Bio_Conservation_Score"
-    - "scib/Batch_Integration_Score"
+    #- "scib/Bio_Conservation_Score"
+    #- "scib/Batch_Integration_Score"
     # Add more as needed
 
   # Label configurations to include
