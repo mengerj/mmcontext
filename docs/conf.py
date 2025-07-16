@@ -29,7 +29,12 @@ repository_url = urls["Source"]
 # The full version, including alpha/beta/rc tags
 release = info["Version"]
 
+# Bibtex configuration
 bibtex_bibfiles = ["references.bib"]
+bibtex_default_style = "unsrt"
+bibtex_reference_style = "author_year"
+bibtex_encoding = "utf-8"
+
 templates_path = ["_templates"]
 nitpicky = False  # Warn about broken links
 needs_sphinx = "4.0"
@@ -64,7 +69,20 @@ extensions = [
 
 
 autosummary_generate = True
+autosummary_generate_overwrite = False
+autosummary_imported_members = False
+autosummary_ignore_module_all = False
+autosummary_mock_imports = []
 autodoc_member_order = "groupwise"
+autodoc_default_options = {
+    "members": True,
+    "inherited-members": False,
+    "show-inheritance": True,
+    "undoc-members": False,
+}
+autodoc_preserve_defaults = True
+autodoc_typehints = "description"
+autodoc_typehints_description_target = "documented"
 default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
@@ -107,6 +125,23 @@ intersphinx_mapping = {
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
 
+# Add more comprehensive warning suppression for Read the Docs
+suppress_warnings = [
+    "docutils",
+    "docutils.parsers.rst",
+    "docutils.parsers.rst.states",
+    "docutils.parsers.rst.directives",
+    "docutils.utils",
+    "ref.class",  # To suppress warnings related to unresolved class references
+    "ref.attr",
+    "ref.func",
+    "ref.meth",
+    "autosummary",
+    "toc.not_readable",
+    "epub.unknown_project_files",
+    "app.add_source_suffix",
+]
+
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -135,12 +170,4 @@ nitpick_ignore = [
     ("py:class", "torch.nn.modules.module.Module"),
     ("py:class", "torch.utils.hooks.RemovableHandle"),
     ("py:attr", "torch.nn.modules.module.Module"),
-]
-
-suppress_warnings = [
-    "docutils",
-    "ref.class",  # To suppress warnings related to unresolved class references
-    "ref.attr",
-    "ref.func",
-    "ref.meth",
 ]
