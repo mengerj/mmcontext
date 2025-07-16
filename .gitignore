@@ -39,6 +39,7 @@ docs/notebooks/*zarr
 venv*/
 
 docs/notebooks/*zarr*
+exploratory/notebooks/figs
 
 #env variables
 .env

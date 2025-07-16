@@ -39,6 +39,7 @@ from datasets import DatasetDict
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
 from sentence_transformers.models import Pooling
+from sentence_transformers.models.Module import Module
 from transformers import AutoModel, AutoTokenizer
 
 from mmcontext.file_utils import (
@@ -276,7 +277,7 @@ class MMContextProcessor:
 # --------------------------------------------------------------------------- #
 # 2.  Encoder
 # --------------------------------------------------------------------------- #
-class MMContextEncoder(nn.Module):
+class MMContextEncoder(Module):
     """
     Dual-tower encoder that acts as its own tokenizer.
 
@@ -328,6 +329,20 @@ class MMContextEncoder(nn.Module):
     """
 
     VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "random"]
+
+    # Configuration attributes for SentenceTransformer Module base class
+    config_keys = [
+        "text_encoder_name",
+        "adapter_hidden_dim",
+        "adapter_output_dim",
+        "freeze_text_encoder",
+        "unfreeze_last_n_layers",
+        "registered_data_origin",
+        "registered_input_dim",
+        "output_token_embeddings",
+        "train_lookup",
+        "pooling_mode",
+    ]
 
     def __init__(
         self,
@@ -724,9 +739,10 @@ class MMContextEncoder(nn.Module):
             "output_token_embeddings": self.output_token_embeddings,
             "train_lookup": self.train_lookup,
             "pooling_mode": self.pooling_mode,
+            "model_type": "bert",
         }
 
-    def save(self, output_path: str, safe_serialization: bool = True) -> None:
+    def save(self, output_path: str, safe_serialization: bool = True, **kwargs) -> None:
         """
         Saves the model configuration and state dict, excluding the omics embedding matrix.
 
@@ -739,10 +755,8 @@ class MMContextEncoder(nn.Module):
         """
         os.makedirs(output_path, exist_ok=True)
 
-        # Save config without omics matrix
-        config_path = os.path.join(output_path, "config.json")
-        with open(config_path, "w") as fOut:
-            json.dump(self._get_config_dict(), fOut, indent=2)
+        # Save config using base class method
+        self.save_config(output_path)
 
         # Get state dict and filter omics embeddings
         state = self.state_dict()
@@ -750,36 +764,52 @@ class MMContextEncoder(nn.Module):
             # Remove omics embeddings but keep adapter weights
             state = {k: v for k, v in state.items() if not k.startswith("omics_encoder.embeddings")}
 
-        if safe_serialization:
-            model_path = os.path.join(output_path, "model.safetensors")
-            # Create a temporary model with the filtered state dict
-            temp_model = MMContextEncoder(
-                text_encoder_name=self.text_encoder_name,
-                adapter_hidden_dim=self.adapter_hidden_dim,
-                adapter_output_dim=self.adapter_output_dim,
-                registered_data_origin=self._registered_data_origin,
-                registered_input_dim=self._registered_input_dim,
-                output_token_embeddings=self.output_token_embeddings,
-                train_lookup=self.train_lookup,
-                pooling_mode=self.pooling_mode,
-            )
-            # Load the filtered state dict into the temporary model
-            temp_model.load_state_dict(state, strict=False)
-            # Save using safetensors
-            save_safetensors_model(temp_model, model_path)
-        else:
-            model_path = os.path.join(output_path, "pytorch_model.bin")
-            torch.save(state, model_path)
+        # Create a temporary model with the filtered state dict for saving
+        temp_model = MMContextEncoder(
+            text_encoder_name=self.text_encoder_name,
+            adapter_hidden_dim=self.adapter_hidden_dim,
+            adapter_output_dim=self.adapter_output_dim,
+            registered_data_origin=self._registered_data_origin,
+            registered_input_dim=self._registered_input_dim,
+            output_token_embeddings=self.output_token_embeddings,
+            train_lookup=self.train_lookup,
+            pooling_mode=self.pooling_mode,
+        )
+        # Load the filtered state dict into the temporary model
+        temp_model.load_state_dict(state, strict=False)
 
-    @staticmethod
-    def load(input_path: str, safe_serialization: bool = True):
+        # Save torch weights using base class method
+        temp_model.save_torch_weights(output_path, safe_serialization=safe_serialization)
+
+    @classmethod
+    def load(
+        cls,
+        model_name_or_path: str,
+        subfolder: str = "",
+        token=None,
+        cache_folder=None,
+        revision=None,
+        local_files_only=False,
+        safe_serialization: bool = True,
+        **kwargs,
+    ):
         """
         Loads the model from disk.
 
         Parameters
         ----------
-        input_path : str
-            Directory where the model was saved.
+        model_name_or_path : str
+            Path to the model directory or the name of the model on Hugging Face.
+        subfolder : str, optional
+            The subfolder within the model directory to load from. Defaults to ''.
+        token : bool | str | None, optional
+            Token for authentication. Defaults to None.
+        cache_folder : str | None, optional
+            Cache folder for the model files. Defaults to None.
+        revision : str | None, optional
+            Revision of the model to load. Defaults to None.
+        local_files_only : bool, optional
+            Whether to only load local files. Defaults to False.
         safe_serialization : bool, optional
             If True, expects safetensors format; else a PyTorch bin.
 
@@ -788,19 +818,29 @@ class MMContextEncoder(nn.Module):
         MMContextEncoder
             The loaded model instance, ready for data registration.
         """
-        config_path = os.path.join(input_path, "config.json")
-        with open(config_path) as fIn:
-            cfg = json.load(fIn)
+        # Load configuration
+        cfg = cls.load_config(
+            model_name_or_path,
+            subfolder,
+            token=token,
+            cache_folder=cache_folder,
+            revision=revision,
+            local_files_only=local_files_only,
+        )
 
         # Create model from config without omics embedding
-        model = MMContextEncoder(**cfg)
+        model = cls(**cfg)
 
-        # Load state dict
-        if safe_serialization and os.path.exists(os.path.join(input_path, "model.safetensors")):
-            load_safetensors_model(model, os.path.join(input_path, "model.safetensors"))
-        else:
-            state_dict = torch.load(os.path.join(input_path, "pytorch_model.bin"), map_location=torch.device("cpu"))
-            model.load_state_dict(state_dict, strict=False)
+        # Load torch weights
+        cls.load_torch_weights(
+            model_name_or_path,
+            subfolder,
+            token=token,
+            cache_folder=cache_folder,
+            revision=revision,
+            local_files_only=local_files_only,
+            model=model,
+        )
 
         if model._registered_data_origin != "unregistered":
             logger.warning(
@@ -1132,7 +1172,8 @@ class MMContextEncoder(nn.Module):
         ds : HFDataset | DatasetDict
             Input dataset to prepare
         primary_cell_sentence_col : str
-            Column containing cell/sample representations. References one of the cell_sentence_cols in the dataset, that you want to process.
+            Column containing cell/sample representations. References one of the cell_sentence columns in the dataset, that you want to process.
+            These will be tokenized by the omics part of the model, if prefix=True, or by the text part of the model, if prefix=False.
             These will be the primary output columns. For multiplets, negative samples will be chosen from this column, if they are sample indices. Other negatives
             are captions and are not modified.
             If prefix=True, these will be prefixed with the processor's prefix.

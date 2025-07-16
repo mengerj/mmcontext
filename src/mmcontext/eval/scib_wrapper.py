@@ -28,6 +28,7 @@ class ScibBundle(BaseEvaluator):
         adata: ad.AnnData,
         dataset_name: str,
         model_id: str,
+        model_name: str,
         bio_labels: list[str],
         batch_labels: list[str],
         embed_name: str = "X_embed",
@@ -90,6 +91,7 @@ class ScibBundle(BaseEvaluator):
                                 {
                                     "dataset": dataset_name,
                                     "model": model_id,
+                                    "model_name": model_name,
                                     "bio_label": bio_label,
                                     "batch_label": batch_label,
                                     "metric": f"scib/{metric_name}",
@@ -107,6 +109,7 @@ class ScibBundle(BaseEvaluator):
                         {
                             "dataset": dataset_name,
                             "model": model_id,
+                            "model_name": model_name,
                             "bio_label": bio_label,
                             "batch_label": batch_label,
                             "metric": "scib/error",

@@ -39,3 +39,14 @@ datasets:
       - Disease
     batch_label_list:
       - "sra_study_acc"
+  - name: human_immune_health_atlas
+    source: jo-mengr/human_immune_health_atlas_20k_single_no_caption_cs50
+    split: test
+    format: hub
+    index_col: sample_idx
+    bio_label_list:
+      - AIFI_L1
+      - AIFI_L2
+      - AIFI_L3
+    batch_label_list:
+      - batch_id

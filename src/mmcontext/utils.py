@@ -15,7 +15,9 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-def consolidate_low_frequency_categories(adata: anndata.AnnData, columns: list, threshold: int, remove=False):
+def consolidate_low_frequency_categories(
+    adata: anndata.AnnData, columns: str | list[str], threshold: int, remove=False
+):
     """Consolidates low frequency categories in specified columns of an AnnData object.
 
     Modifies the AnnData object's .obs by setting entries in specified columns
@@ -40,6 +42,9 @@ def consolidate_low_frequency_categories(adata: anndata.AnnData, columns: list, 
     # Ensure the object is loaded into memory if it's in backed mode
     if adata.isbacked:
         adata = adata.to_memory()
+
+    if isinstance(columns, str):
+        columns = [columns]
 
     for col in columns:
         if col in adata.obs.columns:

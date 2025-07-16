@@ -19,6 +19,6 @@ The main model is {class}`mmcontext.models.MMContextEncoder.MMContextEncoder`. I
 .. autosummary::
     :toctree: ../generated/
     :nosignatures:
-    models.MMContextEncoder.MMContextEncoder
-    models.MMContextProcessor.MMContextProcessor
+    models.mmcontextencoder.MMContextEncoder
+    models.mmcontextencoder.MMContextProcessor
 ```

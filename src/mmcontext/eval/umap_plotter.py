@@ -56,6 +56,14 @@ class UmapPlotter(BaseEvaluator):
         figsize: tuple = (8, 8),
         dpi: int = 300,
         point_size: int = None,
+        font_size: int = 12,
+        font_style: str = "normal",
+        font_weight: str = "normal",
+        legend_fontsize: int = 10,
+        legend_loc: str = "right margin",
+        axis_label_size: int = 12,
+        axis_tick_size: int = 10,
+        frameon: bool = False,
         **kw,
     ) -> None:
         """
@@ -85,6 +93,22 @@ class UmapPlotter(BaseEvaluator):
             DPI for saved plots (default: 300)
         point_size : int, optional
             Size of points in UMAP (default: None, uses scanpy default)
+        font_size : int, optional
+            General font size (default: 12)
+        font_style : str, optional
+            Font style (default: "normal")
+        font_weight : str, optional
+            Font weight (default: "normal")
+        legend_fontsize : int, optional
+            Font size for legends (default: 10)
+        legend_loc : str, optional
+            Legend location (default: "right margin")
+        axis_label_size : int, optional
+            Size of axis labels (default: 12)
+        axis_tick_size : int, optional
+            Size of axis tick labels (default: 10)
+        frameon : bool, optional
+            Whether to show frame around plots (default: False)
         **kw
             Additional keyword arguments
         """
@@ -115,7 +139,7 @@ class UmapPlotter(BaseEvaluator):
                 # Create nametag for filename
                 nametag = f"{emb_key}_{label_key}_{label_kind.value}"
 
-                # Call the plot_umap function
+                # Call the plot_umap function with all parameters
                 plot_umap(
                     adata=adata_copy,
                     embedding_key=emb_key,
@@ -128,10 +152,15 @@ class UmapPlotter(BaseEvaluator):
                     dpi=dpi,
                     point_size=point_size,
                     save_format=save_format,
-                    frameon=False,
-                    legend_fontsize=10,
-                    font_weight="bold",
-                    legend_loc="right margin",
+                    frameon=frameon,
+                    legend_fontsize=legend_fontsize,
+                    font_weight=font_weight,
+                    legend_loc=legend_loc,
+                    # Additional parameters that we'll pass through
+                    font_size=font_size,
+                    font_style=font_style,
+                    axis_label_size=axis_label_size,
+                    axis_tick_size=axis_tick_size,
                 )
 
                 logger.info(f"✓ UMAP plot saved for {emb_key}")

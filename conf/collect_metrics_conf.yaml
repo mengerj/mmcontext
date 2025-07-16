@@ -1,0 +1,43 @@
+# conf/collect_metrics_conf.yaml
+defaults:
+  - dataset_list
+  - model_list
+
+collect_metrics:
+  # Directory containing evaluation results
+  eval_root: "${hydra:runtime.cwd}/out/embeddings"
+
+  # Output directory for collected metrics
+  output_dir: "${hydra:runtime.cwd}/out/collected_metrics"
+
+  # Visualization settings
+  plot_format: "png" # Options: "png", "pdf", "svg"
+
+  # Plot appearance settings
+  vertical_plots: true # Use vertical orientation (model names on y-axis)
+  font_size: 50 # Font size for labels and titles
+  fig_width: 20 # Figure width per subplot
+  fig_height: 20 # Figure height per subplot
+
+  # ScIB type handling
+  scib_types_as_models:
+    ["raw", "embedding_X_geneformer", "embedding_X_hvg", "embedding_X_pca"]
+  # Which type corresponds to the actual model embedding (will be merged with regular metrics)
+  model_embedding_type: "embedding_X_embed"
+
+  # Metrics to include from regular evaluations
+  regular_metrics:
+    - "LabelSimilarity/mean_auc"
+    - "LabelSimilarity/accuracy_over_random"
+    # Add more as needed
+
+  # Metrics to include from scib evaluations
+  scib_metrics:
+    - "scib/Overall_Score"
+    #- "scib/Bio_Conservation_Score"
+    #- "scib/Batch_Integration_Score"
+    # Add more as needed
+
+  # Label configurations to include
+  bio_labels: ["celltype", "cell_type"] # Can be overridden per dataset
+  batch_labels: ["tech", "batch", "donor"] # Can be overridden per dataset

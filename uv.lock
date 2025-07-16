@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.10, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12' and sys_platform == 'linux'",
@@ -1521,7 +1522,7 @@ requires-dist = [
     { name = "ipython", marker = "extra == 'doc'" },
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "myst-nb", marker = "extra == 'doc'", specifier = ">=1.1" },
-    { name = "numcodecs", specifier = ">=0.13.1,<0.15.0" },
+    { name = "numcodecs", specifier = ">=0.13.1,<0.15" },
     { name = "numpy", specifier = ">=1.26.4" },
     { name = "omegaconf", specifier = ">=2.3" },
     { name = "pandas", marker = "extra == 'doc'" },
@@ -1536,7 +1537,7 @@ requires-dist = [
     { name = "scib", specifier = ">=1.1.7" },
     { name = "scikit-learn", specifier = ">=1.5.2" },
     { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "sentence-transformers", git = "https://github.com/mengerj/sentence-transformers.git?rev=master" },
+    { name = "sentence-transformers", specifier = ">=5.0.0" },
     { name = "session-info", specifier = ">=1.0.1" },
     { name = "setuptools", marker = "extra == 'doc'" },
     { name = "sphinx", marker = "extra == 'doc'", specifier = ">=4" },
@@ -1552,6 +1553,7 @@ requires-dist = [
     { name = "wordcloud", specifier = ">=1.9.4" },
     { name = "zarr", specifier = "<3" },
 ]
+provides-extras = ["dev", "doc", "test"]
 
 [[package]]
 name = "more-itertools"
@@ -3098,8 +3100,8 @@ wheels = [
 
 [[package]]
 name = "sentence-transformers"
-version = "4.1.0.dev0"
-source = { git = "https://github.com/mengerj/sentence-transformers.git?rev=master#cae95497816a4f45272543488e0908a337860039" }
+version = "5.0.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "pillow" },
@@ -3109,6 +3111,10 @@ dependencies = [
     { name = "tqdm" },
     { name = "transformers" },
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/99/69/2a29773b43a24ee04eb26af492d85d520b30a86cfef22a0885e77e9c4a16/sentence_transformers-5.0.0.tar.gz", hash = "sha256:e5a411845910275fd166bacb01d28b7f79537d3550628ae42309dbdd3d5670d1", size = 366847 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/ff/178f08ea5ebc1f9193d9de7f601efe78c01748347875c8438f66f5cecc19/sentence_transformers-5.0.0-py3-none-any.whl", hash = "sha256:346240f9cc6b01af387393f03e103998190dfb0826a399d0c38a81a05c7a5d76", size = 470191 },
 ]
 
 [[package]]
