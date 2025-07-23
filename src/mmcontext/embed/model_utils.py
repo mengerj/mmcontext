@@ -71,10 +71,25 @@ class HFIndexedDataset(torch.utils.data.Dataset):
 
 
 def load_st_model(model_id: str | Path) -> SentenceTransformer:
-    """Load a Sentence-Transformer model from HF Hub or local path (unchanged)."""
+    """Load a Sentence-Transformer model from HF Hub or local path with GPU support."""
+    import os
+
     model_id = str(model_id)
     logger.info("Loading model %s", model_id)
-    return SentenceTransformer(model_id)
+
+    # Check device availability in worker process
+    if torch.cuda.is_available():
+        device = "cuda"
+        logger.info(f"CUDA available in worker process {os.getpid()}: {torch.cuda.get_device_name()}")
+    else:
+        device = "cpu"
+        logger.warning(f"CUDA not available in worker process {os.getpid()}, using CPU")
+
+    # Load model and explicitly move to device
+    model = SentenceTransformer(model_id, device=device)
+    logger.info(f"Model loaded on device: {model.device}")
+
+    return model
 
 
 def prepare_model_and_embed(

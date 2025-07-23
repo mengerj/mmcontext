@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from mmcontext.embed.dataset_utils import collect_adata_subset, load_generic_dataset
 from mmcontext.embed.model_utils import embed_labels, load_st_model, prepare_model_and_embed
@@ -214,6 +215,8 @@ def _process_single_worker(args):
     import time
     import traceback
 
+    import torch
+
     ds_cfg, model_cfg, run_cfg, output_root, output_format, adata_cache = args
     dataset_name = ds_cfg.name
     model_id = model_cfg.source
@@ -233,6 +236,16 @@ def _process_single_worker(args):
         handler.setFormatter(logging.Formatter(f"[Worker {os.getpid()}] %(levelname)s - %(message)s"))
         worker_logger.addHandler(handler)
 
+    # Initialize CUDA context in worker process if available
+    if torch.cuda.is_available():
+        worker_logger.info(f"Initializing CUDA context - Device: {torch.cuda.get_device_name()}")
+        # Clear any cached memory from previous runs
+        torch.cuda.empty_cache()
+        # Set memory growth to avoid OOM in multi-process scenarios
+        torch.cuda.set_per_process_memory_fraction(0.8)  # Use 80% of GPU memory max
+    else:
+        worker_logger.warning("CUDA not available in worker process")
+
     worker_logger.info(f"Starting processing: {dataset_name}/{model_id_for_path}")
     start_time = time.time()
 
@@ -243,9 +256,18 @@ def _process_single_worker(args):
 
         elapsed_time = time.time() - start_time
         worker_logger.info(f"Completed processing: {dataset_name_result}/{model_id_result} in {elapsed_time:.1f}s")
+
+        # Clean up GPU memory after processing
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         return dataset_name_result, model_id_result, success, error_msg
 
     except Exception as e:
+        # Clean up GPU memory on error
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         # Get full traceback for debugging
         elapsed_time = time.time() - start_time
         error_msg = f"{str(e)}\n{traceback.format_exc()}"
@@ -356,7 +378,27 @@ def embed_pipeline(cfg) -> None:
         task_timeout = cfg.run.get("task_timeout", 7200)
         print(f"Task timeout: {task_timeout}s ({task_timeout / 60:.1f} minutes)")
 
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Choose executor based on GPU availability and configuration
+        use_threads_for_gpu = cfg.run.get("use_threads_for_gpu", True)  # Default to threads for GPU
+
+        if torch.cuda.is_available() and use_threads_for_gpu:
+            # Use ThreadPoolExecutor for GPU tasks to share GPU memory efficiently
+            from concurrent.futures import ThreadPoolExecutor
+
+            print("Using ThreadPoolExecutor for GPU processing (better memory sharing)")
+            executor_class = ThreadPoolExecutor
+            worker_func = process_single_dataset_model  # Use direct function for threads
+            task_args_func = lambda task: task  # Pass args directly for threads
+        else:
+            # Use ProcessPoolExecutor for CPU tasks or when explicitly requested
+            from concurrent.futures import ProcessPoolExecutor
+
+            print("Using ProcessPoolExecutor")
+            executor_class = ProcessPoolExecutor
+            worker_func = _process_single_worker  # Use wrapper for processes
+            task_args_func = lambda task: (task,)  # Wrap in tuple for processes
+
+        with executor_class(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_task = {}
             for i, task in enumerate(tasks):
@@ -369,7 +411,7 @@ def embed_pipeline(cfg) -> None:
                 else:
                     model_id_for_path = model_id
 
-                future = executor.submit(_process_single_worker, task)
+                future = executor.submit(worker_func, *task_args_func(task))
                 future_to_task[future] = (dataset_name, model_id_for_path, i, time.time())
 
             # Process completed tasks with timeout
