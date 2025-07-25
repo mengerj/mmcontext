@@ -11,6 +11,7 @@ import torch
 from datasets import Dataset as HFDataset
 from sentence_transformers import SentenceTransformer
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from mmcontext.models.mmcontextencoder import MMContextEncoder as MMEnc
 
@@ -218,7 +219,7 @@ def prepare_model_and_embed(
 
     st_model.eval()
     with torch.inference_mode():
-        for batch_indices, batch_texts in loader:
+        for batch_indices, batch_texts in tqdm(loader, desc="Encoding"):
             # DataLoader returns tuples → convert to list[str]
             embeddings = st_model.encode(
                 list(batch_texts),
