@@ -230,7 +230,7 @@ def main(cfg: DictConfig):
                 freeze_text_encoder=cfg.text_encoder.freeze_text_encoder,
                 unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
                 train_lookup=False,
-                joint_adapter_hidden_dim=cfg.joint_adapter.hidden_dim,
+                joint_adapter_hidden_dim=None,
             )
 
             # get the main cell sentence column
