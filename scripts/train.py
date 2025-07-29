@@ -134,7 +134,12 @@ def generate_model_name(cfg: DictConfig, dataset_configs: list, cs_len: int = No
             shortened_name = dataset_name
 
         dataset_parts.append(shortened_name)
-        captions.append(dataset_config.caption)
+
+        # Shorten caption names for model naming
+        caption = dataset_config.caption
+        if caption == "natural_language_annotation":
+            caption = "nla"
+        captions.append(caption)
 
     # Combine dataset names
     datasets_str = "-".join(dataset_parts)
@@ -149,6 +154,11 @@ def generate_model_name(cfg: DictConfig, dataset_configs: list, cs_len: int = No
         encoder_str = "pubmedbert"
     elif "biobert" in text_encoder_name.lower():
         encoder_str = "biobert"
+    elif "modernbert" in text_encoder_name.lower():
+        if "bioclinical" in text_encoder_name.lower():
+            encoder_str = "biomodern"
+        else:
+            encoder_str = "modernbert"
     else:
         # Take the last part after '/'
         encoder_str = text_encoder_name.split("/")[-1]
@@ -220,6 +230,7 @@ def main(cfg: DictConfig):
                 freeze_text_encoder=cfg.text_encoder.freeze_text_encoder,
                 unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
                 train_lookup=False,
+                joint_adapter_hidden_dim=cfg.joint_adapter.hidden_dim,
             )
 
             # get the main cell sentence column
@@ -323,11 +334,58 @@ def main(cfg: DictConfig):
                 batch_size=cfg.trainer.per_device_eval_batch_size,
             )
             evaluators.append(evaluator)
+
+        # -------------------------------------------------------------------------
+        # 2.1. Load extra datasets (training only, no evaluators)
+        # -------------------------------------------------------------------------
+        if hasattr(cfg, "extra_datasets") and cfg.extra_datasets:
+            logger.info("Loading extra datasets for training...")
+
+            for extra_dataset_config in cfg.extra_datasets:
+                dataset_id = extra_dataset_config.id
+                dataset_name = extra_dataset_config.name
+                logger.info(f"Loading extra dataset: {dataset_name} from {dataset_id}")
+
+                # Load the dataset directly using the provided ID
+                dataset = load_dataset(dataset_id)
+                logger.info(f"Extra dataset loaded - Keys: {list(dataset.keys())}")
+
+                # Log dataset splits and sizes
+                for split_name, split_data in dataset.items():
+                    logger.info(f"  {split_name} split: {len(split_data)} samples")
+                    if len(split_data) > 0:
+                        logger.info(f"    Columns: {list(split_data.column_names)}")
+
+                # For extra datasets, we assume they don't need the special text_only processing
+                # and are already in the correct format. Allow configurable cell sentence column.
+                # cell_sentence_col = getattr(extra_dataset_config, 'primary_cell_sentence_col', 'cell_sentence_2')
+                dataset_ready = dataset.remove_columns(["source_database", "source_link", "is_synonym"])
+
+                logger.info(f"Extra dataset prepared - Keys: {list(dataset_ready.keys())}")
+
+                # Add only the train split to train_datasets (no validation for extra datasets)
+                if "train" in dataset_ready:
+                    train_datasets[dataset_name] = dataset_ready["train"]
+                    logger.info(f"Added extra dataset '{dataset_name}' to training set")
+                else:
+                    logger.warning(f"Extra dataset '{dataset_name}' has no 'train' split, skipping")
+
+                # Create loss function for this dataset type
+                losses[dataset_name] = get_loss(dataset_type=extra_dataset_config.type)
+
+                # Note: No evaluators created for extra datasets
+                logger.info(f"Finished processing extra dataset: {dataset_name}\n")
+
         # Build the sentence Trasnformer model
         modules = [enc]
         model = SentenceTransformer(modules=modules)
-        # Combine all evaluators into a single sequential evaluator
-        dev_evaluator = SequentialEvaluator(evaluators)
+
+        # Combine all evaluators into a single sequential evaluator (only if we have evaluators)
+        if evaluators:
+            dev_evaluator = SequentialEvaluator(evaluators)
+        else:
+            dev_evaluator = None
+            logger.info("No evaluators created - validation will be skipped")
 
         # -------------------------------------------------------------------------
         # 3. Load test datasets
@@ -348,6 +406,14 @@ def main(cfg: DictConfig):
         unique_model_name = generate_unique_model_name(cfg, cfg.datasets, cs_len)
         logger.info(f"Using model name: {unique_model_name}")
 
+        # Adjust evaluation strategy if there are no validation datasets
+        eval_strategy = cfg.trainer.eval_strategy
+        eval_steps = cfg.trainer.eval_steps
+        if not val_datasets or dev_evaluator is None:
+            logger.info("No validation datasets available - disabling evaluation during training")
+            eval_strategy = "no"
+            eval_steps = None
+
         args = SentenceTransformerTrainingArguments(
             output_dir=hydra_run_dir,
             num_train_epochs=cfg.trainer.num_train_epochs,
@@ -357,11 +423,12 @@ def main(cfg: DictConfig):
             warmup_ratio=cfg.trainer.warmup_ratio,
             fp16=cfg.trainer.fp16,
             bf16=cfg.trainer.bf16,
-            eval_strategy=cfg.trainer.eval_strategy,
-            eval_steps=cfg.trainer.eval_steps,
+            eval_strategy=eval_strategy,
+            eval_steps=eval_steps,
             save_strategy=cfg.trainer.save_strategy,
             save_steps=cfg.trainer.save_steps,
             save_total_limit=cfg.trainer.save_total_limit,
+            max_grad_norm=cfg.trainer.max_grad_norm,
             logging_steps=cfg.trainer.logging_steps,
             run_name=unique_model_name,
             dataloader_num_workers=cfg.trainer.dataloader_num_workers,
@@ -371,6 +438,15 @@ def main(cfg: DictConfig):
         # 8. Create a trainer & train with multiple datasets
         # -------------------------------------------------------------------------
         unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
+
+        # Create callbacks list
+        callbacks = [unfreeze_callback, WandbCallback()]
+
+        # Add joint adapter callback if joint adapter is configured
+        # if cfg.joint_adapter.hidden_dim is not None and cfg.joint_adapter.hidden_dim > 0:
+        #    joint_adapter_callback = UnfreezeJointAdapterCallback(unfreeze_epoch=cfg.joint_adapter.unfreeze_epoch)
+        #    callbacks.append(joint_adapter_callback)
+
         trainer = SentenceTransformerTrainer(
             model=model,
             args=args,
@@ -378,7 +454,7 @@ def main(cfg: DictConfig):
             eval_dataset=val_datasets,
             loss=losses,
             evaluator=dev_evaluator,  # Pass the sequential evaluator instead of the dictionary
-            callbacks=[unfreeze_callback, WandbCallback()],
+            callbacks=callbacks,
         )
         trainer.train()
 
