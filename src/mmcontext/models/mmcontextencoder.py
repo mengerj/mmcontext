@@ -198,7 +198,9 @@ class MMContextProcessor:
                     "attention_mask": torch.ones_like(ids),
                 }
             else:
-                tok_out = self.text_tok(texts, padding=padding, return_tensors="pt", **tok_kwargs)
+                tok_out = self.text_tok(
+                    texts, padding=padding, return_tensors="pt"
+                )  # ** tok_kwargs, removed due to issues with "document" type being passed, as of ST version 5.
             # tok["attention_mask"] = tok["attention_mask"].bool()
             tok_out["omics_text_info"] = torch.ones(len(texts), dtype=torch.int8)
             return tok_out
@@ -244,7 +246,9 @@ class MMContextProcessor:
                     "attention_mask": torch.ones_like(ids),
                 }
             else:
-                tok_out = self.text_tok(text_vals, padding=padding, return_tensors="pt", **tok_kwargs)
+                tok_out = self.text_tok(
+                    text_vals, padding=padding, return_tensors="pt"
+                )  # ** tok_kwargs, removed due to issues with "document" type being passed, as of ST version 5.
             for k, v in tok_out.items():  # v shape: (n_text, L)
                 full = [torch.zeros_like(v[0])] * len(texts)
                 for src, dst in enumerate(text_pos):
@@ -312,7 +316,7 @@ class MMContextEncoder(Module):
         Pre-initialized processor. If None, one will be created.
     registered_data_origin : str | None, optional
         Type of omics data representation. Must be one of:
-        ["unregistered", "pca", "hvg", "scvi_fm", "geneformer"].
+        ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs"].
         Defaults to "unregistered".
     registered_input_dim : int | None, optional
         Input dimension of registered data. Required when loading a model
@@ -326,9 +330,17 @@ class MMContextEncoder(Module):
     pooling_mode : str, optional
         Pooling strategy to use. Defaults to "mean". Options: "mean", "cls", "max", etc.
         See SentenceTransformers Pooling documentation for all options.
+    joint_adapter_hidden_dim : int | None, optional
+        Hidden dimension for the joint adapter that processes sentence embeddings.
+        If None or 0, no joint adapter is used. If >0, uses a two-layer MLP with the
+        specified hidden dimension. The joint adapter starts frozen and can be
+        enabled/unfrozen at a specified epoch during training. Defaults to None.
+
+        Note: Setting hidden_dim=0 would create an identity module (since input_dim
+        equals output_dim), which has no effect, so it's treated the same as None.
     """
 
-    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "random"]
+    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "random"]
 
     # Configuration attributes for SentenceTransformer Module base class
     config_keys = [
@@ -342,6 +354,8 @@ class MMContextEncoder(Module):
         "output_token_embeddings",
         "train_lookup",
         "pooling_mode",
+        "joint_adapter_hidden_dim",
+        "_joint_adapter_was_trained",
     ]
 
     def __init__(
@@ -359,6 +373,8 @@ class MMContextEncoder(Module):
         output_token_embeddings: bool = False,
         train_lookup: bool = False,
         pooling_mode: str = "mean",
+        joint_adapter_hidden_dim: int | None = None,
+        _joint_adapter_was_trained: bool = False,
     ) -> None:
         super().__init__()
         if registered_data_origin not in self.VALID_DATA_ORIGINS:
@@ -377,6 +393,7 @@ class MMContextEncoder(Module):
         self.output_token_embeddings = output_token_embeddings
         self.train_lookup = train_lookup
         self.pooling_mode = pooling_mode
+        self.joint_adapter_hidden_dim = joint_adapter_hidden_dim
 
         # Determine if adapters should be used
         self._use_adapters = adapter_hidden_dim is not None or adapter_output_dim is not None
@@ -418,6 +435,24 @@ class MMContextEncoder(Module):
             pooling_mode=pooling_mode,
         )
 
+        # ------------------------------------------------ joint adapter
+        # Create joint adapter if requested
+        # None or 0 = skip joint adapter altogether (0 would create identity module, so no effect)
+        # >0 = use joint adapter with MLP (hidden layer of specified size)
+        if joint_adapter_hidden_dim is not None and joint_adapter_hidden_dim > 0:
+            self.joint_adapter = AdapterModule(
+                input_dim=self._output_dim,
+                hidden_dim=joint_adapter_hidden_dim,
+                output_dim=self._output_dim,
+            )
+            # Start with frozen parameters
+            for param in self.joint_adapter.parameters():
+                param.requires_grad = False
+            self._joint_adapter_enabled = False
+        else:
+            self.joint_adapter = None
+            self._joint_adapter_enabled = False
+
         # ------------------------------------------------ omics tower
         if omics_embedding is not None:
             self._init_omics(omics_embedding)
@@ -452,6 +487,9 @@ class MMContextEncoder(Module):
 
         self.processor = processor
         self._manage_text_encoder_freezing()
+
+        # Track if joint adapter was trained (used for proper loading)
+        self._joint_adapter_was_trained = _joint_adapter_was_trained
 
     def _init_omics(self, matrix: np.ndarray):
         """Initialize the omics tower given an embedding matrix."""
@@ -504,12 +542,18 @@ class MMContextEncoder(Module):
                 param.requires_grad = False
 
             if self.unfreeze_last_n_layers > 0:
+                # For ModernBERT models
+                if hasattr(self.text_encoder, "layers"):
+                    layers = self.text_encoder.layers[-self.unfreeze_last_n_layers :]
+                    logger.info(f"Unfreezing last {self.unfreeze_last_n_layers} layers of ModernBERT model")
                 # For BERT-like models
-                if hasattr(self.text_encoder, "encoder") and hasattr(self.text_encoder.encoder, "layer"):
+                elif hasattr(self.text_encoder, "encoder") and hasattr(self.text_encoder.encoder, "layer"):
                     layers = self.text_encoder.encoder.layer[-self.unfreeze_last_n_layers :]
+                    logger.info(f"Unfreezing last {self.unfreeze_last_n_layers} layers of BERT-like model")
                 # For RoBERTa-like models
                 elif hasattr(self.text_encoder, "roberta") and hasattr(self.text_encoder.roberta, "encoder"):
                     layers = self.text_encoder.roberta.encoder.layer[-self.unfreeze_last_n_layers :]
+                    logger.info(f"Unfreezing last {self.unfreeze_last_n_layers} layers of RoBERTa-like model")
                 else:
                     logger.warning(
                         f"Unsupported architecture for {self.text_encoder_name}. Cannot unfreeze last {self.unfreeze_last_n_layers} layers."
@@ -519,6 +563,10 @@ class MMContextEncoder(Module):
                 for layer in layers:
                     for param in layer.parameters():
                         param.requires_grad = True
+
+                logger.info(
+                    f"Successfully unfroze {len(layers)} layers with {sum(p.numel() for layer in layers for p in layer.parameters() if p.requires_grad)} trainable parameters"
+                )
 
     # ---------------------------------------------------------------------
     def tokenize(
@@ -615,15 +663,15 @@ class MMContextEncoder(Module):
         # text branch
         # ------------------------------------------------------------------ #
         if text_mask.any():
-            token_type_slice = (
-                features["token_type_ids"][text_mask]  # use the mask
-                if "token_type_ids" in features and features["token_type_ids"] is not None
-                else None  # otherwise skip arg
-            )
+            # token_type_slice = (
+            #    features["token_type_ids"][text_mask]  # use the mask
+            #     if "token_type_ids" in features and features["token_type_ids"] is not None
+            #     else None  # otherwise skip arg
+            # )
             txt_out = self.text_encoder(
                 input_ids=features["input_ids"][text_mask],
                 attention_mask=features["attention_mask"][text_mask],
-                token_type_ids=token_type_slice,
+                # token_type_ids=token_type_slice,
             )
 
             # Get token embeddings and apply adapter if present
@@ -679,6 +727,12 @@ class MMContextEncoder(Module):
         }
         pooled_features = self.pooling(pooling_features)
         sentence_embeddings = pooled_features["sentence_embedding"]
+
+        # ------------------------------------------------------------------ #
+        # Apply joint adapter if enabled
+        # ------------------------------------------------------------------ #
+        if self.joint_adapter is not None and self._joint_adapter_enabled:
+            sentence_embeddings = self.joint_adapter(sentence_embeddings)
 
         # ------------------------------------------------------------------ #
         # pack up & return
@@ -739,6 +793,8 @@ class MMContextEncoder(Module):
             "output_token_embeddings": self.output_token_embeddings,
             "train_lookup": self.train_lookup,
             "pooling_mode": self.pooling_mode,
+            "joint_adapter_hidden_dim": self.joint_adapter_hidden_dim,
+            "_joint_adapter_was_trained": self._joint_adapter_was_trained,
             "model_type": "bert",
         }
 
@@ -774,6 +830,7 @@ class MMContextEncoder(Module):
             output_token_embeddings=self.output_token_embeddings,
             train_lookup=self.train_lookup,
             pooling_mode=self.pooling_mode,
+            joint_adapter_hidden_dim=self.joint_adapter_hidden_dim,
         )
         # Load the filtered state dict into the temporary model
         temp_model.load_state_dict(state, strict=False)
@@ -847,6 +904,14 @@ class MMContextEncoder(Module):
                 f"Loaded encoder was registered for '{model._registered_data_origin}' data. "
                 "Call register_initial_embeddings() with compatible data before using it."
             )
+
+        # Enable joint adapter if it was trained in the saved model
+        if hasattr(model, "_joint_adapter_was_trained") and model._joint_adapter_was_trained:
+            if model.joint_adapter is not None:
+                model._joint_adapter_enabled = True
+                for param in model.joint_adapter.parameters():
+                    param.requires_grad = True
+                logger.info("Joint adapter enabled for loaded model (was previously trained)")
 
         return model
 
