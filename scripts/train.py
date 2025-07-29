@@ -385,7 +385,7 @@ def main(cfg: DictConfig):
         model_dir = Path(hydra_run_dir, "model")
         os.makedirs(model_dir, exist_ok=True)
         model.save(model_dir)
-        model.push_to_hub(f"jo-mengr/{unique_model_name}")
+        model.push_to_hub(f"jo-mengr/{unique_model_name}", private=True)
     except Exception as e:
         logger.exception(e)
         raise e
