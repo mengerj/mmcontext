@@ -46,7 +46,7 @@ echo "flash-attn installed"
 # 4. Run your training script with Hydra overrides
 ##
 
-python3 scripts/embed.py \
+python3 scripts/embed_serial.py \
     ++hydra.run.dir="$BASE_OUT"
     # Add run.overwrite=true to force overwrite existing embeddings
     # Example: run.overwrite=true
