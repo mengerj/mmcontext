@@ -17,22 +17,37 @@ input_dim_map:
   pca: 50
   scvi_fm: 50
   geneformer: 512
-
-text_only: true #If you only want to process all input like text (cell sentences based on gene names)
+  gs: 8000
 
 gene_based_cell_sentence: true # If true, use list of gene names as a representation of the cell
 
-# Modified dataset configuration to support multiple datasets
-datasets:
+# Cell sentence configuration
+cs_length: 50 # Number of tokens/words to keep from cell sentences (truncate to first n elements)
+cs_col: "cell_sentence_2" # Column name containing cell sentences to process
+
+# Omics datasets - represent actual omics data that can be processed as text_only or with numeric embeddings
+# - All omics datasets have enc.prepare_ds applied to them
+# - If text_only=true: cell sentences are truncated (if cs_length set) and processed as text
+# - If text_only=false: numeric embeddings are loaded and used alongside text processing
+omics_datasets:
   - name: "cellxgene_pseudo_bulk_3_5k"
     type: "multiplets"
     caption: "natural_language_annotation"
-    cs_len: 200 # Set to a number like 50 to append _cs50 to dataset name
-  #- name: "geo_70k"
-  #  type: "multiplets"
-  #  caption: "natural_language_annotation"
-  #  cs_len: 50 # Set to a number like 50 to append _cs50 to dataset name
-  # Add more datasets as needed
+    text_only: true # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+#  - name: "geo_70k"
+#    type: "multiplets"
+#    caption: "natural_language_annotation"
+#    text_only: false  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+
+# Bio datasets - biological background knowledge datasets (always processed as text-only)
+# - These do NOT have enc.prepare_ds applied (different data format)
+# - These do NOT get cell sentence truncation
+# - Use keep_columns to specify which columns to retain from the raw dataset
+bio_datasets:
+  - id: "jo-mengr/descriptions_genes"
+    name: "gene_description"
+    type: "multiplets"
+    keep_columns: ["anchor", "positive"] # Columns to keep from this dataset
 
 #test_datasets:
 #  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"
@@ -40,18 +55,22 @@ datasets:
 # Add more test datasets as needed
 
 text_encoder:
-  name: "NeuML/pubmedbert-base-embeddings"
+  name: "NeuML/bioclinical-modernbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings"
   freeze_text_encoder: True
-  unfreeze_last_n_layers: 2
+  unfreeze_last_n_layers: 1
 
 #loss: "MultipleNegativesRankingLoss"
 #loss: "ContrastiveLoss"
 #evaluator: "TripletEvaluator" # If not provided, the default evaluator is used
 
-adapter:
+adapter: #each output of both models parts is passed through a separate adapter
   omics_input_dim: #this will be overwritten by the embedding_dim_map
   hidden_dim: null
   output_dim: null
+
+joint_adapter: #if desired, the outputs of both models parts are passed through a joint adapter after the seperate adapters.
+  hidden_dim: 0 # null or 0=skip joint adapter, >0=MLP with hidden layer
+  unfreeze_epoch: 1 # Epoch at which to enable the joint adapter
 
 trainer:
   unfreeze_epoch: 16 #will unfreeze the whole text encoder
@@ -68,6 +87,7 @@ trainer:
   save_strategy: "steps"
   save_steps: 2000
   save_total_limit: 2
-  logging_steps: 50
+  logging_steps: 100
   logging_first_step: True
   dataloader_num_workers: 0
+  max_grad_norm: 1.0
