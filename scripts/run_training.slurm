@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1            # Request amount of GPUs
 #SBATCH --mem=64G               # Request 64GB of host RAM, not GPU VRAM!
-#SBATCH --time=04:00:00         # Max job time of 4 hours
+#SBATCH --time=12:00:00         # Max job time of 4 hours
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0) Define a unified RUN_ID: real job ID under SLURM, or a timestamp locally
@@ -30,24 +30,24 @@ exec 2>"$BASE_OUT"/train.err
 # ─────────────────────────────────────────────────────────────────────────────
 
 # General training parameters
-EMBEDDING_METHOD="scvi_fm"
-TEXT_ONLY="false"
-GENE_BASED_CELL_SENTENCE="false"
+EMBEDDING_METHOD="gs"
+TEXT_ONLY="true"
+GENE_BASED_CELL_SENTENCE="true"
 TRAINER_FP16="true"
 
 # Dataset configuration
 # You can define multiple datasets - each one will be added to the list
 # Format: "name,type,caption,cs_len" (cs_len can be "null" or a number)
 DATASETS=(
-    "cellxgene_pseudo_bulk_100k,multiplets,cell_type,50"
+    "cellxgene_pseudo_bulk_100k,multiplets,natural_language_annotation,2000"
 )
 
 # Adapter dimensions
-ADAPTER_HIDDEN_DIM="128"    # Can be "null" or a number like 1024
-ADAPTER_OUTPUT_DIM="64"    # Usually 2048, 1024, etc.
+ADAPTER_HIDDEN_DIM=null    # Can be "null" or a number like 1024
+ADAPTER_OUTPUT_DIM=null    # Usually 2048, 1024, etc.
 
 # Learning rate and other trainer params
-LEARNING_RATE="2e-4"        # Changed from 0.05 to avoid NaN issues
+LEARNING_RATE="2e-5"        # Changed from 0.05 to avoid NaN issues
 BATCH_SIZE="128"
 EVAL_BATCH_SIZE="128"
 NUM_EPOCHS="4"
@@ -92,8 +92,16 @@ DATASETS_OVERRIDE=$(build_datasets_override)
 
 echo "Starting training job with RUN_ID: $RUN_ID"
 echo "Output directory: $BASE_OUT"
+
 source .venv/bin/activate
 echo "venv activated"
+
+echo "installing flash-attn"
+uv pip install ninja packaging wheel setuptools
+uv pip install flash-attn==2.8.1 --no-build-isolation
+echo "flash-attn installed"
+
+#python scripts/cuda_available.py
 
 echo "Running training script with parameters:"
 echo "  embedding_method: $EMBEDDING_METHOD"
