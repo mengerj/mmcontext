@@ -1216,173 +1216,57 @@ class MMContextEncoder(Module):
         print("Use the returned DataFrame to register the embeddings with `register_initial_embeddings()`.")
         return full_df, path_map
 
-    def prepare_ds(
+    def prefix_ds(
         self,
         ds: HFDataset | DatasetDict,
-        primary_cell_sentence_col: str,
-        *,  # keyword-only below
-        prefix: bool = True,
-        caption_col: str = "caption",
-        positive_col: str = "positive",
-        label_col: str = "label",
-        negative_prefix: str = "negative",
-        index_col: str = "sample_idx",
-        keep_index_col: bool = False,
+        columns_to_prefix: list[str] | str,
     ) -> HFDataset | DatasetDict:
-        """Return a copy ready for SentenceTransformerTrainer.
+        """Return a copy ready for SentenceTransformerTrainer with prefixes applied and columns renamed.
+
+        This simplified version only handles:
+        1. Adding prefixes to specified columns
+        2. Renaming columns based on dataset type (for sentence transformers compatibility)
 
         Parameters
         ----------
         ds : HFDataset | DatasetDict
-            Input dataset to prepare
-        primary_cell_sentence_col : str
-            Column containing cell/sample representations. References one of the cell_sentence columns in the dataset, that you want to process.
-            These will be tokenized by the omics part of the model, if prefix=True, or by the text part of the model, if prefix=False.
-            These will be the primary output columns. For multiplets, negative samples will be chosen from this column, if they are sample indices. Other negatives
-            are captions and are not modified.
-            If prefix=True, these will be prefixed with the processor's prefix.
-        prefix : bool, optional
-            Whether to add the processor's prefix to primary_cell_sentence_col. If False, only subsetting is performed.
-        caption_col : str, optional
-            Name of the caption column for pairs
-        positive_col : str, optional
-            Name of the positive column for multiplets
-        label_col : str, optional
-            Name of the label column for pairs
-        negative_prefix : str, optional
-            Prefix for negative columns in multiplets
-        index_col : str, optional
-            Name of the index column for HFDataset. Only if index_col is provided, it will be left in the output.
-        keep_index_col : bool, optional
-            Whether to keep the index column in the output. Defaults to False. Is needed for the embedding workflow.
+            Input dataset to prepare (should have columns already selected and indices resolved)
+        columns_to_prefix : list[str]
+            List of column names to add the processor's prefix to
 
         Returns
         -------
         HFDataset | DatasetDict
-            Processed dataset with appropriate columns and optional prefixes
+            Processed dataset with prefixes and renamed columns
         """
+        if isinstance(columns_to_prefix, str):
+            columns_to_prefix = [columns_to_prefix]
 
         def _add_prefix(tok: str) -> str:
             p = self.processor.prefix
             return tok if tok.startswith(p) else f"{p}{tok}"
 
-        def _pref(batch, pref_col):
-            if isinstance(pref_col, str):
-                # Handle single column
-                batch[pref_col] = [_add_prefix(t.strip()) for t in batch[pref_col]]
-            else:
-                # Handle list of columns (for backward compatibility)
-                for col in pref_col:
+        def _apply_prefixes(batch):
+            for col in columns_to_prefix:
+                if col in batch:
                     batch[col] = [_add_prefix(t.strip()) for t in batch[col]]
             return batch
 
-        def _resolve_negative_indices(split: HFDataset, negative_cols: list[str]) -> HFDataset:
-            """Resolve sample indices in negative columns to actual values.
-
-            Odd-numbered negatives (1, 3, 5, ...) map to positive column values.
-            Even-numbered negatives (2, 4, 6, ...) map to anchor column values.
-            """
-            if not index_col or not negative_cols:
-                return split
-
-            import re
-
-            # Create mappings from index to both positive and anchor values
-            index_to_positive = {}
-            index_to_anchor = {}
-
-            for _, row in enumerate(split):
-                if index_col in row:
-                    idx_val = str(row[index_col])
-                    if positive_col in row:
-                        index_to_positive[idx_val] = row[positive_col]
-                    if primary_cell_sentence_col in row:
-                        index_to_anchor[idx_val] = row[primary_cell_sentence_col]
-
-            def _resolve_negatives(batch):
-                for neg_col in negative_cols:
-                    if neg_col in batch:
-                        # Extract the number from column name (e.g., "negative_1_idx" -> 1)
-                        match = re.search(r"negative_(\d+)_idx", neg_col)
-                        if match:
-                            neg_num = int(match.group(1))
-                            is_odd = neg_num % 2 == 1
-
-                            resolved_values = []
-                            for idx_value in batch[neg_col]:
-                                if is_odd and idx_value in index_to_positive:
-                                    resolved_values.append(index_to_positive[idx_value])
-                                elif not is_odd and idx_value in index_to_anchor:
-                                    resolved_values.append(index_to_anchor[idx_value])
-                                else:
-                                    # Fallback: keep original value if mapping not found
-                                    resolved_values.append(idx_value)
-
-                            batch[neg_col] = resolved_values
-                return batch
-
-            # Apply the resolution
-            proc = split.map(_resolve_negatives, batched=True, desc="Resolving negative indices")
-
-            # Rename columns to remove "_idx" suffix
-            for neg_col in negative_cols:
-                if neg_col in proc.column_names and neg_col.endswith("_idx"):
-                    new_col_name = neg_col.replace("_idx", "")
-                    proc = proc.rename_column(neg_col, new_col_name)
-
-            return proc
-
         def _process_split(split: HFDataset) -> HFDataset:
-            is_pairs = label_col in split.column_names and label_col != primary_cell_sentence_col
-            is_multiplets = positive_col in split.column_names
-
-            keep_cols = [primary_cell_sentence_col]
-
-            if is_multiplets:
-                keep_cols.append(positive_col)
-                negative_cols = [c for c in split.column_names if c.startswith(negative_prefix)]
-                # Add the renamed negative column names (without "_idx") to keep_cols
-                renamed_negative_cols = [c.replace("_idx", "") if c.endswith("_idx") else c for c in negative_cols]
-                keep_cols += renamed_negative_cols
-            elif is_pairs:
-                keep_cols += [caption_col, label_col]
-            else:  # single – keep only the main column
-                keep_cols = [primary_cell_sentence_col]
-
-            if keep_index_col:
-                keep_cols.append(index_col)
-
-            # sanity checks --------------------------------------------------
-            if primary_cell_sentence_col not in split.column_names:
-                raise TypeError(f"Column '{primary_cell_sentence_col}' missing from dataset split.")
-
-            if split.features[primary_cell_sentence_col].dtype != "string":
-                raise TypeError(f"Column '{primary_cell_sentence_col}' must contain strings.")
-
-            # prefix if requested + drop unused columns ----------------------
-            if prefix:
+            # Apply prefixes to specified columns
+            if columns_to_prefix:
                 proc = split.map(
-                    lambda b: _pref(b, primary_cell_sentence_col),
+                    _apply_prefixes,
                     batched=True,
-                    desc=f"Prefixing {primary_cell_sentence_col}",
+                    desc=f"Prefixing columns: {columns_to_prefix}",
                 )
             else:
                 proc = split
 
-            # resolve negative indices to actual cell sentence values --------
-            # (after prefix is added so resolved values also have prefix)
-            if is_multiplets:
-                proc = _resolve_negative_indices(proc, negative_cols)
+            # Note: Column renaming (e.g., primary column to "anchor") is now handled
+            # in the resolve_negative_indices_and_rename function for multiplets.
+            # This method only handles prefixing.
 
-            drop_cols = [c for c in proc.column_names if c not in keep_cols]
-            if drop_cols:
-                proc = proc.remove_columns(drop_cols)
-            if is_pairs:
-                proc = proc.rename_column(primary_cell_sentence_col, "sentence_1")
-                if caption_col:
-                    proc = proc.rename_column(caption_col, "sentence_2")
-            elif is_multiplets:
-                proc = proc.rename_column(primary_cell_sentence_col, "anchor")
             return proc
 
         if isinstance(ds, HFDataset):
@@ -1390,7 +1274,7 @@ class MMContextEncoder(Module):
         elif isinstance(ds, DatasetDict):
             return DatasetDict({name: _process_split(s) for name, s in ds.items()})
         else:
-            raise TypeError("prepare_ds expects a datasets.Dataset or DatasetDict")
+            raise TypeError("prefix_ds expects a datasets.Dataset or DatasetDict")
 
     @property
     def registered_data_origin(self) -> str:

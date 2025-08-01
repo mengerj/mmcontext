@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 
 import hydra
-from datasets import load_dataset
+import torch
+from datasets import DatasetDict, load_dataset
 from huggingface_hub import HfApi, HfFolder
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
@@ -22,9 +23,45 @@ from mmcontext.eval import SystemMonitor
 from mmcontext.models.mmcontextencoder import MMContextEncoder
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
-from mmcontext.utils import get_evaluator, get_loss  # , load_test_adata_from_hf_dataset
+from mmcontext.utils import (  # , load_test_adata_from_hf_dataset
+    get_evaluator,
+    get_loss,
+    resolve_negative_indices_and_rename,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def truncate_cell_sentences(dataset, column_name: str, max_length: int):
+    """
+    Truncate cell sentences to the first max_length tokens efficiently.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        HuggingFace dataset containing cell sentences
+    column_name : str
+        Name of the column containing cell sentences to truncate
+    max_length : int
+        Maximum number of tokens/words to keep (first n elements)
+
+    Returns
+    -------
+    Dataset
+        Dataset with truncated cell sentences
+    """
+
+    def _truncate_batch(batch):
+        truncated_sentences = []
+        for sentence in batch[column_name]:
+            # Split by spaces and take first max_length tokens
+            tokens = sentence.split()[:max_length]
+            # Join back with spaces
+            truncated_sentences.append(" ".join(tokens))
+        batch[column_name] = truncated_sentences
+        return batch
+
+    return dataset.map(_truncate_batch, batched=True, desc=f"Truncating {column_name} to {max_length} tokens")
 
 
 def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
@@ -55,7 +92,12 @@ def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
 
 
 def generate_unique_model_name(
-    cfg: DictConfig, dataset_configs: list, cs_len: int = None, username: str = "jo-mengr"
+    cfg: DictConfig,
+    dataset_configs: list,
+    cs_len: int = None,
+    text_only_datasets: list = None,
+    numeric_datasets: list = None,
+    username: str = "jo-mengr",
 ) -> str:
     """
     Generate a unique model name, appending version numbers if needed.
@@ -68,6 +110,10 @@ def generate_unique_model_name(
         List of dataset configurations
     cs_len : int, optional
         Length of cell sentences when text_only is True
+    text_only_datasets : list, optional
+        List of dataset names that are processed as text_only
+    numeric_datasets : list, optional
+        List of dataset names that use numeric embeddings
     username : str, optional
         Username/organization on Hugging Face Hub (default: "jo-mengr")
 
@@ -77,7 +123,7 @@ def generate_unique_model_name(
         Unique model name that doesn't conflict with existing models
     """
     # Generate base model name
-    base_name = generate_model_name(cfg, dataset_configs, cs_len)
+    base_name = generate_model_name(cfg, dataset_configs, cs_len, text_only_datasets, numeric_datasets)
 
     # Check if base name is available
     if not check_model_exists(base_name, username):
@@ -102,7 +148,13 @@ def generate_unique_model_name(
             return f"{base_name}-{timestamp}"
 
 
-def generate_model_name(cfg: DictConfig, dataset_configs: list, cs_len: int = None) -> str:
+def generate_model_name(
+    cfg: DictConfig,
+    dataset_configs: list,
+    cs_len: int = None,
+    text_only_datasets: list = None,
+    numeric_datasets: list = None,
+) -> str:
     """
     Generate a descriptive model name based on configuration.
 
@@ -114,6 +166,10 @@ def generate_model_name(cfg: DictConfig, dataset_configs: list, cs_len: int = No
         List of dataset configurations
     cs_len : int, optional
         Length of cell sentences when text_only is True
+    text_only_datasets : list, optional
+        List of dataset names that are processed as text_only
+    numeric_datasets : list, optional
+        List of dataset names that use numeric embeddings
 
     Returns
     -------
@@ -166,26 +222,26 @@ def generate_model_name(cfg: DictConfig, dataset_configs: list, cs_len: int = No
     # Get output dimension
     output_dim = cfg.adapter.output_dim
 
-    # Get embedding method or text_only
-    if cfg.text_only:
+    # Determine method string based on dataset mix
+    text_only_datasets = text_only_datasets or []
+    numeric_datasets = numeric_datasets or []
+
+    if text_only_datasets and numeric_datasets:
+        # Mixed mode: some datasets are text_only, some are numeric
+        method_str = f"mixed-{cfg.embedding_method}"
+        if cs_len is not None:
+            method_str = f"{method_str}-text_{cs_len}"
+    elif text_only_datasets and not numeric_datasets:
+        # All datasets are text_only
         method_str = "text_only"
         if cs_len is not None:
             method_str = f"text_only_{cs_len}"
-        if not cfg.gene_based_cell_sentence:
-            raise ValueError(
-                "text_only is true, but gene_based_cell_sentence is false. This will lead to training a text model on sample ids, which is not what you want."
-            )
     else:
+        # All datasets use numeric embeddings (or no datasets specified)
         method_str = cfg.embedding_method
 
-    # Get cell sentence type
-    if cfg.gene_based_cell_sentence:
-        cell_sentence_str = "feat_cs"  # feature-based cell sentences (genes)
-    else:
-        cell_sentence_str = "sample_cs"  # sample-based cell sentences
-
-    # Construct the model name
-    model_name = f"mmcontext-{datasets_str}-{captions_str}-{encoder_str}-{output_dim}-{method_str}-{cell_sentence_str}"
+    # Construct the model name (removed cell_sentence_str component)
+    model_name = f"mmcontext-{datasets_str}-{captions_str}-{encoder_str}-{output_dim}-{method_str}"
 
     return model_name
 
@@ -204,6 +260,19 @@ def main(cfg: DictConfig):
     # Print out the loaded configuration for debugging
     # (comment out or remove if too verbose)
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
+
+    # Check CUDA availability if force_cuda is enabled
+    if getattr(cfg, "force_cuda", False):
+        if not torch.cuda.is_available():
+            error_msg = "CUDA is required (force_cuda=true) but not available on this system"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        else:
+            logger.info("CUDA is available and force_cuda=true - proceeding with training")
+    else:
+        cuda_status = "available" if torch.cuda.is_available() else "not available"
+        logger.info(f"CUDA is {cuda_status}, force_cuda=false - proceeding with training")
+
     # get the hydra output dir
     hydra_run_dir = HydraConfig.get().run.dir
     monitor = SystemMonitor(logger=logger)
@@ -233,14 +302,7 @@ def main(cfg: DictConfig):
                 joint_adapter_hidden_dim=None,
             )
 
-            # get the main cell sentence column
-            if cfg.gene_based_cell_sentence:
-                primary_cell_sentence = "cell_sentence_2"
-                layer_axis = "var"
-            else:
-                primary_cell_sentence = "cell_sentence_1"
-                layer_axis = "obs"
-            # Get the correct columns for the given data format
+            # Primary cell sentence column and layer axis are now determined per dataset
         # -------------------------------------------------------------------------
         # 2. Load multiple datasets
         # -------------------------------------------------------------------------
@@ -248,107 +310,223 @@ def main(cfg: DictConfig):
         val_datasets = {}
         losses = {}
         evaluators = []
-        cs_len = None
 
-        for dataset_config in cfg.datasets:
-            # Construct dataset name with optional cs_len suffix
-            base_name = dataset_config.name
+        # Track which datasets are text_only vs numeric for model naming
+        text_only_datasets = []
+        numeric_datasets = []
+        text_only_cs_lengths = []  # Track cs_length values from text_only datasets
 
-            dataset_name = f"{base_name}_{dataset_config.type}_{dataset_config.caption}"
-            if hasattr(dataset_config, "cs_len") and dataset_config.cs_len is not None:
-                dataset_name = f"{dataset_name}_cs{dataset_config.cs_len}"
-            logger.info(f"Loading dataset: {dataset_name}")
+        # Process omics datasets - these can be text_only or numeric
+        if hasattr(cfg, "omics_datasets") and cfg.omics_datasets:
+            for dataset_config in cfg.omics_datasets:
+                # Construct dataset name
+                base_name = dataset_config.name
+                dataset_name = f"{base_name}_{dataset_config.type}_{dataset_config.caption}"
+                logger.info(f"Loading omics dataset: {dataset_name}")
 
-            # Load the dataset
-            dataset = load_dataset(f"jo-mengr/{dataset_name}")
-            logger.info(f"Raw dataset loaded - Keys: {list(dataset.keys())}")
+                # Load the dataset
+                dataset = load_dataset(f"jo-mengr/{dataset_name}")
+                logger.info(f"Raw dataset loaded - Keys: {list(dataset.keys())}")
 
-            # Log dataset splits and sizes
-            for split_name, split_data in dataset.items():
-                logger.info(f"  {split_name} split: {len(split_data)} samples")
-                if len(split_data) > 0:
-                    logger.info(f"    Columns: {list(split_data.column_names)}")
-                    # Log first sample for debugging
-                    sample = split_data[0]
-                    logger.info(f"    First sample keys: {list(sample.keys())}")
-                    # Log sample content (truncated for readability)
-                    for key, value in sample.items():
-                        if isinstance(value, str):
-                            preview = value[:100] + "..." if len(value) > 100 else value
-                            logger.info(f"      {key}: {preview}")
-                        else:
-                            logger.info(f"      {key}: {type(value)} - {value}")
+                # Log dataset splits and sizes
+                for split_name, split_data in dataset.items():
+                    logger.info(f"  {split_name} split: {len(split_data)} samples")
+                    if len(split_data) > 0:
+                        logger.info(f"    Columns: {list(split_data.column_names)}")
+                        # Log first sample for debugging
+                        sample = split_data[0]
+                        logger.info(f"    First sample keys: {list(sample.keys())}")
+                        # Log sample content (truncated for readability)
+                        for key, value in sample.items():
+                            if isinstance(value, str):
+                                preview = value[:100] + "..." if len(value) > 100 else value
+                                logger.info(f"      {key}: {preview}")
+                            else:
+                                logger.info(f"      {key}: {type(value)} - {value}")
 
-            if not cfg.text_only:
-                token_df, _ = enc.get_initial_embeddings(
-                    dataset,
-                    layer_key=precomputed_key,
-                    download_dir=f"../../data/from_nxtcloud/{dataset_name}",
-                    axis=layer_axis,
+                # Determine dataset-specific settings
+                layer_axis = getattr(dataset_config, "layer_axis", "obs")  # Default to "obs"
+
+                # Determine primary cell sentence column based on layer_axis only
+                if layer_axis == "var":
+                    primary_cell_sentence = "cell_sentence_2"  # Gene-based
+                else:
+                    primary_cell_sentence = "cell_sentence_1"  # Cell-based
+
+                logger.info(
+                    f"Dataset '{dataset_name}' using layer_axis='{layer_axis}', primary_cell_sentence='{primary_cell_sentence}'"
                 )
-                enc.register_initial_embeddings(token_df, data_origin=chosen_method)
-            else:
-                # Get the length of the cell sentences and validate consistency
-                current_cs_len = len(dataset["train"][0][primary_cell_sentence].split(" "))
-                if cs_len is None:
-                    cs_len = current_cs_len
-                    logger.info(f"Cell sentence length for text_only mode: {cs_len}")
-                elif cs_len != current_cs_len:
-                    raise ValueError(
-                        f"Inconsistent cell sentence lengths across datasets: {cs_len} vs {current_cs_len} for dataset {dataset_name}"
+
+                # Check if this dataset should be processed as text_only
+                dataset_text_only = getattr(dataset_config, "text_only", False)
+
+                # Get dataset-specific cell sentence truncation parameters
+                dataset_cs_length = getattr(dataset_config, "cs_length", None)
+                dataset_cs_col = getattr(dataset_config, "cs_col", None)
+
+                # Track dataset mode for model naming
+                if dataset_text_only:
+                    text_only_datasets.append(dataset_name)
+                    # Track cs_length if specified for text_only datasets
+                    if dataset_cs_length and dataset_cs_length > 0:
+                        text_only_cs_lengths.append(dataset_cs_length)
+                else:
+                    numeric_datasets.append(dataset_name)
+
+                logger.info(
+                    f"Dataset '{dataset_name}' will be processed as: {'text_only' if dataset_text_only else 'numeric embeddings'}"
+                )
+
+                # Apply cell sentence truncation if configured (only for text_only datasets with cs_length specified)
+
+                if dataset_text_only and dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
+                    logger.info(
+                        f"Truncating cell sentences in column '{dataset_cs_col}' to {dataset_cs_length} tokens for text_only dataset"
                     )
-            # Add the prefix expected by the model
-            dataset_ready = enc.prepare_ds(
-                dataset, primary_cell_sentence_col=primary_cell_sentence, prefix=not cfg.text_only
-            )  # ,"negative_2"])
 
-            # Log prepared dataset info
-            logger.info(f"Dataset prepared - Keys: {list(dataset_ready.keys())}")
-            for split_name, split_data in dataset_ready.items():
-                logger.info(f"  Prepared {split_name} split: {len(split_data)} samples")
-                if len(split_data) > 0:
-                    logger.info(f"    Prepared columns: {list(split_data.column_names)}")
-                    # Log first prepared sample
-                    prepared_sample = split_data[0]
-                    logger.info(f"    First prepared sample keys: {list(prepared_sample.keys())}")
-                    for key, value in prepared_sample.items():
-                        if isinstance(value, str):
-                            preview = value[:100] + "..." if len(value) > 100 else value
-                            logger.info(f"      {key}: {preview}")
+                    # Apply truncation to all splits that contain the specified column
+                    truncated_dataset = {}
+                    for split_name, split_data in dataset.items():
+                        if dataset_cs_col in split_data.column_names:
+                            truncated_dataset[split_name] = truncate_cell_sentences(
+                                split_data, dataset_cs_col, dataset_cs_length
+                            )
+                            logger.info(f"  Truncated {split_name} split")
                         else:
-                            logger.info(f"      {key}: {type(value)}")
-            logger.info(f"Finished processing dataset: {dataset_name}\n")
+                            truncated_dataset[split_name] = split_data
+                            logger.info(
+                                f"  Column '{dataset_cs_col}' not found in {split_name} split, keeping original"
+                            )
 
-            # Add train split to train_datasets dictionary
-            train_datasets[dataset_name] = dataset_ready["train"]
+                    # Use the truncated dataset for the rest of the processing
+                    dataset = DatasetDict(truncated_dataset)
+                elif dataset_text_only:
+                    logger.info(
+                        f"Text_only dataset '{dataset_name}' - no truncation applied (cs_length or cs_col not specified)"
+                    )
+                else:
+                    logger.info(f"Non-text_only dataset '{dataset_name}' - skipping cell sentence truncation")
 
-            # Add validation split to val_datasets dictionary
-            val_datasets[dataset_name] = dataset_ready["val"]
+                # Step 1: Handle embedding registration FIRST (needs access to raw dataset with all columns)
+                if not dataset_text_only:
+                    logger.info(f"Loading numeric embeddings for dataset '{dataset_name}' (before column selection)")
+                    token_df, _ = enc.get_initial_embeddings(
+                        dataset,
+                        layer_key=precomputed_key,
+                        download_dir=f"../../data/from_nxtcloud/{dataset_name}",
+                        axis=layer_axis,
+                    )
+                    enc.register_initial_embeddings(token_df, data_origin=chosen_method)
+                else:
+                    # In text_only mode, we'll use cell sentences directly
+                    logger.info(
+                        f"Dataset '{dataset_name}' using text_only mode - cell sentences will be processed as text"
+                    )
 
-            # Create loss function for this dataset type
-            losses[dataset_name] = get_loss(dataset_type=dataset_config.type)
+                # Step 2: Select columns based on dataset configuration
+                keep_columns = getattr(dataset_config, "keep_columns", None)
+                index_column = getattr(dataset_config, "index_column", None)
 
-            evaluator = get_evaluator(
-                dataset_type=dataset_config.type,
-                dataset=dataset_ready["val"],
-                batch_size=cfg.trainer.per_device_eval_batch_size,
-            )
-            evaluators.append(evaluator)
+                if keep_columns:
+                    # Automatically include index column if specified (needed for resolving indices)
+                    if index_column and index_column not in keep_columns:
+                        keep_columns = keep_columns + [index_column]
+                        logger.info(f"Added index column '{index_column}' to keep_columns")
+
+                    logger.info(f"Selecting columns: {keep_columns}")
+                    # Apply to all splits that contain the specified columns
+                    dataset_selected = {}
+                    for split_name, split_data in dataset.items():
+                        # Only keep columns that exist in this split
+                        available_columns = [col for col in keep_columns if col in split_data.column_names]
+                        if available_columns:
+                            dataset_selected[split_name] = split_data.select_columns(available_columns)
+                            logger.info(f"  Selected columns {available_columns} in {split_name} split")
+                        else:
+                            logger.warning(f"  No specified columns found in {split_name} split, keeping all")
+                            dataset_selected[split_name] = split_data
+                    dataset = DatasetDict(dataset_selected)
+                else:
+                    logger.info("No keep_columns specified, using dataset as-is")
+
+                # Step 3: Resolve negative indices for multiplet datasets and rename columns
+                if dataset_config.type == "multiplets":
+                    logger.info("Resolving negative indices and renaming columns for multiplet dataset")
+                    index_col_to_use = index_column if index_column else "sample_idx"
+                    dataset = resolve_negative_indices_and_rename(
+                        dataset,
+                        primary_cell_sentence_col=primary_cell_sentence,
+                        positive_col="positive",
+                        negative_prefix="negative",
+                        index_col=index_col_to_use,
+                        remove_index_col=True,  # Remove index column after resolving
+                    )
+                    logger.info(
+                        f"Primary column '{primary_cell_sentence}' renamed to 'anchor', index column '{index_col_to_use}' removed"
+                    )
+
+                # Step 4: Apply prefixes using the new simplified prefix_ds method
+                prefix_columns = getattr(
+                    dataset_config, "prefix_columns", ["anchor", "negative_2"]
+                )  # These are the omics representations by default
+                if dataset_text_only:
+                    # For text_only datasets, don't add prefix
+                    prefix_columns = []
+                logger.info(f"Applying prefixes to columns: {prefix_columns}")
+
+                dataset_ready = enc.prefix_ds(dataset, columns_to_prefix=prefix_columns)
+
+                # Log prepared dataset info
+                logger.info(f"Dataset prepared - Keys: {list(dataset_ready.keys())}")
+                for split_name, split_data in dataset_ready.items():
+                    logger.info(f"  Prepared {split_name} split: {len(split_data)} samples")
+                    if len(split_data) > 0:
+                        logger.info(f"    Prepared columns: {list(split_data.column_names)}")
+                        # Log first prepared sample
+                        prepared_sample = split_data[0]
+                        logger.info(f"    First prepared sample keys: {list(prepared_sample.keys())}")
+                        for key, value in prepared_sample.items():
+                            if isinstance(value, str):
+                                preview = value[:100] + "..." if len(value) > 100 else value
+                                logger.info(f"      {key}: {preview}")
+                            else:
+                                logger.info(f"      {key}: {type(value)}")
+                logger.info(f"Finished processing omics dataset: {dataset_name}\n")
+
+                # Add train split to train_datasets dictionary
+                train_datasets[dataset_name] = dataset_ready["train"]
+
+                # Add validation split to val_datasets dictionary
+                val_datasets[dataset_name] = dataset_ready["val"]
+
+                # Create loss function for this dataset type
+                losses[dataset_name] = get_loss(dataset_type=dataset_config.type)
+
+                evaluator = get_evaluator(
+                    dataset_type=dataset_config.type,
+                    dataset=dataset_ready["val"],
+                    batch_size=cfg.trainer.per_device_eval_batch_size,
+                )
+                evaluators.append(evaluator)
 
         # -------------------------------------------------------------------------
-        # 2.1. Load extra datasets (training only, no evaluators)
+        # 2.1. Load bio datasets (biological background knowledge, always text-only)
         # -------------------------------------------------------------------------
-        if hasattr(cfg, "extra_datasets") and cfg.extra_datasets:
-            logger.info("Loading extra datasets for training...")
+        if hasattr(cfg, "bio_datasets") and cfg.bio_datasets:
+            logger.info("Loading bio datasets for training...")
 
-            for extra_dataset_config in cfg.extra_datasets:
-                dataset_id = extra_dataset_config.id
-                dataset_name = extra_dataset_config.name
-                logger.info(f"Loading extra dataset: {dataset_name} from {dataset_id}")
+            for bio_dataset_config in cfg.bio_datasets:
+                dataset_id = bio_dataset_config.id
+                dataset_name = bio_dataset_config.name
+                logger.info(f"Loading bio dataset: {dataset_name} from {dataset_id}")
+
+                # Bio datasets are always treated as text_only
+                text_only_datasets.append(dataset_name)
+                logger.info(f"Bio dataset '{dataset_name}' will be processed as text_only")
 
                 # Load the dataset directly using the provided ID
                 dataset = load_dataset(dataset_id)
-                logger.info(f"Extra dataset loaded - Keys: {list(dataset.keys())}")
+                logger.info(f"Bio dataset loaded - Keys: {list(dataset.keys())}")
 
                 # Log dataset splits and sizes
                 for split_name, split_data in dataset.items():
@@ -356,25 +534,40 @@ def main(cfg: DictConfig):
                     if len(split_data) > 0:
                         logger.info(f"    Columns: {list(split_data.column_names)}")
 
-                # For extra datasets, we assume they don't need the special text_only processing
-                # and are already in the correct format. Allow configurable cell sentence column.
-                # cell_sentence_col = getattr(extra_dataset_config, 'primary_cell_sentence_col', 'cell_sentence_2')
-                dataset_ready = dataset.remove_columns(["source_database", "source_link", "is_synonym"])
+                # Use configurable select_columns instead of hardcoded remove_columns
+                keep_columns = getattr(bio_dataset_config, "keep_columns", None)
+                if keep_columns:
+                    # Apply to all splits that contain the specified columns
+                    dataset_processed = {}
+                    for split_name, split_data in dataset.items():
+                        # Only keep columns that exist in this split
+                        available_columns = [col for col in keep_columns if col in split_data.column_names]
+                        if available_columns:
+                            dataset_processed[split_name] = split_data.select_columns(available_columns)
+                            logger.info(f"  Kept columns {available_columns} in {split_name} split")
+                        else:
+                            logger.warning(f"  No specified columns found in {split_name} split, keeping all")
+                            dataset_processed[split_name] = split_data
+                    dataset_ready = DatasetDict(dataset_processed)
+                else:
+                    # If no keep_columns specified, use the dataset as-is
+                    dataset_ready = dataset
+                    logger.info("  No keep_columns specified, using dataset as-is")
 
-                logger.info(f"Extra dataset prepared - Keys: {list(dataset_ready.keys())}")
+                logger.info(f"Bio dataset prepared - Keys: {list(dataset_ready.keys())}")
 
-                # Add only the train split to train_datasets (no validation for extra datasets)
+                # Add only the train split to train_datasets (no validation for bio datasets)
                 if "train" in dataset_ready:
                     train_datasets[dataset_name] = dataset_ready["train"]
-                    logger.info(f"Added extra dataset '{dataset_name}' to training set")
+                    logger.info(f"Added bio dataset '{dataset_name}' to training set")
                 else:
-                    logger.warning(f"Extra dataset '{dataset_name}' has no 'train' split, skipping")
+                    logger.warning(f"Bio dataset '{dataset_name}' has no 'train' split, skipping")
 
                 # Create loss function for this dataset type
-                losses[dataset_name] = get_loss(dataset_type=extra_dataset_config.type)
+                losses[dataset_name] = get_loss(dataset_type=bio_dataset_config.type)
 
-                # Note: No evaluators created for extra datasets
-                logger.info(f"Finished processing extra dataset: {dataset_name}\n")
+                # Note: No evaluators created for bio datasets
+                logger.info(f"Finished processing bio dataset: {dataset_name}\n")
 
         # Build the sentence Trasnformer model
         modules = [enc]
@@ -403,8 +596,21 @@ def main(cfg: DictConfig):
         # -------------------------------------------------------------------------
 
         # Generate unique model name to avoid conflicts
-        unique_model_name = generate_unique_model_name(cfg, cfg.datasets, cs_len)
+        # Use the first cs_length from text_only datasets for naming (if any)
+        cs_length_for_naming = text_only_cs_lengths[0] if text_only_cs_lengths else None
+        omics_datasets = getattr(cfg, "omics_datasets", [])
+        unique_model_name = generate_unique_model_name(
+            cfg, omics_datasets, cs_length_for_naming, text_only_datasets, numeric_datasets
+        )
         logger.info(f"Using model name: {unique_model_name}")
+        logger.info(f"Text-only datasets: {text_only_datasets}")
+        logger.info(f"Numeric datasets: {numeric_datasets}")
+        if text_only_cs_lengths:
+            logger.info(f"Text-only dataset cs_lengths: {text_only_cs_lengths}")
+            if len(set(text_only_cs_lengths)) > 1:
+                logger.info(f"Multiple cs_length values detected: {set(text_only_cs_lengths)}")
+        else:
+            logger.info("No cs_length values specified for text-only datasets")
 
         # Adjust evaluation strategy if there are no validation datasets
         eval_strategy = cfg.trainer.eval_strategy

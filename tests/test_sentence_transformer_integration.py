@@ -238,7 +238,7 @@ def test_training_text_only(st_text_encoder, dummy_dataset, tmp_path):
     train_loss = losses.CosineSimilarityLoss(st_text_encoder)
 
     # Create a simple evaluator
-    # without using .prepare_ds() on the ds, the omics_tokens will be treated as text input
+    # without using .prefix_ds() on the ds, the omics_tokens will be treated as text input
     evaluator = EmbeddingSimilarityEvaluator(
         dummy_dataset["omics_tokens"], dummy_dataset["caption"], dummy_dataset["label"]
     )
@@ -287,7 +287,7 @@ def test_training_bimodal(st_bimodal_encoder, dummy_dataset_with_split, tmp_path
         num_labels=2,
         concatenation_sent_rep=True,  # For single sentence
     )
-    ds = st_bimodal_encoder[0].prepare_ds(dummy_dataset_with_split, primary_cell_sentence_col="omics_tokens")
+    ds = st_bimodal_encoder[0].prefix_ds(dummy_dataset_with_split, columns_to_prefix=["omics_tokens"])
     # Create trainer with bimodal dataset
     trainer = SentenceTransformerTrainer(
         model=st_bimodal_encoder,

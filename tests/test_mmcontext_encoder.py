@@ -182,7 +182,7 @@ def test_adding_numeric_data(text_only_encoder, numeric_df, dummy_dataset_with_s
     # Register numeric data
     encoder.register_initial_embeddings(numeric_df, data_origin="pca")
 
-    registered_ds = encoder.prepare_ds(dummy_dataset_with_split, "omics_tokens")
+    registered_ds = encoder.prefix_ds(dummy_dataset_with_split, "omics_tokens")
 
     # Check that data was added correctly
     assert encoder._has_omics
@@ -194,7 +194,7 @@ def test_adding_numeric_data(text_only_encoder, numeric_df, dummy_dataset_with_s
     assert hasattr(encoder.omics_encoder.embeddings, "weight")
 
     # Now test with mixed input using the prefixed ID
-    sample_idx = registered_ds["train"]["sentence_1"][0]
+    sample_idx = registered_ds["train"]["omics_tokens"][0]
     features = encoder.tokenize([sample_idx, "This is a test"])
 
     # Check that the features have the right keys
@@ -623,23 +623,6 @@ def test_freezing_unfreezing_roberta(TextEncStub, TokStub):
         assert all(not p.requires_grad for p in other_layers_params), "Other layers should be frozen"
 
 
-def test_freezing_unsupported_architecture(caplog, TextEncStub, TokStub):
-    """Test that a warning is logged for unsupported architecture."""
-    with (
-        patch("transformers.AutoModel.from_pretrained", return_value=TextEncStub(model_type="unsupported")),
-        patch("transformers.AutoTokenizer.from_pretrained", return_value=TokStub()),
-    ):
-        # Create model with unfrozen last layer for unsupported architecture
-        _model_partial = MMContextEncoder(
-            text_encoder_name="unsupported-model",
-            freeze_text_encoder=True,
-            unfreeze_last_n_layers=1,
-        )
-
-        # Check that a warning was logged
-        assert any("Unsupported architecture" in record.message for record in caplog.records)
-
-
 # --------------------------------------------------------------------- #
 # Error handling tests
 # --------------------------------------------------------------------- #
@@ -937,7 +920,7 @@ def test_identity_adapter_when_no_hidden_no_output(TextEncStub):
 
 
 # ---------------------------------------------------------------------
-# prepare_ds: single-pair & multi-pair datasets
+# prefix_ds: single-pair & multi-pair datasets
 # ---------------------------------------------------------------------
 
 
@@ -949,7 +932,7 @@ def _check_prefixed(col, pref):
 def test_prepare_multiplets(text_only_encoder):
     import datasets
 
-    enc = text_only_encoder  # fixture – no omics registered
+    from mmcontext.utils import resolve_negative_indices_and_rename
 
     multi_ds = datasets.Dataset.from_dict(
         {
@@ -962,36 +945,31 @@ def test_prepare_multiplets(text_only_encoder):
             "junk_col": ["x", "y"],  # must be dropped
         }
     )
-    dataset_ready = enc.prepare_ds(multi_ds, primary_cell_sentence_col="cell_sentence_2", prefix=False)
+    multi_ds = multi_ds.select_columns(
+        ["sample_idx", "cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
+    )
+    dataset_ready = resolve_negative_indices_and_rename(
+        multi_ds,
+        primary_cell_sentence_col="cell_sentence_2",
+        positive_col="positive",
+        negative_prefix="negative",
+        index_col="sample_idx",
+        remove_index_col=True,
+    )
     assert dataset_ready["negative_1"][0] == "Tumor"
     assert dataset_ready["negative_1"][1] == "This is a Macrophage"
     assert dataset_ready["negative_2"][0] == "GeneC GeneD"
     assert dataset_ready["negative_2"][1] == "GeneA GeneB"
 
 
-def test_prepare_ds_pairs_and_multiplets(text_only_encoder):
+def test_prefix_multiplets(text_only_encoder):
     import datasets
+
+    from mmcontext.utils import resolve_negative_indices_and_rename
 
     enc = text_only_encoder  # fixture – no omics registered
     pref = enc.processor.prefix  # usually "sample_idx:"
 
-    # ----------------------- 1) PAIRS ---------------------------------
-    pair_ds = datasets.Dataset.from_dict(
-        {
-            "sample_idx": ["S1", "S2", "S3"],
-            "caption": ["cap1", "cap2", "cap3"],
-            "label": [1, 0, 1],
-            "junk_col": [42, 43, 44],  # must be dropped
-        }
-    )
-
-    proc_pair = enc.prepare_ds(pair_ds, primary_cell_sentence_col="sample_idx")
-
-    # Columns retained: anchor, caption, label
-    assert set(proc_pair.column_names) == {"sentence_1", "sentence_2", "label"}
-    _check_prefixed(proc_pair["sentence_1"], pref)  # every row prefixed
-
-    # ----------------------- 2) MULTIPLETS -----------------------------
     multi_ds = datasets.Dataset.from_dict(
         {
             "sample_idx": ["S4", "S5"],
@@ -1004,56 +982,62 @@ def test_prepare_ds_pairs_and_multiplets(text_only_encoder):
         }
     )
 
-    proc_multi = enc.prepare_ds(
-        multi_ds,
+    multi_ds1 = multi_ds.select_columns(
+        ["sample_idx", "cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
+    )
+    proc_multi1 = resolve_negative_indices_and_rename(
+        multi_ds1,
         primary_cell_sentence_col="cell_sentence_1",
         positive_col="positive",
         negative_prefix="negative",
         index_col="sample_idx",
+        remove_index_col=True,
     )
+    proc_multi1 = enc.prefix_ds(proc_multi1, columns_to_prefix=["anchor", "negative_2"])
 
     # Only anchor + positive + all negatives kept
-    assert set(proc_multi.column_names) == {
+    assert set(proc_multi1.column_names) == {
         "anchor",
         "positive",
         "negative_1",
         "negative_2",
     }
-    _check_prefixed(proc_multi["anchor"], pref)
-    _check_prefixed(proc_multi["positive"], "")  # captions stay raw
-    _check_prefixed(proc_multi["negative_1"], "")  # negatives are text
-    _check_prefixed(proc_multi["negative_2"], pref)  # other negatives should be prefixed
+    _check_prefixed(proc_multi1["anchor"], pref)
+    _check_prefixed(proc_multi1["positive"], "")  # captions stay raw
+    _check_prefixed(proc_multi1["negative_1"], "")  # negatives are text
+    _check_prefixed(proc_multi1["negative_2"], pref)  # other negatives should be prefixed
 
     # negatives should be resolved to cell sentences
-    assert proc_multi["negative_1"][0] == "Tumor"
-    assert proc_multi["negative_1"][1] == "This is a Macrophage"
-    assert proc_multi["negative_2"][0] == "sample_idx:S10"
-    assert proc_multi["negative_2"][1] == "sample_idx:S8"
-
-    # now run with cell_sentence_2
-    proc_multi = enc.prepare_ds(
-        multi_ds,
+    assert proc_multi1["negative_1"][0] == "Tumor"
+    assert proc_multi1["negative_1"][1] == "This is a Macrophage"
+    assert proc_multi1["negative_2"][0] == "sample_idx:S10"
+    assert proc_multi1["negative_2"][1] == "sample_idx:S8"
+    multi_ds2 = multi_ds.select_columns(
+        ["sample_idx", "cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
+    )
+    proc_multi2 = resolve_negative_indices_and_rename(
+        multi_ds2,
         primary_cell_sentence_col="cell_sentence_2",
         positive_col="positive",
         negative_prefix="negative",
         index_col="sample_idx",
-        prefix=False,  # no prefix if cell_sentence_2 is used
+        remove_index_col=True,
     )
-    assert set(proc_multi.column_names) == {
+
+    assert set(proc_multi2.column_names) == {
         "anchor",
         "positive",
         "negative_1",
         "negative_2",
     }
     # negatives should be resolved to cell sentences
-    assert proc_multi["negative_1"][0] == "Tumor"
-    assert proc_multi["negative_1"][1] == "This is a Macrophage"
-    assert proc_multi["negative_2"][0] == "GeneC GeneD"
-    assert proc_multi["negative_2"][1] == "GeneA GeneB"
+    assert proc_multi2["negative_1"][0] == "Tumor"
+    assert proc_multi2["negative_1"][1] == "This is a Macrophage"
+    assert proc_multi2["negative_2"][0] == "GeneC GeneD"
+    assert proc_multi2["negative_2"][1] == "GeneA GeneB"
 
     # -------------- behavioural sanity: extra column really gone -------
-    assert "junk_col" not in proc_pair.column_names
-    assert "junk_col" not in proc_multi.column_names
+    assert "junk_col" not in proc_multi2.column_names
 
 
 def test_model_amp_dtype_compatibility(
