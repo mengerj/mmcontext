@@ -38,8 +38,7 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
-from sentence_transformers.models import Pooling
-from sentence_transformers.models.Module import Module
+from sentence_transformers.models import Pooling, Module
 from transformers import AutoModel, AutoTokenizer
 
 from mmcontext.file_utils import (
