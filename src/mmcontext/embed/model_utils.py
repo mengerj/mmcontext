@@ -118,7 +118,7 @@ def prepare_model_and_embed(
     ----------
     st_model : SentenceTransformer
         The model wrapper.  The *first* module (``st_model[0]``) may expose
-        extra methods such as ``prepare_ds``.
+        extra methods such as ``prefix_ds``.
     df_subset : DataFrame
         Test-set slice (≤ 5 k rows by default) **must** contain
         ``main_col`` and ``index_col``.
@@ -179,9 +179,9 @@ def prepare_model_and_embed(
         logger.info("Registering initial embeddings with MMContextEncoder module of SentenceTransformer Model …")
         impl.register_initial_embeddings(token_df, data_origin=layer_key.split("X_")[1])  # type: ignore[arg-type]
 
-    if hasattr(impl, "prepare_ds"):
-        logger.info("Calling prepare_ds on model-specific module …")
-        ds = impl.prepare_ds(
+    if hasattr(impl, "prefix_ds"):
+        logger.info("Calling prefix_ds on model-specific module …")
+        ds = impl.prefix_ds(
             ds=data,
             primary_cell_sentence_col=main_col,
             caption_col=caption_col,
