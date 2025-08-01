@@ -30,21 +30,13 @@ exec 2>"$BASE_OUT"/train.err
 # ─────────────────────────────────────────────────────────────────────────────
 
 # General training parameters
-EMBEDDING_METHOD="gs"
-TEXT_ONLY="true"
-GENE_BASED_CELL_SENTENCE="true"
+EMBEDDING_METHOD="scvi_fm"
+FORCE_CUDA="true"           # Require CUDA for training
 TRAINER_FP16="true"
 
-# Dataset configuration
-# You can define multiple datasets - each one will be added to the list
-# Format: "name,type,caption,cs_len" (cs_len can be "null" or a number)
-DATASETS=(
-    "cellxgene_pseudo_bulk_100k,multiplets,natural_language_annotation,2000"
-)
-
 # Adapter dimensions
-ADAPTER_HIDDEN_DIM=null    # Can be "null" or a number like 1024
-ADAPTER_OUTPUT_DIM=null    # Usually 2048, 1024, etc.
+ADAPTER_HIDDEN_DIM="128"    # Can be "null" or a number like 1024
+ADAPTER_OUTPUT_DIM="64"     # Usually 2048, 1024, etc.
 
 # Learning rate and other trainer params
 LEARNING_RATE="2e-5"        # Changed from 0.05 to avoid NaN issues
@@ -53,38 +45,14 @@ EVAL_BATCH_SIZE="128"
 NUM_EPOCHS="4"
 WARMUP_RATIO="0.1"
 
+# Note: Dataset-specific configurations (text_only, layer_axis, cs_length, etc.)
+# are now handled in the YAML configuration files (conf/train_conf.yaml)
+# rather than as command-line overrides.
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 3) Build Hydra Override Strings
+# 3) Prepare Training Parameters
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Function to build datasets override string
-build_datasets_override() {
-    local datasets_str="datasets=["
-    local first=true
-
-    for dataset in "${DATASETS[@]}"; do
-        IFS=',' read -r name type caption cs_len <<< "$dataset"
-
-        if [ "$first" = true ]; then
-            first=false
-        else
-            datasets_str="${datasets_str},"
-        fi
-
-        datasets_str="${datasets_str}{name:${name},type:${type},caption:${caption}"
-
-        if [ "$cs_len" != "null" ]; then
-            datasets_str="${datasets_str},cs_len:${cs_len}"
-        fi
-
-        datasets_str="${datasets_str}}"
-    done
-
-    datasets_str="${datasets_str}]"
-    echo "$datasets_str"
-}
-
-DATASETS_OVERRIDE=$(build_datasets_override)
+# No dataset overrides needed - configurations are in YAML files
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4) Activate environment and run training
@@ -105,20 +73,17 @@ echo "flash-attn installed"
 
 echo "Running training script with parameters:"
 echo "  embedding_method: $EMBEDDING_METHOD"
-echo "  text_only: $TEXT_ONLY"
-echo "  gene_based_cell_sentence: $GENE_BASED_CELL_SENTENCE"
-echo "  datasets: ${DATASETS_OVERRIDE}"
+echo "  force_cuda: $FORCE_CUDA"
 echo "  adapter.hidden_dim: $ADAPTER_HIDDEN_DIM"
 echo "  adapter.output_dim: $ADAPTER_OUTPUT_DIM"
 echo "  learning_rate: $LEARNING_RATE"
 echo "  batch_size: $BATCH_SIZE"
 echo "  trainer.fp16: $TRAINER_FP16"
+echo "  Dataset configurations are loaded from conf/train_conf.yaml"
 
 python3 scripts/train.py \
     embedding_method="$EMBEDDING_METHOD" \
-    text_only="$TEXT_ONLY" \
-    gene_based_cell_sentence="$GENE_BASED_CELL_SENTENCE" \
-    "$DATASETS_OVERRIDE" \
+    force_cuda="$FORCE_CUDA" \
     adapter.hidden_dim="$ADAPTER_HIDDEN_DIM" \
     adapter.output_dim="$ADAPTER_OUTPUT_DIM" \
     trainer.learning_rate="$LEARNING_RATE" \
