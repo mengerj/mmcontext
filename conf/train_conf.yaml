@@ -19,28 +19,57 @@ input_dim_map:
   geneformer: 512
   gs: 8000
 
-gene_based_cell_sentence: true # If true, use list of gene names as a representation of the cell
+# Cell sentence configuration moved to dataset-specific parameters (cs_length and cs_col)
+# Global cs_length and cs_col removed - now specified per dataset
 
-# Cell sentence configuration
-cs_length: 50 # Number of tokens/words to keep from cell sentences (truncate to first n elements)
-cs_col: "cell_sentence_2" # Column name containing cell sentences to process
+# Training hardware requirements
+force_cuda: false # If true, training will stop if CUDA is not available
 
 # Omics datasets - represent actual omics data that can be processed as text_only or with numeric embeddings
-# - All omics datasets have enc.prepare_ds applied to them
-# - If text_only=true: cell sentences are truncated (if cs_length set) and processed as text
-# - If text_only=false: numeric embeddings are loaded and used alongside text processing
+# Processing workflow: get_initial_embeddings (if not text_only) → select_columns → resolve_negative_indices (if multiplets) → prefix_ds (prefixing)
+# - index_column: Name of the index column (automatically included in keep_columns, removed after resolving indices)
+# - keep_columns: List of columns to select from the raw dataset (applied after embedding loading)
+# - prefix_columns: List of columns to add processor prefix to (only for non-text_only datasets)
+# - layer_axis: "obs" for cell-based embeddings, "var" for gene-based embeddings (only matters for non-text_only datasets)
+# - cs_length: Number of tokens/words to keep from cell sentences (only for text_only datasets, optional)
+# - cs_col: Column name containing cell sentences to truncate (only for text_only datasets, optional)
+# - Renaming: primary column → "anchor", positive → stays "positive", negatives → remove "_idx" suffix
+# - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
+# - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
   - name: "cellxgene_pseudo_bulk_3_5k"
     type: "multiplets"
     caption: "natural_language_annotation"
-    text_only: true # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
+    index_column: sample_idx
+    keep_columns: [
+        "cell_sentence_1",
+        "positive",
+        "negative_1_idx",
+        "negative_2_idx",
+      ] # Columns to select from raw dataset
+    # cs_length and cs_col not needed for non-text_only datasets
+  - name: "cellxgene_pseudo_bulk_3_5k"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+    text_only: true # Text-only dataset with truncation
+    layer_axis: "var" #needed to use gene names and not sample ids
+    cs_length: 50 # Truncate cell sentences to 50 tokens
+    cs_col: "cell_sentence_2" # Column to truncate
+    index_column: sample_idx
+    keep_columns:
+      ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
 #  - name: "geo_70k"
 #    type: "multiplets"
 #    caption: "natural_language_annotation"
 #    text_only: false  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+#    layer_axis: "var"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+#    index_column: sample_idx
+#    keep_columns: ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
 
 # Bio datasets - biological background knowledge datasets (always processed as text-only)
-# - These do NOT have enc.prepare_ds applied (different data format)
+# - These do NOT have enc.prefix_ds applied (different data format)
 # - These do NOT get cell sentence truncation
 # - Use keep_columns to specify which columns to retain from the raw dataset
 bio_datasets:

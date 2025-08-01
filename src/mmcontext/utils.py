@@ -436,6 +436,120 @@ def get_device():
         return torch.device("cpu")
 
 
+def resolve_negative_indices_and_rename(
+    dataset,
+    primary_cell_sentence_col: str,
+    positive_col: str = "positive",
+    negative_prefix: str = "negative",
+    index_col: str = "sample_idx",
+    remove_index_col: bool = False,
+):
+    """
+    Resolve negative indices in multiplet datasets and rename columns appropriately.
+
+    This function processes multiplet datasets by:
+    1. Resolving sample indices in negative columns to actual values
+    2. Renaming columns by removing "_idx" suffix
+    3. Renaming primary column to "anchor"
+    4. Optionally removing the index column
+
+    Parameters
+    ----------
+    dataset : Dataset or DatasetDict
+        The dataset containing negative indices to resolve
+    primary_cell_sentence_col : str
+        Name of the primary cell sentence column (will be renamed to "anchor")
+    positive_col : str, optional
+        Name of the positive column (default: "positive")
+    negative_prefix : str, optional
+        Prefix for negative columns (default: "negative")
+    index_col : str, optional
+        Name of the index column (default: "sample_idx")
+    remove_index_col : bool, optional
+        Whether to remove the index column after processing (default: True)
+
+    Returns
+    -------
+    Dataset or DatasetDict
+        Processed dataset with resolved indices and renamed columns
+    """
+    import re
+
+    from datasets import Dataset, DatasetDict
+
+    def _resolve_negative_indices_split(split: Dataset) -> Dataset:
+        """Resolve sample indices in negative columns to actual values for a single split."""
+        negative_cols = [c for c in split.column_names if c.startswith(negative_prefix)]
+
+        if not index_col or not negative_cols:
+            return split
+
+        # Create mappings from index to both positive and anchor values
+        index_to_positive = {}
+        index_to_anchor = {}
+
+        for _, row in enumerate(split):
+            if index_col in row:
+                idx_val = str(row[index_col])
+                if positive_col in row:
+                    index_to_positive[idx_val] = row[positive_col]
+                if primary_cell_sentence_col in row:
+                    index_to_anchor[idx_val] = row[primary_cell_sentence_col]
+
+        def _resolve_negatives(batch):
+            for neg_col in negative_cols:
+                if neg_col in batch:
+                    # Extract the number from column name (e.g., "negative_1_idx" -> 1)
+                    match = re.search(r"negative_(\d+)_idx", neg_col)
+                    if match:
+                        neg_num = int(match.group(1))
+                        is_odd = neg_num % 2 == 1
+
+                        resolved_values = []
+                        for idx_value in batch[neg_col]:
+                            if is_odd and idx_value in index_to_positive:
+                                resolved_values.append(index_to_positive[idx_value])
+                            elif not is_odd and idx_value in index_to_anchor:
+                                resolved_values.append(index_to_anchor[idx_value])
+                            else:
+                                # Fallback: keep original value if mapping not found
+                                resolved_values.append(idx_value)
+
+                        batch[neg_col] = resolved_values
+            return batch
+
+        # Apply the resolution
+        proc = split.map(_resolve_negatives, batched=True, desc="Resolving negative indices")
+
+        # Rename columns to remove "_idx" suffix
+        for neg_col in negative_cols:
+            if neg_col in proc.column_names and neg_col.endswith("_idx"):
+                new_col_name = neg_col.replace("_idx", "")
+                proc = proc.rename_column(neg_col, new_col_name)
+
+        # Rename primary column to "anchor"
+        if primary_cell_sentence_col in proc.column_names and primary_cell_sentence_col != "anchor":
+            proc = proc.rename_column(primary_cell_sentence_col, "anchor")
+
+        # Remove index column if requested
+        if remove_index_col and index_col in proc.column_names:
+            proc = proc.remove_columns([index_col])
+
+        return proc
+
+    # Process the dataset
+    if isinstance(dataset, Dataset):
+        processed_dataset = _resolve_negative_indices_split(dataset)
+    elif isinstance(dataset, DatasetDict):
+        processed_dataset = DatasetDict(
+            {name: _resolve_negative_indices_split(split) for name, split in dataset.items()}
+        )
+    else:
+        raise TypeError("resolve_negative_indices expects a Dataset or DatasetDict")
+
+    return processed_dataset
+
+
 '''
 def prepare_omics_resources(hf_ds, *, prefix: str = "sample_idx:"):
     """
