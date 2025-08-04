@@ -24,6 +24,7 @@ input_dim_map:
 
 # Training hardware requirements
 force_cuda: false # If true, training will stop if CUDA is not available
+force_refresh_cache: false # If true, re-download datasets even if cached (useful when datasets are updated online)
 
 # Omics datasets - represent actual omics data that can be processed as text_only or with numeric embeddings
 # Processing workflow: get_initial_embeddings (if not text_only) → select_columns → resolve_negative_indices (if multiplets) → prefix_ds (prefixing)
@@ -37,19 +38,19 @@ force_cuda: false # If true, training will stop if CUDA is not available
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-  - name: "cellxgene_pseudo_bulk_3_5k"
-    type: "multiplets"
-    caption: "natural_language_annotation"
-    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
-    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
-    index_column: sample_idx
-    keep_columns: [
-        "cell_sentence_1",
-        "positive",
-        "negative_1_idx",
-        "negative_2_idx",
-      ] # Columns to select from raw dataset
-    # cs_length and cs_col not needed for non-text_only datasets
+  # - name: "cellxgene_pseudo_bulk_3_5k"
+  #   type: "multiplets"
+  #   caption: "natural_language_annotation"
+  #   text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+  #   layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
+  #   index_column: sample_idx
+  #   keep_columns: [
+  #       "cell_sentence_1",
+  #       "positive",
+  #       "negative_1_idx",
+  #       "negative_2_idx",
+  #     ] # Columns to select from raw dataset
+  # cs_length and cs_col not needed for non-text_only datasets
   - name: "cellxgene_pseudo_bulk_3_5k"
     type: "multiplets"
     caption: "natural_language_annotation"
@@ -76,7 +77,8 @@ bio_datasets:
   - id: "jo-mengr/descriptions_genes"
     name: "gene_description"
     type: "multiplets"
-    keep_columns: ["anchor", "positive"] # Columns to keep from this dataset
+    anchor_col_name: "anchor"
+    positive_col_name: "positive" # hard negative mining will be performed
 
 #test_datasets:
 #  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"
@@ -104,7 +106,7 @@ joint_adapter: #if desired, the outputs of both models parts are passed through 
 trainer:
   unfreeze_epoch: 16 #will unfreeze the whole text encoder
   output_dir: "../../models/trained"
-  num_train_epochs: 1
+  num_train_epochs: 2
   per_device_train_batch_size: 128
   per_device_eval_batch_size: 128
   learning_rate: 5e-2
@@ -112,11 +114,11 @@ trainer:
   fp16: false
   bf16: false
   eval_strategy: "steps"
-  eval_steps: 100
+  eval_steps: 10
   save_strategy: "steps"
   save_steps: 2000
   save_total_limit: 2
-  logging_steps: 100
+  logging_steps: 10
   logging_first_step: True
   dataloader_num_workers: 0
   max_grad_norm: 1.0

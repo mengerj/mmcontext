@@ -32,6 +32,7 @@ exec 2>"$BASE_OUT"/train.err
 # General training parameters
 EMBEDDING_METHOD="scvi_fm"
 FORCE_CUDA="true"           # Require CUDA for training
+FORCE_REFRESH_CACHE="false" # Set to "true" to re-download datasets even if cached
 TRAINER_FP16="true"
 
 # Adapter dimensions
@@ -66,6 +67,7 @@ echo "venv activated"
 echo "Running training script with parameters:"
 echo "  embedding_method: $EMBEDDING_METHOD"
 echo "  force_cuda: $FORCE_CUDA"
+echo "  force_refresh_cache: $FORCE_REFRESH_CACHE"
 echo "  adapter.hidden_dim: $ADAPTER_HIDDEN_DIM"
 echo "  adapter.output_dim: $ADAPTER_OUTPUT_DIM"
 echo "  learning_rate: $LEARNING_RATE"
@@ -76,6 +78,7 @@ echo "  Dataset configurations are loaded from conf/train_conf.yaml"
 python3 scripts/train.py \
     embedding_method="$EMBEDDING_METHOD" \
     force_cuda="$FORCE_CUDA" \
+    force_refresh_cache="$FORCE_REFRESH_CACHE" \
     adapter.hidden_dim="$ADAPTER_HIDDEN_DIM" \
     adapter.output_dim="$ADAPTER_OUTPUT_DIM" \
     trainer.learning_rate="$LEARNING_RATE" \
