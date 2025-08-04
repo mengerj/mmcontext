@@ -16,6 +16,7 @@ from sentence_transformers import (
     SentenceTransformerTrainingArguments,
 )
 from sentence_transformers.evaluation import SequentialEvaluator
+from sentence_transformers.util import mine_hard_negatives
 from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeTextEncoderCallback
@@ -93,10 +94,6 @@ def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
 
 def generate_unique_model_name(
     cfg: DictConfig,
-    dataset_configs: list,
-    cs_len: int = None,
-    text_only_datasets: list = None,
-    numeric_datasets: list = None,
     username: str = "jo-mengr",
 ) -> str:
     """
@@ -106,14 +103,6 @@ def generate_unique_model_name(
     ----------
     cfg : DictConfig
         Configuration object containing model settings
-    dataset_configs : list
-        List of dataset configurations
-    cs_len : int, optional
-        Length of cell sentences when text_only is True
-    text_only_datasets : list, optional
-        List of dataset names that are processed as text_only
-    numeric_datasets : list, optional
-        List of dataset names that use numeric embeddings
     username : str, optional
         Username/organization on Hugging Face Hub (default: "jo-mengr")
 
@@ -123,7 +112,7 @@ def generate_unique_model_name(
         Unique model name that doesn't conflict with existing models
     """
     # Generate base model name
-    base_name = generate_model_name(cfg, dataset_configs, cs_len, text_only_datasets, numeric_datasets)
+    base_name = generate_model_name(cfg)
 
     # Check if base name is available
     if not check_model_exists(base_name, username):
@@ -150,60 +139,32 @@ def generate_unique_model_name(
 
 def generate_model_name(
     cfg: DictConfig,
-    dataset_configs: list,
+    dataset_configs: list = None,
     cs_len: int = None,
     text_only_datasets: list = None,
     numeric_datasets: list = None,
 ) -> str:
     """
-    Generate a descriptive model name based on configuration.
+    Generate a simplified model name focusing on core architecture components.
 
     Parameters
     ----------
     cfg : DictConfig
         Configuration object containing model settings
-    dataset_configs : list
-        List of dataset configurations
+    dataset_configs : list, optional
+        List of dataset configurations (unused, kept for compatibility)
     cs_len : int, optional
-        Length of cell sentences when text_only is True
+        Length of cell sentences (unused, kept for compatibility)
     text_only_datasets : list, optional
-        List of dataset names that are processed as text_only
+        List of dataset names that are processed as text_only (unused, kept for compatibility)
     numeric_datasets : list, optional
-        List of dataset names that use numeric embeddings
+        List of dataset names that use numeric embeddings (unused, kept for compatibility)
 
     Returns
     -------
     str
-        Generated model name
+        Generated model name in format: mmcontext-{encoder}-{embedding_method}
     """
-    # Process dataset names
-    dataset_parts = []
-    captions = []
-
-    for dataset_config in dataset_configs:
-        # Get shortened dataset name by replacing specific parts
-        dataset_name = dataset_config.name
-        # Replace "cellxgene_pseudo_bulk" with "cg" while keeping any suffixes
-        if dataset_name.startswith("cellxgene_pseudo_bulk"):
-            shortened_name = dataset_name.replace("cellxgene_pseudo_bulk", "cg")
-        else:
-            shortened_name = dataset_name
-
-        dataset_parts.append(shortened_name)
-
-        # Shorten caption names for model naming
-        caption = dataset_config.caption
-        if caption == "natural_language_annotation":
-            caption = "nla"
-        captions.append(caption)
-
-    # Combine dataset names
-    datasets_str = "-".join(dataset_parts)
-
-    # Get unique captions
-    unique_captions = list(set(captions))
-    captions_str = "-".join(unique_captions)
-
     # Get text encoder name (simplified)
     text_encoder_name = cfg.text_encoder.name
     if "pubmedbert" in text_encoder_name.lower():
@@ -219,29 +180,11 @@ def generate_model_name(
         # Take the last part after '/'
         encoder_str = text_encoder_name.split("/")[-1]
 
-    # Get output dimension
-    output_dim = cfg.adapter.output_dim
+    # Get embedding method
+    embedding_method = cfg.embedding_method
 
-    # Determine method string based on dataset mix
-    text_only_datasets = text_only_datasets or []
-    numeric_datasets = numeric_datasets or []
-
-    if text_only_datasets and numeric_datasets:
-        # Mixed mode: some datasets are text_only, some are numeric
-        method_str = f"mixed-{cfg.embedding_method}"
-        if cs_len is not None:
-            method_str = f"{method_str}-text_{cs_len}"
-    elif text_only_datasets and not numeric_datasets:
-        # All datasets are text_only
-        method_str = "text_only"
-        if cs_len is not None:
-            method_str = f"text_only_{cs_len}"
-    else:
-        # All datasets use numeric embeddings (or no datasets specified)
-        method_str = cfg.embedding_method
-
-    # Construct the model name (removed cell_sentence_str component)
-    model_name = f"mmcontext-{datasets_str}-{captions_str}-{encoder_str}-{output_dim}-{method_str}"
+    # Construct the simplified model name
+    model_name = f"mmcontext-{encoder_str}-{embedding_method}"
 
     return model_name
 
@@ -322,6 +265,7 @@ def main(cfg: DictConfig):
                 # Construct dataset name
                 base_name = dataset_config.name
                 dataset_name = f"{base_name}_{dataset_config.type}_{dataset_config.caption}"
+
                 logger.info(f"Loading omics dataset: {dataset_name}")
 
                 # Load the dataset
@@ -356,7 +300,7 @@ def main(cfg: DictConfig):
                 logger.info(
                     f"Dataset '{dataset_name}' using layer_axis='{layer_axis}', primary_cell_sentence='{primary_cell_sentence}'"
                 )
-
+                eval_name = f"{dataset_name}_{primary_cell_sentence}"
                 # Check if this dataset should be processed as text_only
                 dataset_text_only = getattr(dataset_config, "text_only", False)
 
@@ -415,6 +359,7 @@ def main(cfg: DictConfig):
                         layer_key=precomputed_key,
                         download_dir=f"../../data/from_nxtcloud/{dataset_name}",
                         axis=layer_axis,
+                        overwrite=getattr(cfg, "force_refresh_cache", False),  # Add this parameter to config
                     )
                     enc.register_initial_embeddings(token_df, data_origin=chosen_method)
                 else:
@@ -506,6 +451,7 @@ def main(cfg: DictConfig):
                     dataset_type=dataset_config.type,
                     dataset=dataset_ready["val"],
                     batch_size=cfg.trainer.per_device_eval_batch_size,
+                    current_eval_name=eval_name,
                 )
                 evaluators.append(evaluator)
 
@@ -534,20 +480,20 @@ def main(cfg: DictConfig):
                     if len(split_data) > 0:
                         logger.info(f"    Columns: {list(split_data.column_names)}")
 
-                # Use configurable select_columns instead of hardcoded remove_columns
-                keep_columns = getattr(bio_dataset_config, "keep_columns", None)
-                if keep_columns:
+                if bio_dataset_config.anchor_col_name and bio_dataset_config.positive_col_name:
                     # Apply to all splits that contain the specified columns
                     dataset_processed = {}
                     for split_name, split_data in dataset.items():
-                        # Only keep columns that exist in this split
-                        available_columns = [col for col in keep_columns if col in split_data.column_names]
-                        if available_columns:
-                            dataset_processed[split_name] = split_data.select_columns(available_columns)
-                            logger.info(f"  Kept columns {available_columns} in {split_name} split")
-                        else:
-                            logger.warning(f"  No specified columns found in {split_name} split, keeping all")
-                            dataset_processed[split_name] = split_data
+                        # perform hard negative mining with the text model of interest
+                        dataset_with_negatives = mine_hard_negatives(
+                            split_data,
+                            model=SentenceTransformer(cfg.text_encoder.name),
+                            anchor_column_name=bio_dataset_config.anchor_col_name,
+                            positive_column_name=bio_dataset_config.positive_col_name,
+                        )
+                        # rename negative col to negative_1 for the get_evaluator function
+                        dataset_with_negatives = dataset_with_negatives.rename_column("negative", "negative_1")
+                        dataset_processed[split_name] = dataset_with_negatives
                     dataset_ready = DatasetDict(dataset_processed)
                 else:
                     # If no keep_columns specified, use the dataset as-is
@@ -560,6 +506,16 @@ def main(cfg: DictConfig):
                 if "train" in dataset_ready:
                     train_datasets[dataset_name] = dataset_ready["train"]
                     logger.info(f"Added bio dataset '{dataset_name}' to training set")
+                    val_datasets[dataset_name] = dataset_ready[
+                        "train"
+                    ]  # add the training data also as evaluation just to check if these bio datasets are considered
+                    evaluator = get_evaluator(
+                        dataset_type=dataset_config.type,
+                        dataset=dataset_ready["train"],
+                        batch_size=cfg.trainer.per_device_eval_batch_size,
+                        current_eval_name=dataset_name,
+                    )
+                    evaluators.append(evaluator)
                 else:
                     logger.warning(f"Bio dataset '{dataset_name}' has no 'train' split, skipping")
 
@@ -596,21 +552,33 @@ def main(cfg: DictConfig):
         # -------------------------------------------------------------------------
 
         # Generate unique model name to avoid conflicts
-        # Use the first cs_length from text_only datasets for naming (if any)
-        cs_length_for_naming = text_only_cs_lengths[0] if text_only_cs_lengths else None
-        omics_datasets = getattr(cfg, "omics_datasets", [])
-        unique_model_name = generate_unique_model_name(
-            cfg, omics_datasets, cs_length_for_naming, text_only_datasets, numeric_datasets
-        )
-        logger.info(f"Using model name: {unique_model_name}")
-        logger.info(f"Text-only datasets: {text_only_datasets}")
-        logger.info(f"Numeric datasets: {numeric_datasets}")
+        unique_model_name = generate_unique_model_name(cfg)
+        logger.info(f"Using simplified model name: {unique_model_name}")
+
+        # Log dataset information for reference (this detailed info can be used in model documentation)
+        logger.info("Training datasets summary:")
+        logger.info(f"  Text-only datasets: {text_only_datasets}")
+        logger.info(f"  Numeric datasets: {numeric_datasets}")
         if text_only_cs_lengths:
-            logger.info(f"Text-only dataset cs_lengths: {text_only_cs_lengths}")
+            logger.info(f"  Text-only dataset cs_lengths: {text_only_cs_lengths}")
             if len(set(text_only_cs_lengths)) > 1:
-                logger.info(f"Multiple cs_length values detected: {set(text_only_cs_lengths)}")
-        else:
-            logger.info("No cs_length values specified for text-only datasets")
+                logger.info(f"  Multiple cs_length values detected: {set(text_only_cs_lengths)}")
+
+        # Log omics datasets details
+        if hasattr(cfg, "omics_datasets") and cfg.omics_datasets:
+            logger.info("  Omics datasets configuration:")
+            for dataset_config in cfg.omics_datasets:
+                logger.info(
+                    f"    - {dataset_config.name}: type={dataset_config.type}, "
+                    f"text_only={getattr(dataset_config, 'text_only', False)}, "
+                    f"layer_axis={getattr(dataset_config, 'layer_axis', 'obs')}"
+                )
+
+        # Log bio datasets details
+        if hasattr(cfg, "bio_datasets") and cfg.bio_datasets:
+            logger.info("  Bio datasets configuration:")
+            for dataset_config in cfg.bio_datasets:
+                logger.info(f"    - {dataset_config.name}: type={dataset_config.type}")
 
         # Adjust evaluation strategy if there are no validation datasets
         eval_strategy = cfg.trainer.eval_strategy

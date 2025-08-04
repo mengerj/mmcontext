@@ -337,7 +337,9 @@ def get_loss(dataset_type: str, loss_name: str = None):
     return LossClass
 
 
-def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None, batch_size: int = 32):
+def get_evaluator(
+    dataset_type: str, dataset, evaluator_name: str | None = None, batch_size: int = 32, current_eval_name: str = None
+):
     """
     Return a suitable evaluator object
 
@@ -389,6 +391,7 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None,
                 sentences2=dataset["sentence_2"],
                 labels=dataset["label"],
                 batch_size=batch_size,
+                name=current_eval_name,
             )
         except AttributeError as e:
             raise f"Evaluator class '{evaluator_name}' not found in sentence_transformers.evaluation" from e
@@ -414,6 +417,7 @@ def get_evaluator(dataset_type: str, dataset, evaluator_name: str | None = None,
                 anchors=dataset["anchor"],
                 positives=dataset["positive"],
                 negatives=dataset["negative_1"],
+                name=current_eval_name,
             )
         except AttributeError as e:
             raise f"Evaluator class '{evaluator_name}' not found in sentence_transformers.evaluation" from e
