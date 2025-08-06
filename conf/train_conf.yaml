@@ -37,7 +37,7 @@ force_cuda: false # If true, training will stop if CUDA is not available
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-  - name: "cellxgene_pseudo_bulk_3_5k"
+  - name: "cellxgene_pseudo_bulk_100k"
     type: "multiplets"
     caption: "natural_language_annotation"
     text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
@@ -50,16 +50,16 @@ omics_datasets:
         "negative_2_idx",
       ] # Columns to select from raw dataset
     # cs_length and cs_col not needed for non-text_only datasets
-  - name: "cellxgene_pseudo_bulk_3_5k"
-    type: "multiplets"
-    caption: "natural_language_annotation"
-    text_only: true # Text-only dataset with truncation
-    layer_axis: "var" #needed to use gene names and not sample ids
-    cs_length: 50 # Truncate cell sentences to 50 tokens
-    cs_col: "cell_sentence_2" # Column to truncate
-    index_column: sample_idx
-    keep_columns:
-      ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
+ # - name: "cellxgene_pseudo_bulk_100k"
+ #   type: "multiplets"
+ #   caption: "natural_language_annotation"
+ #   text_only: true # Text-only dataset with truncation
+ #   layer_axis: "var" #needed to use gene names and not sample ids
+ #   cs_length: 50 # Truncate cell sentences to 50 tokens
+ #   cs_col: "cell_sentence_2" # Column to truncate
+ #   index_column: sample_idx
+ #   keep_columns:
+ #     ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
 #  - name: "geo_70k"
 #    type: "multiplets"
 #    caption: "natural_language_annotation"
@@ -84,9 +84,9 @@ bio_datasets:
 # Add more test datasets as needed
 
 text_encoder:
-  name: "NeuML/bioclinical-modernbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings"
+  name: "NeuML/pubmedbert-base-embeddings" #"NeuML/bioclinical-modernbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings"
   freeze_text_encoder: True
-  unfreeze_last_n_layers: 1
+  unfreeze_last_n_layers: 2
 
 #loss: "MultipleNegativesRankingLoss"
 #loss: "ContrastiveLoss"

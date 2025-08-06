@@ -30,13 +30,13 @@ exec 2>"$BASE_OUT"/train.err
 # ─────────────────────────────────────────────────────────────────────────────
 
 # General training parameters
-EMBEDDING_METHOD="scvi_fm"
+EMBEDDING_METHOD="gs"
 FORCE_CUDA="true"           # Require CUDA for training
 TRAINER_FP16="true"
 
 # Adapter dimensions
-ADAPTER_HIDDEN_DIM="128"    # Can be "null" or a number like 1024
-ADAPTER_OUTPUT_DIM="64"     # Usually 2048, 1024, etc.
+ADAPTER_HIDDEN_DIM=2048    # Can be "null" or a number like 1024
+ADAPTER_OUTPUT_DIM=1024    # Usually 2048, 1024, etc.
 
 # Learning rate and other trainer params
 LEARNING_RATE="2e-5"        # Changed from 0.05 to avoid NaN issues
