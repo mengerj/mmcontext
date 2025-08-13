@@ -357,7 +357,7 @@ def main(cfg: DictConfig):
                     token_df, _ = enc.get_initial_embeddings(
                         dataset,
                         layer_key=precomputed_key,
-                        download_dir=f"../../data/from_nxtcloud/{dataset_name}",
+                        download_dir=f"data/from_nxtcloud/{dataset_name}",
                         axis=layer_axis,
                         overwrite=getattr(cfg, "force_refresh_cache", False),  # Add this parameter to config
                     )
@@ -507,12 +507,13 @@ def main(cfg: DictConfig):
                 if "train" in dataset_ready:
                     train_datasets[dataset_name] = dataset_ready["train"]
                     logger.info(f"Added bio dataset '{dataset_name}' to training set")
-                    val_datasets[dataset_name] = dataset_ready[
-                        "train"
-                    ]  # add the training data also as evaluation just to check if these bio datasets are considered
+                    # add a random sample of 1000 samples to the validation set
+                    val_datasets[dataset_name] = dataset_ready["train"].select(
+                        range(1000)
+                    )  # add the training data also as evaluation just to check if these bio datasets are considered
                     evaluator = get_evaluator(
                         dataset_type=bio_dataset_config.type,
-                        dataset=dataset_ready["train"],
+                        dataset=val_datasets[dataset_name],
                         batch_size=cfg.trainer.per_device_eval_batch_size,
                         current_eval_name=dataset_name,
                     )
