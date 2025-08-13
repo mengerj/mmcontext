@@ -471,7 +471,7 @@ def main(cfg: DictConfig):
                 logger.info(f"Bio dataset '{dataset_name}' will be processed as text_only")
 
                 # Load the dataset directly using the provided ID
-                dataset = load_dataset(dataset_id)
+                dataset = load_dataset(dataset_id, revision="hard_negatives")
                 logger.info(f"Bio dataset loaded - Keys: {list(dataset.keys())}")
 
                 # Log dataset splits and sizes
@@ -484,15 +484,16 @@ def main(cfg: DictConfig):
                     # Apply to all splits that contain the specified columns
                     dataset_processed = {}
                     for split_name, split_data in dataset.items():
+                        dataset_with_negatives = split_data
                         # perform hard negative mining with the text model of interest
-                        dataset_with_negatives = mine_hard_negatives(
-                            split_data,
-                            model=SentenceTransformer(cfg.text_encoder.name),
-                            anchor_column_name=bio_dataset_config.anchor_col_name,
-                            positive_column_name=bio_dataset_config.positive_col_name,
-                        )
+                        # dataset_with_negatives = mine_hard_negatives(
+                        #    split_data,
+                        #    model=SentenceTransformer(cfg.text_encoder.name),
+                        #    anchor_column_name=bio_dataset_config.anchor_col_name,
+                        #    positive_column_name=bio_dataset_config.positive_col_name,
+                        # )
                         # rename negative col to negative_1 for the get_evaluator function
-                        dataset_with_negatives = dataset_with_negatives.rename_column("negative", "negative_1")
+                        # dataset_with_negatives = dataset_with_negatives.rename_column("negative", "negative_1")
                         dataset_processed[split_name] = dataset_with_negatives
                     dataset_ready = DatasetDict(dataset_processed)
                 else:
@@ -510,7 +511,7 @@ def main(cfg: DictConfig):
                         "train"
                     ]  # add the training data also as evaluation just to check if these bio datasets are considered
                     evaluator = get_evaluator(
-                        dataset_type=dataset_config.type,
+                        dataset_type=bio_dataset_config.type,
                         dataset=dataset_ready["train"],
                         batch_size=cfg.trainer.per_device_eval_batch_size,
                         current_eval_name=dataset_name,
@@ -635,7 +636,8 @@ def main(cfg: DictConfig):
         model_dir = Path(hydra_run_dir, "model")
         os.makedirs(model_dir, exist_ok=True)
         model.save(model_dir)
-        model.push_to_hub(f"jo-mengr/{unique_model_name}", private=True)
+        model.push_to_hub(f"jo-mengr/{unique_model_name}")
+        logger.info(f"Training completed successfully. Model saved to {model_dir}")
     except Exception as e:
         logger.exception(e)
         raise e
@@ -643,8 +645,6 @@ def main(cfg: DictConfig):
         monitor.stop()
         monitor.save(hydra_run_dir)
         monitor.plot_metrics(hydra_run_dir)
-        logger.info(f"Training completed successfully. Model saved to {model_dir}")
-
     # Evaluate on test datasets
 
 
