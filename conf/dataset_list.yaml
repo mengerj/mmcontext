@@ -2,45 +2,8 @@
 defaults: []
 
 datasets:
-  - name: tabula_sapiens_10k
-    source: jo-mengr/tabula_sapiens_10k_single_no_caption_cs50
-    split: test
-    format: hub
-    index_col: sample_idx
-    bio_label_list:
-      - cell_ontology_class
-    batch_label_list:
-      - donor
-  - name: pancreas_hub
-    source: jo-mengr/human_pancreas_single_no_caption # hub repo
-    split: test
-    format: hub # hub | hf_disk | csv
-    index_col: sample_idx
-    bio_label_list:
-      - celltype
-    batch_label_list:
-      - tech
-  - name: cg_100k_val
-    source: jo-mengr/cellxgene_pseudo_bulk_100k_multiplets_natural_language_annotation_cs50
-    split: val
-    format: hub # hub | hf_disk | csv
-    index_col: sample_idx
-    bio_label_list:
-      - cell_type
-    batch_label_list:
-      - dataset_title
-      - assay
-  - name: human_disease_single_no_caption_cs50
-    source: jo-mengr/human_disease_single_no_caption_cs50
-    split: test
-    format: hub
-    index_col: sample_idx
-    bio_label_list:
-      - Disease
-    batch_label_list:
-      - "sra_study_acc"
-  - name: human_immune_health_atlas
-    source: jo-mengr/human_immune_health_atlas_20k_single_no_caption_cs50
+  - name: human_immune_health_atlas_cs2k
+    source: jo-mengr/human_immune_health_atlas_10k_single_no_caption_cs2000
     split: test
     format: hub
     index_col: sample_idx
