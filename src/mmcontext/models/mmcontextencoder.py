@@ -38,7 +38,7 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
-from sentence_transformers.models import Pooling, Module
+from sentence_transformers.models import Module, Pooling
 from transformers import AutoModel, AutoTokenizer
 
 from mmcontext.file_utils import (
@@ -78,6 +78,9 @@ class MMContextProcessor:
     prefix : str, optional
         Tag that distinguishes omics IDs from text (default: ``"sample_idx:"``).
         Only used if omics_lookup is provided.
+    max_seq_length : int, optional
+        Maximum sequence length for text tokenization. If None, will be extracted
+        from the tokenizer's configuration. Used for truncation during tokenization.
 
     Examples
     --------
@@ -102,13 +105,19 @@ class MMContextProcessor:
         omics_lookup: dict[str, int] = None,
         *,
         prefix: str = _PREFIX,
+        max_seq_length: int | None = None,
     ) -> None:
+        self.text_encoder_name = text_encoder_name
         if text_encoder_name == "one_hot":
             self.text_tok = None  # no HF tokenizer
             self._sentence2id: dict[str, int] = {}
             self._next_id = 1  # 0 is reserved for padding
+            # Set max_seq_length for one-hot encoder
+            self.max_seq_length = max_seq_length if max_seq_length is not None else 512
         else:
             self.text_tok = AutoTokenizer.from_pretrained(text_encoder_name)
+            # Extract max_seq_length from tokenizer config or use provided value
+            self._set_max_seq_length(max_seq_length)
         self.lookup = omics_lookup
         self.prefix = prefix
         self._text_only = omics_lookup is None
@@ -129,6 +138,33 @@ class MMContextProcessor:
         if prefix is not None:
             self.prefix = prefix
         self._text_only = False
+
+    def _set_max_seq_length(self, max_seq_length: int | None = None):
+        """Extract and set max_seq_length from tokenizer configuration or use provided value."""
+        if max_seq_length is not None:
+            # Use explicitly provided value
+            self.max_seq_length = max_seq_length
+            return
+
+        # Try to get from tokenizer config
+        try:
+            from transformers import AutoConfig
+
+            config = AutoConfig.from_pretrained(self.text_encoder_name)
+            if hasattr(config, "max_position_embeddings"):
+                self.max_seq_length = config.max_position_embeddings
+            elif hasattr(config, "max_seq_length"):
+                self.max_seq_length = config.max_seq_length
+            elif hasattr(config, "n_positions"):
+                self.max_seq_length = config.n_positions
+            elif hasattr(config, "max_sequence_length"):
+                self.max_seq_length = config.max_sequence_length
+            else:
+                # Fallback to a reasonable default
+                self.max_seq_length = 512
+        except Exception:
+            # Fallback if config loading fails
+            self.max_seq_length = 512
 
     # --------------------------------------------------------------------- #
     # public helpers
@@ -198,7 +234,7 @@ class MMContextProcessor:
                 }
             else:
                 tok_out = self.text_tok(
-                    texts, padding=padding, return_tensors="pt"
+                    texts, padding=padding, return_tensors="pt", truncation=True, max_length=self.max_seq_length
                 )  # ** tok_kwargs, removed due to issues with "document" type being passed, as of ST version 5.
             # tok["attention_mask"] = tok["attention_mask"].bool()
             tok_out["omics_text_info"] = torch.ones(len(texts), dtype=torch.int8)
@@ -246,7 +282,7 @@ class MMContextProcessor:
                 }
             else:
                 tok_out = self.text_tok(
-                    text_vals, padding=padding, return_tensors="pt"
+                    text_vals, padding=padding, return_tensors="pt", truncation=True, max_length=self.max_seq_length
                 )  # ** tok_kwargs, removed due to issues with "document" type being passed, as of ST version 5.
             for k, v in tok_out.items():  # v shape: (n_text, L)
                 full = [torch.zeros_like(v[0])] * len(texts)
@@ -337,6 +373,11 @@ class MMContextEncoder(Module):
 
         Note: Setting hidden_dim=0 would create an identity module (since input_dim
         equals output_dim), which has no effect, so it's treated the same as None.
+    max_seq_length : int | None, optional
+        Maximum sequence length for tokenization. If None, will be extracted from
+        the text encoder's configuration (e.g., max_position_embeddings). If the
+        text encoder doesn't have this information, defaults to 512. This property
+        is important for SentenceTransformers compatibility.
     """
 
     VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "random"]
@@ -355,6 +396,7 @@ class MMContextEncoder(Module):
         "pooling_mode",
         "joint_adapter_hidden_dim",
         "_joint_adapter_was_trained",
+        "max_seq_length",
     ]
 
     def __init__(
@@ -374,6 +416,7 @@ class MMContextEncoder(Module):
         pooling_mode: str = "mean",
         joint_adapter_hidden_dim: int | None = None,
         _joint_adapter_was_trained: bool = False,
+        max_seq_length: int | None = None,
     ) -> None:
         super().__init__()
         if registered_data_origin not in self.VALID_DATA_ORIGINS:
@@ -410,6 +453,8 @@ class MMContextEncoder(Module):
             self.text_encoder = AutoModel.from_pretrained(text_encoder_name)
 
         text_hidden_dim = self.text_encoder.config.hidden_size
+
+        # Note: max_seq_length will be set from processor after processor initialization
 
         # Determine output dimension
         if self._use_adapters:
@@ -482,9 +527,12 @@ class MMContextEncoder(Module):
             processor = MMContextProcessor(
                 text_encoder_name=text_encoder_name if isinstance(text_encoder_name, str) else "prajjwal1/bert-tiny",
                 omics_lookup=omics_lookup,
+                max_seq_length=max_seq_length,
             )
 
         self.processor = processor
+        # Set max_seq_length from processor
+        self.max_seq_length = self.processor.max_seq_length
         self._manage_text_encoder_freezing()
 
         # Track if joint adapter was trained (used for proper loading)
@@ -794,6 +842,7 @@ class MMContextEncoder(Module):
             "pooling_mode": self.pooling_mode,
             "joint_adapter_hidden_dim": self.joint_adapter_hidden_dim,
             "_joint_adapter_was_trained": self._joint_adapter_was_trained,
+            "max_seq_length": self.max_seq_length,
             "model_type": "bert",
         }
 
@@ -830,6 +879,7 @@ class MMContextEncoder(Module):
             train_lookup=self.train_lookup,
             pooling_mode=self.pooling_mode,
             joint_adapter_hidden_dim=self.joint_adapter_hidden_dim,
+            max_seq_length=self.max_seq_length,
         )
         # Load the filtered state dict into the temporary model
         temp_model.load_state_dict(state, strict=False)

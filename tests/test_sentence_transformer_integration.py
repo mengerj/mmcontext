@@ -377,3 +377,51 @@ def test_with_problematic_inputs(text_only_encoder):
             assert embedding.shape[0] == 8  # Expected output shape
         except AttributeError:
             pytest.fail("Model should handle boolean omics_text_info without AttributeError")
+
+
+def test_max_seq_length_propagation():
+    """Test that max_seq_length from MMContextEncoder propagates to SentenceTransformer."""
+    # Test with BERT model that has known max_position_embeddings
+    encoder = MMContextEncoder("bert-base-uncased")
+
+    # Verify the encoder has the expected max_seq_length
+    assert hasattr(encoder, "max_seq_length")
+    assert encoder.max_seq_length == 512  # BERT-base has 512 max_position_embeddings
+
+    # Create SentenceTransformer with the encoder
+    st_model = SentenceTransformer(modules=[encoder])
+
+    # Verify that max_seq_length propagated to the SentenceTransformer
+    assert hasattr(st_model, "max_seq_length")
+    assert st_model.max_seq_length == 512
+
+    # Test with explicit max_seq_length
+    encoder_custom = MMContextEncoder("bert-base-uncased", max_seq_length=256)
+    assert encoder_custom.max_seq_length == 256
+
+    st_model_custom = SentenceTransformer(modules=[encoder_custom])
+    assert st_model_custom.max_seq_length == 256
+
+    # Test with one-hot encoder
+    encoder_onehot = MMContextEncoder("one_hot")
+    assert encoder_onehot.max_seq_length == 512  # Default fallback
+
+    st_model_onehot = SentenceTransformer(modules=[encoder_onehot])
+    assert st_model_onehot.max_seq_length == 512
+
+
+def test_max_seq_length_in_config():
+    """Test that max_seq_length is properly saved and loaded in model configuration."""
+    # Create encoder with custom max_seq_length
+    encoder = MMContextEncoder("bert-base-uncased", max_seq_length=384)
+
+    # Check that it's in the config dict
+    config = encoder._get_config_dict()
+    assert "max_seq_length" in config
+    assert config["max_seq_length"] == 384
+
+    # Test with SentenceTransformer
+    st_model = SentenceTransformer(modules=[encoder])
+
+    # The SentenceTransformer should also have the correct max_seq_length
+    assert st_model.max_seq_length == 384
