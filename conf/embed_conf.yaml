@@ -5,7 +5,7 @@ defaults:
 run:
   seed: 42
   n_rows: 5_000 # rows per dataset split
-  batch_size: 16
+  batch_size: 1
   num_workers: 1
   overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
 
