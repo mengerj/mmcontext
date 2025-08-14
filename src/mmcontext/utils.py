@@ -70,7 +70,7 @@ def truncate_cell_sentences(dataset, column_name: str, max_length: int, num_proc
         _truncate_batch,
         batched=True,
         batch_size=10000,  # Larger batch size for better performance
-        desc=f"Truncating {column_name} to {max_length} tokens",
+        desc=f"Truncating {column_name} to {max_length} genes (words)",
         load_from_cache_file=False,  # Disable caching to avoid disk I/O overhead
         num_proc=num_proc,
     )
