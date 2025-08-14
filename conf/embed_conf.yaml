@@ -5,12 +5,12 @@ defaults:
 run:
   seed: 42
   n_rows: 5_000 # rows per dataset split
-  batch_size: 1
-  num_workers: 1
+  batch_size: 64
+  num_workers: 0
   overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
 
   # Parallelization settings
-  enable_parallel: true # Enable parallel processing of dataset/model combinations
+  enable_parallel: false # Enable parallel processing of dataset/model combinations
   max_workers: null # Maximum number of parallel workers (null = auto-detect CPU count)
   task_timeout: 7200 # Maximum time (seconds) per dataset/model combination (2 hours default)
 

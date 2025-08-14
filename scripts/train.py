@@ -28,41 +28,10 @@ from mmcontext.utils import (  # , load_test_adata_from_hf_dataset
     get_evaluator,
     get_loss,
     resolve_negative_indices_and_rename,
+    truncate_cell_sentences,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def truncate_cell_sentences(dataset, column_name: str, max_length: int):
-    """
-    Truncate cell sentences to the first max_length tokens efficiently.
-
-    Parameters
-    ----------
-    dataset : Dataset
-        HuggingFace dataset containing cell sentences
-    column_name : str
-        Name of the column containing cell sentences to truncate
-    max_length : int
-        Maximum number of tokens/words to keep (first n elements)
-
-    Returns
-    -------
-    Dataset
-        Dataset with truncated cell sentences
-    """
-
-    def _truncate_batch(batch):
-        truncated_sentences = []
-        for sentence in batch[column_name]:
-            # Split by spaces and take first max_length tokens
-            tokens = sentence.split()[:max_length]
-            # Join back with spaces
-            truncated_sentences.append(" ".join(tokens))
-        batch[column_name] = truncated_sentences
-        return batch
-
-    return dataset.map(_truncate_batch, batched=True, desc=f"Truncating {column_name} to {max_length} tokens")
 
 
 def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:

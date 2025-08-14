@@ -8,6 +8,7 @@ import torch
 from mmcontext.embed.dataset_utils import collect_adata_subset, load_generic_dataset
 from mmcontext.embed.model_utils import embed_labels, load_st_model, prepare_model_and_embed
 from mmcontext.file_utils import save_table
+from mmcontext.utils import truncate_cell_sentences
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,10 @@ def process_single_dataset_model(
             main_col = "cell_sentence_2"
         else:
             main_col = "cell_sentence_1"
+
+        # truncate cell sentences
+        if ds_cfg.get("cs_length", None) is not None and main_col == "cell_sentence_2":
+            raw_ds = truncate_cell_sentences(raw_ds, main_col, ds_cfg.cs_length)
 
         # Generate embeddings
         emb_df, path_map = prepare_model_and_embed(
