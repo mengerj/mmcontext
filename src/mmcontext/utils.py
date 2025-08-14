@@ -15,7 +15,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-def truncate_cell_sentences(dataset, column_name: str, max_length: int):
+def truncate_cell_sentences(dataset, column_name: str, max_length: int, num_proc: int = None):
     """
     Truncate cell sentences to the first max_length tokens efficiently.
 
@@ -27,24 +27,53 @@ def truncate_cell_sentences(dataset, column_name: str, max_length: int):
         Name of the column containing cell sentences to truncate
     max_length : int
         Maximum number of tokens/words to keep (first n elements)
+    num_proc : int, optional
+        Number of processes to use. If None, uses single process for small datasets
+        and multiple processes for large datasets (>50k samples).
 
     Returns
     -------
     Dataset
         Dataset with truncated cell sentences
     """
+    import re
+
+    # Pre-compile regex pattern for better performance
+    # This pattern matches sequences of non-whitespace characters (tokens)
+    token_pattern = re.compile(r"\S+")
 
     def _truncate_batch(batch):
-        truncated_sentences = []
+        truncated = []
         for sentence in batch[column_name]:
-            # Split by spaces and take first max_length tokens
-            tokens = sentence.split()[:max_length]
-            # Join back with spaces
-            truncated_sentences.append(" ".join(tokens))
-        batch[column_name] = truncated_sentences
+            # Find all tokens using regex (faster than split for large texts)
+            tokens = token_pattern.findall(sentence)
+            # Take first max_length tokens and join
+            if len(tokens) <= max_length:
+                truncated.append(sentence)  # No truncation needed
+            else:
+                truncated.append(" ".join(tokens[:max_length]))
+        batch[column_name] = truncated
         return batch
 
-    return dataset.map(_truncate_batch, batched=True, desc=f"Truncating {column_name} to {max_length} tokens")
+    # Auto-determine number of processes based on dataset size
+    if num_proc is None:
+        dataset_size = len(dataset)
+        if dataset_size > 50000:
+            import os
+
+            num_proc = min(os.cpu_count() or 1, 4)  # Use up to 4 processes for large datasets
+        else:
+            num_proc = 1  # Single process for smaller datasets to avoid overhead
+
+    # Use larger batch size for better performance and disable caching for memory efficiency
+    return dataset.map(
+        _truncate_batch,
+        batched=True,
+        batch_size=10000,  # Larger batch size for better performance
+        desc=f"Truncating {column_name} to {max_length} tokens",
+        load_from_cache_file=False,  # Disable caching to avoid disk I/O overhead
+        num_proc=num_proc,
+    )
 
 
 def consolidate_low_frequency_categories(

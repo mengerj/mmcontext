@@ -49,33 +49,54 @@ def load_generic_dataset(
     """
     Load a dataset in Arrow (hub / on-disk) **or** CSV form.
 
+    For hub datasets, uses streaming to efficiently load only the requested
+    number of rows without downloading the entire dataset.
+
     Returns
     -------
-    • datasets.Dataset   (for 'hub' or 'hf_disk')
-    • pandas.DataFrame   (for 'csv')
+    datasets.Dataset
+        Always returns a datasets.Dataset (CSV is converted from pandas)
     """
+    from itertools import islice
+
     source = Path(source).expanduser()
+
     if fmt == "hub":
-        ds = load_dataset(str(source), split=split or "test", download_mode="force_redownload")
+        if max_rows is not None:
+            # Use streaming to load only the requested number of rows
+            ds_iter = load_dataset(str(source), split=split or "test", streaming=True)
+            # Convert iterator to list with the requested number of items
+            subset_list = list(islice(ds_iter, max_rows))
+            ds = Dataset.from_list(subset_list)
+            logger.info("Loaded %s via streaming (%d rows)", fmt, len(ds))
+        else:
+            # Load the full dataset if no max_rows specified
+            ds = load_dataset(str(source), split=split or "test", download_mode="force_redownload")
+            logger.info("Loaded %s (%d rows)", fmt, len(ds))
     elif fmt == "hf_disk":
         disk = load_from_disk(str(source))
         ds = disk[split] if split else disk
+
+        # Apply sub-sampling if requested
+        if max_rows and len(ds) > max_rows:
+            ds = ds.shuffle(seed=seed).select(range(max_rows))
+        logger.info("Loaded %s (%d rows)", fmt, len(ds))
     elif fmt == "csv":
         if not source.is_file() or source.suffix != ".csv":
             raise FileNotFoundError(f"CSV file not found: {source}")
-        ds_df = pd.read_csv(source)
-        # convert the csv to HFDataset
+
+        if max_rows is not None:
+            # For CSV, read only the requested number of rows + header
+            ds_df = pd.read_csv(source, nrows=max_rows)
+        else:
+            ds_df = pd.read_csv(source)
+
+        # Convert the csv to HFDataset
         ds = Dataset.from_pandas(ds_df, split=split or "test")
+        logger.info("Loaded %s (%d rows)", fmt, len(ds))
     else:
         raise ValueError(f"Unknown format '{fmt}'")
 
-    # ── optional sub-sampling ───────────────────────────────────────────
-    if max_rows and len(ds) > max_rows:
-        if isinstance(ds, pd.DataFrame):
-            ds = ds.sample(n=max_rows, random_state=seed)
-        else:  # Arrow
-            ds = ds.shuffle(seed=seed).select(range(max_rows))
-    logger.info("Loaded %s (%d rows)", fmt, len(ds))
     return ds
 
 
