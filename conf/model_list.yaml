@@ -1,5 +1,8 @@
 defaults: []
 models:
-  - source: "NeuML/pubmedbert-base-embeddings"
-    name: pubmedbert
+  - source: "NeuML/bioclinical-modernbert-base-embeddings"
+    name: modernbert
+    text_only: true
+  - source: "Qwen/Qwen3-Embedding-0.6B"
+    name: qwen3_06b
     text_only: true

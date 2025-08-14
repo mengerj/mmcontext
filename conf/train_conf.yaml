@@ -23,7 +23,7 @@ input_dim_map:
 # Global cs_length and cs_col removed - now specified per dataset
 
 # Training hardware requirements
-force_cuda: false # If true, training will stop if CUDA is not available
+force_cuda: true # If true, training will stop if CUDA is not available
 force_refresh_cache: false # If true, re-download datasets even if cached (useful when datasets are updated online)
 
 # Omics datasets - represent actual omics data that can be processed as text_only or with numeric embeddings
