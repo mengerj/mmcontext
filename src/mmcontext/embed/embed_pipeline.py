@@ -110,7 +110,7 @@ def process_single_dataset_model(
 
         # truncate cell sentences
         if ds_cfg.get("cs_length", None) is not None and main_col == "cell_sentence_2":
-            raw_ds = truncate_cell_sentences(raw_ds, main_col, ds_cfg.cs_length)
+            raw_ds = truncate_cell_sentences(raw_ds, main_col, ds_cfg.cs_length, filter_strings=["RPS", "RPL", "MT"])
 
         # Generate embeddings
         emb_df, path_map = prepare_model_and_embed(

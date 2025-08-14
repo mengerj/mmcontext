@@ -15,9 +15,11 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-def truncate_cell_sentences(dataset, column_name: str, max_length: int, num_proc: int = None):
+def truncate_cell_sentences(
+    dataset, column_name: str, max_length: int, num_proc: int = None, filter_strings: list[str] = None
+):
     """
-    Truncate cell sentences to the first max_length tokens efficiently.
+    Truncate cell sentences to the first max_length tokens efficiently, with optional gene filtering.
 
     Parameters
     ----------
@@ -30,11 +32,15 @@ def truncate_cell_sentences(dataset, column_name: str, max_length: int, num_proc
     num_proc : int, optional
         Number of processes to use. If None, uses single process for small datasets
         and multiple processes for large datasets (>50k samples).
+    filter_strings : list[str], optional
+        List of strings to filter out from genes. Any gene containing any of these
+        strings will be removed before truncation. Useful for filtering ribosomal
+        genes (e.g., ['RPS', 'RPL']) or other unwanted gene sets.
 
     Returns
     -------
     Dataset
-        Dataset with truncated cell sentences
+        Dataset with filtered and truncated cell sentences
     """
     import re
 
@@ -47,11 +53,40 @@ def truncate_cell_sentences(dataset, column_name: str, max_length: int, num_proc
         for sentence in batch[column_name]:
             # Find all tokens using regex (faster than split for large texts)
             tokens = token_pattern.findall(sentence)
+
+            # Filter out genes containing any of the filter strings
+            if filter_strings:
+                original_count = len(tokens)
+                filtered_tokens = []
+                removed_counts = {filter_str: 0 for filter_str in filter_strings}
+
+                for token in tokens:
+                    should_keep = True
+                    for filter_str in filter_strings:
+                        if filter_str in token:
+                            removed_counts[filter_str] += 1
+                            should_keep = False
+                            break  # No need to check other filter strings for this token
+
+                    if should_keep:
+                        filtered_tokens.append(token)
+
+                tokens = filtered_tokens
+
+                # Log filtering results for this sentence (only if genes were removed)
+                total_removed = original_count - len(tokens)
+                if total_removed > 0:
+                    filter_details = ", ".join(
+                        [f"{count} with '{filter_str}'" for filter_str, count in removed_counts.items() if count > 0]
+                    )
+                    logger.debug(f"Filtered {total_removed} genes from sentence: {filter_details}")
+
             # Take first max_length tokens and join
             if len(tokens) <= max_length:
-                truncated.append(sentence)  # No truncation needed
+                truncated.append(" ".join(tokens))  # Join filtered tokens
             else:
                 truncated.append(" ".join(tokens[:max_length]))
+
         batch[column_name] = truncated
         return batch
 
@@ -65,15 +100,32 @@ def truncate_cell_sentences(dataset, column_name: str, max_length: int, num_proc
         else:
             num_proc = 1  # Single process for smaller datasets to avoid overhead
 
+    # Log filtering information if filter strings are provided
+    if filter_strings:
+        logger.info(f"Filtering genes containing: {filter_strings}")
+
+    # Create description for progress bar
+    desc_parts = []
+    if filter_strings:
+        desc_parts.append(f"Filtering genes with {filter_strings}")
+    desc_parts.append(f"Truncating {column_name} to {max_length} genes")
+    desc = " and ".join(desc_parts)
+
     # Use larger batch size for better performance and disable caching for memory efficiency
-    return dataset.map(
+    processed_dataset = dataset.map(
         _truncate_batch,
         batched=True,
         batch_size=10000,  # Larger batch size for better performance
-        desc=f"Truncating {column_name} to {max_length} genes (words)",
+        desc=desc,
         load_from_cache_file=False,  # Disable caching to avoid disk I/O overhead
         num_proc=num_proc,
     )
+
+    # Log summary statistics if filtering was applied
+    if filter_strings:
+        logger.info(f"Gene filtering and truncation completed for {len(processed_dataset)} samples")
+
+    return processed_dataset
 
 
 def consolidate_low_frequency_categories(
