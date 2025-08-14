@@ -1,5 +1,5 @@
 defaults: []
 models:
-  - source: "thomas-sounack/BioClinical-ModernBERT-base"
-    name: modernbert
+  - source: "NeuML/pubmedbert-base-embeddings"
+    name: pubmedbert
     text_only: true
