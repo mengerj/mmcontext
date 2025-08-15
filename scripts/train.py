@@ -145,6 +145,8 @@ def generate_model_name(
             encoder_str = "biomodern"
         else:
             encoder_str = "modernbert"
+    elif "qwen" in text_encoder_name.lower():
+        encoder_str = "qwen"
     else:
         # Take the last part after '/'
         encoder_str = text_encoder_name.split("/")[-1]
