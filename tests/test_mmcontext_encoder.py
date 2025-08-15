@@ -228,6 +228,61 @@ def test_registered_input_dim():
     assert next(encoder.omics_adapter.parameters()).shape[1] == 100  # Input dim
 
 
+def test_text_model_kwargs():
+    """Test that text_model_kwargs are properly handled and passed to AutoModel.from_pretrained()."""
+    # Test with text_model_kwargs
+    text_model_kwargs = {
+        "torch_dtype": "auto",
+        "trust_remote_code": False,
+    }
+
+    encoder = MMContextEncoder(
+        text_encoder_name="prajjwal1/bert-tiny",
+        text_model_kwargs=text_model_kwargs,
+    )
+
+    # Verify that the kwargs were stored correctly
+    assert encoder.text_model_kwargs == text_model_kwargs
+
+    # Test that the model works correctly
+    features = encoder.tokenize(["This is a test sentence."])
+    assert "input_ids" in features
+    assert "attention_mask" in features
+
+    # Test forward pass
+    encoder.eval()
+    out = encoder(features)
+    assert "sentence_embedding" in out
+
+    # Test config serialization includes text_model_kwargs
+    config = encoder._get_config_dict()
+    assert "text_model_kwargs" in config
+    assert config["text_model_kwargs"] == text_model_kwargs
+
+
+def test_text_model_kwargs_defaults():
+    """Test that text_model_kwargs defaults work correctly."""
+    # Test with None
+    encoder1 = MMContextEncoder(
+        text_encoder_name="prajjwal1/bert-tiny",
+        text_model_kwargs=None,
+    )
+    assert encoder1.text_model_kwargs == {}
+
+    # Test with empty dict
+    encoder2 = MMContextEncoder(
+        text_encoder_name="prajjwal1/bert-tiny",
+        text_model_kwargs={},
+    )
+    assert encoder2.text_model_kwargs == {}
+
+    # Test with no parameter (default)
+    encoder3 = MMContextEncoder(
+        text_encoder_name="prajjwal1/bert-tiny",
+    )
+    assert encoder3.text_model_kwargs == {}
+
+
 # ------------------- saving and loading the models -------------------
 # --------------------------------------------------------------------- #
 
@@ -495,6 +550,83 @@ def test_adapter_weights_preserved(text_only_encoder, tmp_path):
     # Check that loaded weights match modified weights
     loaded_weight = next(loaded_encoder.text_adapter.parameters()).clone()
     assert torch.allclose(modified_weight, loaded_weight)
+
+
+def test_save_load_with_text_model_kwargs(tmp_path):
+    """Test that text_model_kwargs are preserved during save and load."""
+    text_model_kwargs = {
+        "torch_dtype": "auto",  # Use string instead of actual torch dtype to avoid serialization issues
+        "trust_remote_code": False,
+    }
+
+    # Create encoder with text_model_kwargs
+    encoder = MMContextEncoder(
+        text_encoder_name="prajjwal1/bert-tiny",
+        text_model_kwargs=text_model_kwargs,
+        adapter_hidden_dim=16,
+        adapter_output_dim=8,
+    )
+
+    # Do a forward pass
+    features = encoder.tokenize(["This is a test"])
+    encoder.eval()
+    orig_out = encoder(features)
+
+    # Save the model
+    save_dir = tmp_path / "encoder_with_kwargs"
+    encoder.save(str(save_dir))
+
+    # Load the model
+    loaded_encoder = MMContextEncoder.load(str(save_dir))
+
+    # Check that text_model_kwargs are preserved
+    assert loaded_encoder.text_model_kwargs == text_model_kwargs
+
+    # Check that the model still works correctly
+    loaded_features = loaded_encoder.tokenize(["This is a test"])
+    loaded_encoder.eval()
+    loaded_out = loaded_encoder(loaded_features)
+
+    assert torch.allclose(orig_out["sentence_embedding"], loaded_out["sentence_embedding"])
+
+
+def test_save_load_with_torch_dtype_kwargs(tmp_path):
+    """Test that text_model_kwargs with torch dtypes are properly serialized and deserialized."""
+    text_model_kwargs = {
+        "torch_dtype": torch.float32,
+        "trust_remote_code": False,
+    }
+
+    # Create encoder with torch dtype in text_model_kwargs
+    encoder = MMContextEncoder(
+        text_encoder_name="prajjwal1/bert-tiny",
+        text_model_kwargs=text_model_kwargs,
+        adapter_hidden_dim=16,
+        adapter_output_dim=8,
+    )
+
+    # Do a forward pass
+    features = encoder.tokenize(["This is a test"])
+    encoder.eval()
+    orig_out = encoder(features)
+
+    # Save the model
+    save_dir = tmp_path / "encoder_with_torch_dtype"
+    encoder.save(str(save_dir))
+
+    # Load the model
+    loaded_encoder = MMContextEncoder.load(str(save_dir))
+
+    # Check that text_model_kwargs are preserved (torch.float32 should be deserialized correctly)
+    assert loaded_encoder.text_model_kwargs["torch_dtype"] == torch.float32
+    assert not loaded_encoder.text_model_kwargs["trust_remote_code"]
+
+    # Check that the model still works correctly
+    loaded_features = loaded_encoder.tokenize(["This is a test"])
+    loaded_encoder.eval()
+    loaded_out = loaded_encoder(loaded_features)
+
+    assert torch.allclose(orig_out["sentence_embedding"], loaded_out["sentence_embedding"])
 
 
 # --------------------------------------------------------------------- #

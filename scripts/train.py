@@ -205,6 +205,9 @@ def main(cfg: DictConfig):
             # Overwrite the model's embedding_dim with the mapped value
             cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
             precomputed_key = f"X_{chosen_method}"
+            # Get text model kwargs if specified in config
+            text_model_kwargs = getattr(cfg.text_encoder, "model_kwargs", None)
+
             enc = MMContextEncoder(
                 text_encoder_name=cfg.text_encoder.name,
                 adapter_hidden_dim=cfg.adapter.hidden_dim,
@@ -214,6 +217,7 @@ def main(cfg: DictConfig):
                 unfreeze_last_n_layers=cfg.text_encoder.unfreeze_last_n_layers,
                 train_lookup=False,
                 joint_adapter_hidden_dim=None,
+                text_model_kwargs=text_model_kwargs,
             )
 
             # Primary cell sentence column and layer axis are now determined per dataset

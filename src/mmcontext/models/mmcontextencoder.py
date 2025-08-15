@@ -378,6 +378,10 @@ class MMContextEncoder(Module):
         the text encoder's configuration (e.g., max_position_embeddings). If the
         text encoder doesn't have this information, defaults to 512. This property
         is important for SentenceTransformers compatibility.
+    text_model_kwargs : dict | None, optional
+        Additional keyword arguments to pass to AutoModel.from_pretrained() when
+        loading the text encoder. For example, {"attn_implementation": "flash_attention_2"}
+        to enable flash attention. Defaults to None (empty dict).
     """
 
     VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "random"]
@@ -397,6 +401,7 @@ class MMContextEncoder(Module):
         "joint_adapter_hidden_dim",
         "_joint_adapter_was_trained",
         "max_seq_length",
+        "text_model_kwargs",
     ]
 
     def __init__(
@@ -417,6 +422,7 @@ class MMContextEncoder(Module):
         joint_adapter_hidden_dim: int | None = None,
         _joint_adapter_was_trained: bool = False,
         max_seq_length: int | None = None,
+        text_model_kwargs: dict | None = None,
     ) -> None:
         super().__init__()
         if registered_data_origin not in self.VALID_DATA_ORIGINS:
@@ -436,6 +442,7 @@ class MMContextEncoder(Module):
         self.train_lookup = train_lookup
         self.pooling_mode = pooling_mode
         self.joint_adapter_hidden_dim = joint_adapter_hidden_dim
+        self.text_model_kwargs = text_model_kwargs or {}
 
         # Determine if adapters should be used
         self._use_adapters = adapter_hidden_dim is not None or adapter_output_dim is not None
@@ -450,7 +457,7 @@ class MMContextEncoder(Module):
                 num_sentences=1_000_000, embed_dim=embed_dim, trainable=not freeze_text_encoder
             )
         else:
-            self.text_encoder = AutoModel.from_pretrained(text_encoder_name)
+            self.text_encoder = AutoModel.from_pretrained(text_encoder_name, **self.text_model_kwargs)
 
         text_hidden_dim = self.text_encoder.config.hidden_size
 
@@ -827,6 +834,16 @@ class MMContextEncoder(Module):
         dict
             A config with essential hyperparameters.
         """
+        # Convert text_model_kwargs to JSON-serializable format
+        serializable_kwargs = {}
+        for key, value in self.text_model_kwargs.items():
+            # Check if this is a torch dtype by checking the type string
+            if str(type(value)).startswith("<class 'torch.") and "dtype" in str(type(value)):
+                # Handle torch dtypes by converting to string
+                serializable_kwargs[key] = str(value)
+            else:
+                serializable_kwargs[key] = value
+
         return {
             "text_encoder_name": self.text_encoder_name
             if isinstance(self.text_encoder_name, str)
@@ -843,7 +860,7 @@ class MMContextEncoder(Module):
             "joint_adapter_hidden_dim": self.joint_adapter_hidden_dim,
             "_joint_adapter_was_trained": self._joint_adapter_was_trained,
             "max_seq_length": self.max_seq_length,
-            "model_type": "bert",
+            "text_model_kwargs": serializable_kwargs,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True, **kwargs) -> None:
@@ -859,8 +876,10 @@ class MMContextEncoder(Module):
         """
         os.makedirs(output_path, exist_ok=True)
 
-        # Save config using base class method
-        self.save_config(output_path)
+        # Save config using our custom serialization method
+        config_path = os.path.join(output_path, "config.json")
+        with open(config_path, "w") as f:
+            json.dump(self._get_config_dict(), f, indent=4)
 
         # Get state dict and filter omics embeddings
         state = self.state_dict()
@@ -880,12 +899,59 @@ class MMContextEncoder(Module):
             pooling_mode=self.pooling_mode,
             joint_adapter_hidden_dim=self.joint_adapter_hidden_dim,
             max_seq_length=self.max_seq_length,
+            text_model_kwargs=self.text_model_kwargs,
         )
         # Load the filtered state dict into the temporary model
         temp_model.load_state_dict(state, strict=False)
 
         # Save torch weights using base class method
         temp_model.save_torch_weights(output_path, safe_serialization=safe_serialization)
+
+    @classmethod
+    def _deserialize_text_model_kwargs(cls, kwargs_dict: dict) -> dict:
+        """
+        Deserialize text_model_kwargs from JSON-serializable format.
+
+        Parameters
+        ----------
+        kwargs_dict : dict
+            Dictionary with potentially serialized values
+
+        Returns
+        -------
+        dict
+            Dictionary with deserialized values
+        """
+        import torch
+
+        deserialized = {}
+        for key, value in kwargs_dict.items():
+            if isinstance(value, str):
+                # Try to convert string representations back to torch dtypes
+                if value == "torch.float32":
+                    deserialized[key] = torch.float32
+                elif value == "torch.float16":
+                    deserialized[key] = torch.float16
+                elif value == "torch.bfloat16":
+                    deserialized[key] = torch.bfloat16
+                elif value == "torch.int8":
+                    deserialized[key] = torch.int8
+                elif value == "torch.int16":
+                    deserialized[key] = torch.int16
+                elif value == "torch.int32":
+                    deserialized[key] = torch.int32
+                elif value == "torch.int64":
+                    deserialized[key] = torch.int64
+                elif value == "auto":
+                    # Special case for "auto" which is commonly used
+                    deserialized[key] = "auto"
+                else:
+                    # Keep as string if not a recognized torch dtype
+                    deserialized[key] = value
+            else:
+                deserialized[key] = value
+
+        return deserialized
 
     @classmethod
     def load(
@@ -933,6 +999,10 @@ class MMContextEncoder(Module):
             revision=revision,
             local_files_only=local_files_only,
         )
+
+        # Deserialize text_model_kwargs if present
+        if "text_model_kwargs" in cfg:
+            cfg["text_model_kwargs"] = cls._deserialize_text_model_kwargs(cfg["text_model_kwargs"])
 
         # Create model from config without omics embedding
         model = cls(**cfg)

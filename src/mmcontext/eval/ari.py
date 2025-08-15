@@ -48,3 +48,7 @@ class ARI(BaseEvaluator):
 
         ari = adjusted_rand_score(labels, km.labels_)
         return EvalResult(ari=ari)
+
+    def plot(self, **kw):
+        """Plot the ARI score."""
+        pass
