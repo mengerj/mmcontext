@@ -34,6 +34,51 @@ from mmcontext.utils import (  # , load_test_adata_from_hf_dataset
 logger = logging.getLogger(__name__)
 
 
+def resolve_torch_dtype_strings(kwargs_dict: dict) -> dict:
+    """
+    Resolve string representations of torch dtypes to actual torch objects.
+
+    Parameters
+    ----------
+    kwargs_dict : dict
+        Dictionary that may contain torch dtype strings
+
+    Returns
+    -------
+    dict
+        Dictionary with torch dtype strings resolved to actual torch objects
+    """
+    if not kwargs_dict:
+        return kwargs_dict
+
+    resolved = {}
+    for key, value in kwargs_dict.items():
+        if isinstance(value, str) and value.startswith("torch."):
+            # Map common torch dtype strings to actual objects
+            dtype_mapping = {
+                "torch.float32": torch.float32,
+                "torch.float16": torch.float16,
+                "torch.bfloat16": torch.bfloat16,
+                "torch.int8": torch.int8,
+                "torch.int16": torch.int16,
+                "torch.int32": torch.int32,
+                "torch.int64": torch.int64,
+                "torch.bool": torch.bool,
+                "torch.uint8": torch.uint8,
+            }
+
+            if value in dtype_mapping:
+                resolved[key] = dtype_mapping[value]
+                logger.info(f"Resolved torch dtype string '{value}' to {dtype_mapping[value]}")
+            else:
+                logger.warning(f"Unknown torch dtype string '{value}', keeping as string")
+                resolved[key] = value
+        else:
+            resolved[key] = value
+
+    return resolved
+
+
 def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
     """
     Check if a model already exists on Hugging Face Hub.
@@ -205,8 +250,14 @@ def main(cfg: DictConfig):
             # Overwrite the model's embedding_dim with the mapped value
             cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
             precomputed_key = f"X_{chosen_method}"
-            # Get text model kwargs if specified in config
+            # Get text model kwargs if specified in config and resolve torch dtype strings
             text_model_kwargs = getattr(cfg.text_encoder, "model_kwargs", None)
+            if text_model_kwargs:
+                # Convert OmegaConf DictConfig to regular dict if needed
+                if hasattr(text_model_kwargs, "_content"):
+                    text_model_kwargs = dict(text_model_kwargs)
+                text_model_kwargs = resolve_torch_dtype_strings(text_model_kwargs)
+                logger.info(f"Using text model kwargs: {text_model_kwargs}")
 
             enc = MMContextEncoder(
                 text_encoder_name=cfg.text_encoder.name,
