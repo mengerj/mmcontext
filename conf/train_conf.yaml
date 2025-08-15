@@ -89,6 +89,10 @@ text_encoder:
   name: "NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings"
   freeze_text_encoder: True
   unfreeze_last_n_layers: 1
+  # Optional: Additional kwargs to pass to AutoModel.from_pretrained()
+  # model_kwargs:
+  #   attn_implementation: "flash_attention_2"
+  #   torch_dtype: "auto"
 
 #loss: "MultipleNegativesRankingLoss"
 #loss: "ContrastiveLoss"
