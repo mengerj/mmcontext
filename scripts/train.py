@@ -258,7 +258,6 @@ def main(cfg: DictConfig):
                     text_model_kwargs = dict(text_model_kwargs)
                 text_model_kwargs = resolve_torch_dtype_strings(text_model_kwargs)
                 logger.info(f"Using text model kwargs: {text_model_kwargs}")
-
             enc = MMContextEncoder(
                 text_encoder_name=cfg.text_encoder.name,
                 adapter_hidden_dim=cfg.adapter.hidden_dim,
@@ -639,6 +638,9 @@ def main(cfg: DictConfig):
         # -------------------------------------------------------------------------
         # 8. Create a trainer & train with multiple datasets
         # -------------------------------------------------------------------------
+        if cfg.trainer.gradient_checkpointing:
+            model[0].text_encoder.gradient_checkpointing_enable()
+
         unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
 
         # Create callbacks list
