@@ -557,6 +557,36 @@ def main(cfg: DictConfig):
         modules = [enc]
         model = SentenceTransformer(modules=modules)
 
+        # Add this after creating your model in train.py, around line 558-562
+
+        # Diagnostic: Check parameter status before training
+        print("\n=== GRADIENT DEBUGGING ===")
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Model has {trainable_params:,} / {total_params:,} trainable parameters")
+
+        if trainable_params == 0:
+            print("ERROR: No trainable parameters found!")
+            print("Checking MMContextEncoder directly:")
+            enc_trainable = sum(p.numel() for p in enc.parameters() if p.requires_grad)
+            enc_total = sum(p.numel() for p in enc.parameters())
+            print(f"  MMContextEncoder: {enc_trainable:,} / {enc_total:,} trainable")
+
+            # Print first few trainable parameters
+            print("First few trainable parameters:")
+            count = 0
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    print(f"  {name}: {param.shape}")
+                    count += 1
+                    if count >= 5:
+                        break
+
+            if count == 0:
+                print("  No trainable parameters found in model!")
+
+        print("=== END GRADIENT DEBUGGING ===\n")
+
         # Combine all evaluators into a single sequential evaluator (only if we have evaluators)
         if evaluators:
             dev_evaluator = SequentialEvaluator(evaluators)
@@ -635,6 +665,12 @@ def main(cfg: DictConfig):
             run_name=unique_model_name,
             dataloader_num_workers=cfg.trainer.dataloader_num_workers,
         )
+
+        if cfg.trainer.gradient_checkpointing:
+            model[
+                0
+            ].text_encoder.enable_input_require_grads()  # Enable gradient flow for input_ids, otherwise partial unfreezing will lead to no gradient flow
+            model[0].text_encoder.gradient_checkpointing_enable()
 
         # -------------------------------------------------------------------------
         # 8. Create a trainer & train with multiple datasets
