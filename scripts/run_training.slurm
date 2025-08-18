@@ -30,14 +30,15 @@ exec 2>"$BASE_OUT"/train.err
 # ─────────────────────────────────────────────────────────────────────────────
 
 # General training parameters
-EMBEDDING_METHOD="gs"
+EMBEDDING_METHOD="scvi_fm"
 FORCE_CUDA="true"           # Require CUDA for training
 FORCE_REFRESH_CACHE="false" # Set to "true" to re-download datasets even if cached
-TRAINER_FP16="true"
+TRAINER_BF16="true"
+TEXT_ENCODER_NAME="Qwen/Qwen3-Embedding-0.6B"
 
 # Adapter dimensions
-ADAPTER_HIDDEN_DIM=2048    # Can be "null" or a number like 1024
-ADAPTER_OUTPUT_DIM=1024    # Usually 2048, 1024, etc.
+ADAPTER_HIDDEN_DIM=null    # Can be "null" or a number like 1024
+ADAPTER_OUTPUT_DIM=null    # Usually 2048, 1024, etc.
 
 # Learning rate and other trainer params
 LEARNING_RATE="2e-5"        # Changed from 0.05 to avoid NaN issues
@@ -80,7 +81,7 @@ echo "  adapter.hidden_dim: $ADAPTER_HIDDEN_DIM"
 echo "  adapter.output_dim: $ADAPTER_OUTPUT_DIM"
 echo "  learning_rate: $LEARNING_RATE"
 echo "  batch_size: $BATCH_SIZE"
-echo "  trainer.fp16: $TRAINER_FP16"
+echo "  trainer.bf16: $TRAINER_BF16"
 echo "  Dataset configurations are loaded from conf/train_conf.yaml"
 
 python3 scripts/train.py \
@@ -94,5 +95,6 @@ python3 scripts/train.py \
     trainer.per_device_eval_batch_size="$EVAL_BATCH_SIZE" \
     trainer.num_train_epochs="$NUM_EPOCHS" \
     trainer.warmup_ratio="$WARMUP_RATIO" \
-    trainer.fp16="$TRAINER_FP16" \
-    hydra.run.dir="$BASE_OUT"
+    trainer.bf16="$TRAINER_BF16" \
+    hydra.run.dir="$BASE_OUT" \
+    text_encoder.name="$TEXT_ENCODER_NAME"
