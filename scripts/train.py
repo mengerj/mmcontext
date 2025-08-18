@@ -633,13 +633,12 @@ def main(cfg: DictConfig):
             logging_steps=cfg.trainer.logging_steps,
             run_name=unique_model_name,
             dataloader_num_workers=cfg.trainer.dataloader_num_workers,
+            gradient_checkpointing=cfg.trainer.gradient_checkpointing,
         )
 
         # -------------------------------------------------------------------------
         # 8. Create a trainer & train with multiple datasets
         # -------------------------------------------------------------------------
-        if cfg.trainer.gradient_checkpointing:
-            model[0].text_encoder.gradient_checkpointing_enable()
 
         unfreeze_callback = UnfreezeTextEncoderCallback(unfreeze_epoch=cfg.trainer.unfreeze_epoch)
 
