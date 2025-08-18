@@ -359,7 +359,10 @@ def main(cfg: DictConfig):
                     for split_name, split_data in dataset.items():
                         if dataset_cs_col in split_data.column_names:
                             truncated_dataset[split_name] = truncate_cell_sentences(
-                                split_data, dataset_cs_col, dataset_cs_length
+                                split_data,
+                                dataset_cs_col,
+                                dataset_cs_length,
+                                filter_strings=dataset_config.get("gene_filter_strings", None),
                             )
                             logger.info(f"  Truncated {split_name} split")
                         else:
