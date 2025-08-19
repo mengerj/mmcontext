@@ -101,7 +101,6 @@ def prepare_model_and_embed(
     adata_download_dir: str | Path = None,
     main_col: str,
     index_col: str = "sample_index",
-    caption_col: str = None,
     batch_size: int = 32,
     num_workers: int = 0,
     pin_memory: bool = torch.cuda.is_available(),
@@ -156,6 +155,9 @@ def prepare_model_and_embed(
     """
     if not text_only and (layer_key is None or adata_download_dir is None):
         raise ValueError("layer_key and adata_download_dir must be provided if text_only is False")
+    # If using a multiplets dataset, the column with the data representation is called "anchor". For the embedding workflow, only this data is embedded.
+    if "anchor" in data.column_names:
+        main_col = "anchor"
     ###########################################################
     # --- optional model-specific preparation ----------------
     ###########################################################
@@ -181,19 +183,14 @@ def prepare_model_and_embed(
 
     if hasattr(impl, "prefix_ds"):
         logger.info("Calling prefix_ds on model-specific module …")
+        # Step 4: Apply prefixes using the new simplified prefix_ds method
+        logger.info(f"Applying prefixes to columns: {main_col}")
         ds = impl.prefix_ds(
             ds=data,
-            primary_cell_sentence_col=main_col,
-            caption_col=caption_col,
-            prefix=not text_only,
-            index_col=index_col,
-            keep_index_col=True,
+            columns_to_prefix=main_col,
         )  # type: ignore[arg-type]
     else:
         ds = data
-    # If using a multiplets dataset, the column with the data representation is called "anchor". For the embedding workflow, only this data is embedded.
-    if "anchor" in ds.column_names:
-        main_col = "anchor"
     ###########################################################
     # --- sentence embeddings via encode() --------------------
     ###########################################################
@@ -307,7 +304,6 @@ def embed_labels(
         data=label_ds,
         main_col="label",
         index_col="sample_idx",
-        caption_col=None,
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=pin_memory,

@@ -200,7 +200,10 @@ def generate_model_name(
     embedding_method = cfg.embedding_method
 
     # Construct the base model name
-    model_name = f"mmcontext-{encoder_str}-{embedding_method}"
+    if embedding_method is not None:
+        model_name = f"mmcontext-{encoder_str}-{embedding_method}"
+    else:
+        model_name = f"mmcontext-{encoder_str}"
 
     # Add custom tag if provided
     tag = getattr(cfg, "tag", None)
@@ -210,7 +213,7 @@ def generate_model_name(
     return model_name
 
 
-@hydra.main(config_path="../conf", config_name="train_conf", version_base=None)
+@hydra.main(config_path="../conf/training", config_name="train_conf", version_base=None)
 def main(cfg: DictConfig):
     """
     Train the MMContext model using parameters specified in a Hydra config.
@@ -250,11 +253,14 @@ def main(cfg: DictConfig):
         else:
             input_dim_map = cfg.input_dim_map
             chosen_method = cfg.embedding_method
-            if chosen_method not in input_dim_map:
+            if chosen_method is not None and chosen_method not in input_dim_map:
                 raise ValueError(f"Unknown embedding_method '{chosen_method}'. Allowed: {list(input_dim_map.keys())}")
-            # Overwrite the model's embedding_dim with the mapped value
-            cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
-            precomputed_key = f"X_{chosen_method}"
+            # Overwrite the model's embedding_dim with the mapped value (only if embedding_method is not null)
+            if chosen_method is not None:
+                cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
+                precomputed_key = f"X_{chosen_method}"
+            else:
+                precomputed_key = None
             # Get text model kwargs if specified in config and resolve torch dtype strings
             text_model_kwargs = getattr(cfg.text_encoder, "model_kwargs", None)
             if text_model_kwargs:
@@ -385,7 +391,7 @@ def main(cfg: DictConfig):
                     logger.info(f"Non-text_only dataset '{dataset_name}' - skipping cell sentence truncation")
 
                 # Step 1: Handle embedding registration FIRST (needs access to raw dataset with all columns)
-                if not dataset_text_only:
+                if not dataset_text_only and chosen_method is not None:
                     logger.info(f"Loading numeric embeddings for dataset '{dataset_name}' (before column selection)")
                     token_df, _ = enc.get_initial_embeddings(
                         dataset,
@@ -395,6 +401,10 @@ def main(cfg: DictConfig):
                         overwrite=getattr(cfg, "force_refresh_cache", False),  # Add this parameter to config
                     )
                     enc.register_initial_embeddings(token_df, data_origin=chosen_method)
+                elif chosen_method is None:
+                    # If embedding_method is null, force text_only mode
+                    logger.info(f"Dataset '{dataset_name}' forced to text_only mode because embedding_method is null")
+                    dataset_text_only = True  # Override dataset config
                 else:
                     # In text_only mode, we'll use cell sentences directly
                     logger.info(
@@ -677,8 +687,9 @@ def main(cfg: DictConfig):
 
         model_dir = Path(hydra_run_dir, "model")
         os.makedirs(model_dir, exist_ok=True)
-        model.save(model_dir)
-        model.push_to_hub(f"jo-mengr/{unique_model_name}")
+        print("unique_model_name", unique_model_name)
+        # model.save(model_dir)
+        # model.push_to_hub(f"jo-mengr/{unique_model_name}")
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
     except Exception as e:
         logger.exception(e)
