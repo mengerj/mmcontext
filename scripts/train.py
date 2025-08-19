@@ -177,7 +177,7 @@ def generate_model_name(
     Returns
     -------
     str
-        Generated model name in format: mmcontext-{encoder}-{embedding_method}
+        Generated model name in format: mmcontext-{encoder}-{embedding_method}[-{tag}]
     """
     # Get text encoder name (simplified)
     text_encoder_name = cfg.text_encoder.name
@@ -199,8 +199,13 @@ def generate_model_name(
     # Get embedding method
     embedding_method = cfg.embedding_method
 
-    # Construct the simplified model name
+    # Construct the base model name
     model_name = f"mmcontext-{encoder_str}-{embedding_method}"
+
+    # Add custom tag if provided
+    tag = getattr(cfg, "tag", None)
+    if tag and tag.strip():  # Check if tag is not None and not empty/whitespace
+        model_name = f"{model_name}-{tag.strip()}"
 
     return model_name
 
@@ -558,36 +563,6 @@ def main(cfg: DictConfig):
         # Build the sentence Trasnformer model
         modules = [enc]
         model = SentenceTransformer(modules=modules)
-
-        # Add this after creating your model in train.py, around line 558-562
-
-        # Diagnostic: Check parameter status before training
-        print("\n=== GRADIENT DEBUGGING ===")
-        total_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"Model has {trainable_params:,} / {total_params:,} trainable parameters")
-
-        if trainable_params == 0:
-            print("ERROR: No trainable parameters found!")
-            print("Checking MMContextEncoder directly:")
-            enc_trainable = sum(p.numel() for p in enc.parameters() if p.requires_grad)
-            enc_total = sum(p.numel() for p in enc.parameters())
-            print(f"  MMContextEncoder: {enc_trainable:,} / {enc_total:,} trainable")
-
-            # Print first few trainable parameters
-            print("First few trainable parameters:")
-            count = 0
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    print(f"  {name}: {param.shape}")
-                    count += 1
-                    if count >= 5:
-                        break
-
-            if count == 0:
-                print("  No trainable parameters found in model!")
-
-        print("=== END GRADIENT DEBUGGING ===\n")
 
         # Combine all evaluators into a single sequential evaluator (only if we have evaluators)
         if evaluators:
