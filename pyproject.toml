@@ -24,6 +24,15 @@ classifiers = [
 ]
 
 dependencies = [
+  "accelerate>=1.9",
+  "anndata>=0.11.3",
+  "datasets>=2.19.1",
+  "hydra-core>=1.3.2",
+  "psutil>=7",
+  "pynvml>=12",
+  "python-dotenv>=1.1.1",
+  "scanpy>=1.11.3",
+  "scib>=1.1.7",
   #  "accelerate>=0.33",
   #  "numba==0.60",           # was needed due to issues with scanpy and scib automatic load
   #"accelerate>=1.7",
@@ -40,21 +49,12 @@ dependencies = [
   #"scikit-learn>=1.5.2",
   #"seaborn>=0.13.2",
   "sentence-transformers>=5",
-  "transformers",
   #"session-info>=1.0.1",
   "torch>=2.5",
-  "zarr<3",
-  "anndata>=0.11.3",
-  "hydra-core>=1.3.2",
-  "python-dotenv>=1.1.1",
-  "wandb>=0.21.0",
-  "datasets>=2.19.1",
-  "scanpy>=1.11.3",
-  "scib>=1.1.7",
-  "psutil>=7.0.0",
-  "pynvml>=12.0.0",
+  "transformers",
+  "wandb>=0.21",
   "wordcloud>=1.9.4",
-  "accelerate>=1.9.0",
+  "zarr<3",
 ]
 optional-dependencies.dev = [
   "pre-commit",
@@ -167,10 +167,9 @@ skip = [
 ]
 
 [tool.uv.sources]
-#sentence-transformers = { git = "https://github.com/mengerj/sentence-transformers.git", rev = "master" }
 transformers = { git = "git+https://github.com/huggingface/transformers.git" }
-torch = { index = "pytorch-cu121" }
+#torch = { index = "pytorch-cu121" }
 
-[[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+#[[tool.uv.index]]
+#name = "pytorch-cu121"
+#url = "https://download.pytorch.org/whl/cu121"
