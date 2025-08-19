@@ -29,39 +29,41 @@ exec 2>"$BASE_OUT"/train.err
 # 2) Configuration Variables - Customize these as needed
 # ─────────────────────────────────────────────────────────────────────────────
 
-# General training parameters
-EMBEDDING_METHOD="scvi_fm"
-FORCE_CUDA="true"           # Require CUDA for training
-FORCE_REFRESH_CACHE="false" # Set to "true" to re-download datasets even if cached
-TRAINER_BF16="true"
-TEXT_ENCODER_NAME="Qwen/Qwen3-Embedding-0.6B"
+# Project root path (adjust if running from different location)
+PROJECT_ROOT="."
 
-# Adapter dimensions
-ADAPTER_HIDDEN_DIM=null    # Can be "null" or a number like 1024
-ADAPTER_OUTPUT_DIM=null    # Usually 2048, 1024, etc.
+# Configuration file path (relative to PROJECT_ROOT)
+# Override this by setting CONFIG_FILE environment variable before running
+CONFIG_FILE="${CONFIG_FILE:-conf/training/train_conf.yaml}"
 
-# Learning rate and other trainer params
-LEARNING_RATE="2e-5"        # Changed from 0.05 to avoid NaN issues
-BATCH_SIZE="128"
-EVAL_BATCH_SIZE="128"
-NUM_EPOCHS="4"
-WARMUP_RATIO="0.1"
+# Optional command-line overrides
+# These can be set as environment variables to override config file values
+EMBEDDING_METHOD="${EMBEDDING_METHOD:-}"
+TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
-# Note: Dataset-specific configurations (text_only, layer_axis, cs_length, etc.)
-# are now handled in the YAML configuration files (conf/train_conf.yaml)
-# rather than as command-line overrides.
+# Validate that config file exists
+if [[ ! -f "$PROJECT_ROOT/$CONFIG_FILE" ]]; then
+    echo "Error: Configuration file not found at $PROJECT_ROOT/$CONFIG_FILE"
+    echo "Please provide a valid config file path via CONFIG_FILE environment variable"
+    echo "Example: CONFIG_FILE=conf/my_custom_config.yaml sbatch scripts/run_training.slurm"
+    exit 1
+fi
+
+echo "Using configuration file: $CONFIG_FILE"
+if [[ -n "$EMBEDDING_METHOD" ]]; then
+    echo "Overriding embedding_method: $EMBEDDING_METHOD"
+fi
+if [[ -n "$TEXT_ENCODER_NAME" ]]; then
+    echo "Overriding text_encoder.name: $TEXT_ENCODER_NAME"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3) Prepare Training Parameters
-# ─────────────────────────────────────────────────────────────────────────────
-# No dataset overrides needed - configurations are in YAML files
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4) Activate environment and run training
+# 3) Activate environment and run training
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "Starting training job with RUN_ID: $RUN_ID"
 echo "Output directory: $BASE_OUT"
+echo "Configuration file: $CONFIG_FILE"
 
 source .venv/bin/activate
 echo "venv activated"
@@ -73,28 +75,21 @@ echo "flash-attn installed"
 
 #python scripts/cuda_available.py
 
-echo "Running training script with parameters:"
-echo "  embedding_method: $EMBEDDING_METHOD"
-echo "  force_cuda: $FORCE_CUDA"
-echo "  force_refresh_cache: $FORCE_REFRESH_CACHE"
-echo "  adapter.hidden_dim: $ADAPTER_HIDDEN_DIM"
-echo "  adapter.output_dim: $ADAPTER_OUTPUT_DIM"
-echo "  learning_rate: $LEARNING_RATE"
-echo "  batch_size: $BATCH_SIZE"
-echo "  trainer.bf16: $TRAINER_BF16"
-echo "  Dataset configurations are loaded from conf/train_conf.yaml"
+echo "Running training script with configuration from: $CONFIG_FILE"
 
-python3 scripts/train.py \
-    embedding_method="$EMBEDDING_METHOD" \
-    force_cuda="$FORCE_CUDA" \
-    force_refresh_cache="$FORCE_REFRESH_CACHE" \
-    adapter.hidden_dim="$ADAPTER_HIDDEN_DIM" \
-    adapter.output_dim="$ADAPTER_OUTPUT_DIM" \
-    trainer.learning_rate="$LEARNING_RATE" \
-    trainer.per_device_train_batch_size="$BATCH_SIZE" \
-    trainer.per_device_eval_batch_size="$EVAL_BATCH_SIZE" \
-    trainer.num_train_epochs="$NUM_EPOCHS" \
-    trainer.warmup_ratio="$WARMUP_RATIO" \
-    trainer.bf16="$TRAINER_BF16" \
-    hydra.run.dir="$BASE_OUT" \
-    text_encoder.name="$TEXT_ENCODER_NAME"
+# Change to project root directory to ensure relative paths work correctly
+cd "$PROJECT_ROOT"
+
+# Build the command with optional overrides
+TRAIN_CMD="python3 scripts/train.py --config-path=\"$(dirname "$CONFIG_FILE")\" --config-name=\"$(basename "$CONFIG_FILE" .yaml)\" hydra.run.dir=\"$BASE_OUT\""
+
+# Add optional overrides if provided
+if [[ -n "$EMBEDDING_METHOD" ]]; then
+    TRAIN_CMD="$TRAIN_CMD embedding_method=\"$EMBEDDING_METHOD\""
+fi
+if [[ -n "$TEXT_ENCODER_NAME" ]]; then
+    TRAIN_CMD="$TRAIN_CMD text_encoder.name=\"$TEXT_ENCODER_NAME\""
+fi
+
+echo "Executing: $TRAIN_CMD"
+eval $TRAIN_CMD
