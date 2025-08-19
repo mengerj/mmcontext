@@ -151,6 +151,50 @@ def generate_unique_model_name(
             return f"{base_name}-{timestamp}"
 
 
+def validate_dataset_configurations(cfg: DictConfig) -> None:
+    """
+    Validate dataset configurations for consistency between text_only and layer_axis settings.
+
+    Parameters
+    ----------
+    cfg : DictConfig
+        Configuration object containing dataset settings
+
+    Raises
+    ------
+    ValueError
+        If any dataset has inconsistent text_only and layer_axis settings
+    """
+    errors = []
+
+    # Validate omics datasets
+    if hasattr(cfg, "omics_datasets") and cfg.omics_datasets:
+        for i, dataset_config in enumerate(cfg.omics_datasets):
+            dataset_name = dataset_config.name
+            text_only = getattr(dataset_config, "text_only", False)
+            layer_axis = getattr(dataset_config, "layer_axis", "obs")
+
+            if text_only and layer_axis != "var":
+                errors.append(
+                    f"Omics dataset '{dataset_name}' (index {i}): text_only=true requires layer_axis='var', "
+                    f"but got layer_axis='{layer_axis}'"
+                )
+            elif not text_only and layer_axis != "obs":
+                errors.append(
+                    f"Omics dataset '{dataset_name}' (index {i}): text_only=false requires layer_axis='obs', "
+                    f"but got layer_axis='{layer_axis}'"
+                )
+
+    # Bio datasets are always text_only, so no validation needed for them
+
+    if errors:
+        error_msg = "Dataset configuration validation failed:\n" + "\n".join(f"  - {error}" for error in errors)
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    logger.info("Dataset configuration validation passed")
+
+
 def generate_model_name(
     cfg: DictConfig,
     dataset_configs: list = None,
@@ -227,6 +271,9 @@ def main(cfg: DictConfig):
     # Print out the loaded configuration for debugging
     # (comment out or remove if too verbose)
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
+
+    # Validate dataset configurations before proceeding
+    validate_dataset_configurations(cfg)
 
     # Check CUDA availability if force_cuda is enabled
     if getattr(cfg, "force_cuda", False):
