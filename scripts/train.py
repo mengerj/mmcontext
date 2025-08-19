@@ -504,7 +504,7 @@ def main(cfg: DictConfig):
                 logger.info(f"Bio dataset '{dataset_name}' will be processed as text_only")
 
                 # Load the dataset directly using the provided ID
-                dataset = load_dataset(dataset_id, revision="hard_negatives")
+                dataset = load_dataset(dataset_id, revision=bio_dataset_config.revision)
                 logger.info(f"Bio dataset loaded - Keys: {list(dataset.keys())}")
 
                 # Log dataset splits and sizes
