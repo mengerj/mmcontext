@@ -523,28 +523,7 @@ def main(cfg: DictConfig):
                     if len(split_data) > 0:
                         logger.info(f"    Columns: {list(split_data.column_names)}")
 
-                if bio_dataset_config.anchor_col_name and bio_dataset_config.positive_col_name:
-                    # Apply to all splits that contain the specified columns
-                    dataset_processed = {}
-                    for split_name, split_data in dataset.items():
-                        dataset_with_negatives = split_data
-                        # perform hard negative mining with the text model of interest
-                        # dataset_with_negatives = mine_hard_negatives(
-                        #    split_data,
-                        #    model=SentenceTransformer(cfg.text_encoder.name),
-                        #    anchor_column_name=bio_dataset_config.anchor_col_name,
-                        #    positive_column_name=bio_dataset_config.positive_col_name,
-                        # )
-                        # rename negative col to negative_1 for the get_evaluator function
-                        # dataset_with_negatives = dataset_with_negatives.rename_column("negative", "negative_1")
-                        dataset_processed[split_name] = dataset_with_negatives
-                    dataset_ready = DatasetDict(dataset_processed)
-                else:
-                    # If no keep_columns specified, use the dataset as-is
-                    dataset_ready = dataset
-                    logger.info("  No keep_columns specified, using dataset as-is")
-
-                logger.info(f"Bio dataset prepared - Keys: {list(dataset_ready.keys())}")
+                dataset_ready = dataset
 
                 # Add only the train split to train_datasets (no validation for bio datasets)
                 if "train" in dataset_ready:
