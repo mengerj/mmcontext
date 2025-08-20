@@ -195,6 +195,281 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
     logger.info("Dataset configuration validation passed")
 
 
+def generate_revision_name(dataset_config: DictConfig) -> str:
+    """
+    Generate a revision name for a dataset based on preprocessing parameters.
+
+    Parameters
+    ----------
+    dataset_config : DictConfig
+        Dataset configuration containing layer_axis, gene_filter_strings, cs_length, etc.
+
+    Returns
+    -------
+    str
+        Revision name in format: {layer_axis}[_rps_rpl_mt][_cs{cs_length}]
+    """
+    parts = []
+
+    # Add layer axis
+    layer_axis = getattr(dataset_config, "layer_axis", "obs")
+    parts.append(layer_axis)
+
+    # Add gene filter strings if layer_axis is var
+    if layer_axis == "var":
+        gene_filter_strings = getattr(dataset_config, "gene_filter_strings", None)
+        if gene_filter_strings:
+            # Convert to lowercase and join with underscores
+            filter_str = "_".join([s.lower() for s in gene_filter_strings])
+            parts.append(filter_str)
+
+        # Add cs_length if specified
+        cs_length = getattr(dataset_config, "cs_length", None)
+        if cs_length and cs_length > 0:
+            parts.append(f"cs{cs_length}")
+
+    return "_".join(parts)
+
+
+def push_dataset_revision(
+    dataset: "DatasetDict",
+    dataset_name: str,
+    revision: str,
+    username: str = "jo-mengr",
+    commit_message: str = None,
+) -> bool:
+    """
+    Push a processed dataset as a new revision to HuggingFace Hub.
+
+    Parameters
+    ----------
+    dataset : DatasetDict
+        The processed dataset to push
+    dataset_name : str
+        Name of the dataset
+    revision : str
+        Revision name for the processed dataset
+    username : str, optional
+        Username/organization on Hugging Face Hub (default: "jo-mengr")
+    commit_message : str, optional
+        Commit message for the revision
+
+    Returns
+    -------
+    bool
+        True if push was successful, False otherwise
+    """
+    try:
+        full_dataset_name = f"{username}/{dataset_name}"
+        if commit_message is None:
+            commit_message = f"Add preprocessed dataset revision: {revision}"
+
+        logger.info(f"Pushing dataset '{dataset_name}' as revision '{revision}' to {full_dataset_name}")
+        dataset.push_to_hub(
+            full_dataset_name,
+            revision=revision,
+            commit_message=commit_message,
+        )
+        logger.info(f"Successfully pushed revision '{revision}' for dataset '{dataset_name}'")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to push revision '{revision}' for dataset '{dataset_name}': {e}")
+        return False
+
+
+def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-mengr") -> bool:
+    """
+    Check if a specific revision exists for a dataset on Hugging Face Hub.
+
+    Parameters
+    ----------
+    dataset_name : str
+        Name of the dataset
+    revision : str
+        Revision name to check
+    username : str, optional
+        Username/organization on Hugging Face Hub (default: "jo-mengr")
+
+    Returns
+    -------
+    bool
+        True if the revision exists, False otherwise
+    """
+    try:
+        api = HfApi()
+        full_dataset_name = f"{username}/{dataset_name}"
+        # Try to get dataset info with specific revision
+        api.dataset_info(full_dataset_name, revision=revision)
+        return True
+    except Exception:
+        # If any error occurs (404, auth, etc.), assume revision doesn't exist
+        return False
+
+
+def prepare_ds(
+    dataset,
+    dataset_config: DictConfig,
+    dataset_name: str,
+    primary_cell_sentence: str,
+    enc: "MMContextEncoder",
+    chosen_method: str = None,
+    precomputed_key: str = None,
+    force_refresh_cache: bool = False,
+) -> "DatasetDict":
+    """
+    Prepare a dataset by applying all preprocessing steps.
+
+    Parameters
+    ----------
+    dataset : DatasetDict
+        Raw dataset loaded from HuggingFace
+    dataset_config : DictConfig
+        Dataset configuration
+    dataset_name : str
+        Name of the dataset
+    primary_cell_sentence : str
+        Primary cell sentence column name
+    enc : MMContextEncoder
+        The encoder model
+    chosen_method : str, optional
+        Embedding method for numeric datasets
+    precomputed_key : str, optional
+        Key for precomputed embeddings
+    force_refresh_cache : bool, optional
+        Whether to force refresh cache
+
+    Returns
+    -------
+    DatasetDict
+        Processed dataset ready for training
+    """
+    logger.info(f"Preparing dataset: {dataset_name}")
+
+    # Determine dataset-specific settings
+    layer_axis = getattr(dataset_config, "layer_axis", "obs")
+    dataset_text_only = getattr(dataset_config, "text_only", False)
+
+    # Get dataset-specific cell sentence truncation parameters
+    dataset_cs_length = getattr(dataset_config, "cs_length", None)
+    dataset_cs_col = getattr(dataset_config, "cs_col", None)
+
+    logger.info(
+        f"Dataset '{dataset_name}' will be processed as: {'text_only' if dataset_text_only else 'numeric embeddings'}"
+    )
+
+    # Apply cell sentence truncation if configured (only for text_only datasets with cs_length specified)
+    if dataset_text_only and dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
+        logger.info(
+            f"Truncating cell sentences in column '{dataset_cs_col}' to {dataset_cs_length} tokens for text_only dataset"
+        )
+
+        # Apply truncation to all splits that contain the specified column
+        truncated_dataset = {}
+        for split_name, split_data in dataset.items():
+            if dataset_cs_col in split_data.column_names:
+                truncated_dataset[split_name] = truncate_cell_sentences(
+                    split_data,
+                    dataset_cs_col,
+                    dataset_cs_length,
+                    filter_strings=dataset_config.get("gene_filter_strings", None),
+                )
+                logger.info(f"  Truncated {split_name} split")
+            else:
+                truncated_dataset[split_name] = split_data
+                logger.info(f"  Column '{dataset_cs_col}' not found in {split_name} split, keeping original")
+
+        # Use the truncated dataset for the rest of the processing
+        dataset = DatasetDict(truncated_dataset)
+    elif dataset_text_only:
+        logger.info(f"Text_only dataset '{dataset_name}' - no truncation applied (cs_length or cs_col not specified)")
+    else:
+        logger.info(f"Non-text_only dataset '{dataset_name}' - skipping cell sentence truncation")
+
+    # Step 1: Handle embedding registration FIRST (needs access to raw dataset with all columns)
+    if not dataset_text_only and chosen_method is not None:
+        logger.info(f"Loading numeric embeddings for dataset '{dataset_name}' (before column selection)")
+        token_df, _ = enc.get_initial_embeddings(
+            dataset,
+            layer_key=precomputed_key,
+            download_dir=f"data/from_nxtcloud/{dataset_name}",
+            axis=layer_axis,
+            overwrite=force_refresh_cache,
+        )
+        enc.register_initial_embeddings(token_df, data_origin=chosen_method)
+    elif chosen_method is None:
+        # If embedding_method is null, force text_only mode
+        logger.info(f"Dataset '{dataset_name}' forced to text_only mode because embedding_method is null")
+        dataset_text_only = True  # Override dataset config
+    else:
+        # In text_only mode, we'll use cell sentences directly
+        logger.info(f"Dataset '{dataset_name}' using text_only mode - cell sentences will be processed as text")
+
+    # Step 2: Select columns based on dataset configuration
+    keep_columns = getattr(dataset_config, "keep_columns", None)
+    index_column = getattr(dataset_config, "index_column", None)
+
+    if keep_columns:
+        # Automatically include index column if specified (needed for resolving indices)
+        if index_column and index_column not in keep_columns:
+            keep_columns = keep_columns + [index_column]
+            logger.info(f"Added index column '{index_column}' to keep_columns")
+
+        logger.info(f"Selecting columns: {keep_columns}")
+        # Apply to all splits that contain the specified columns
+        dataset_selected = {}
+        for split_name, split_data in dataset.items():
+            # Only keep columns that exist in this split
+            available_columns = [col for col in keep_columns if col in split_data.column_names]
+            if available_columns:
+                dataset_selected[split_name] = split_data.select_columns(available_columns)
+                logger.info(f"  Selected columns {available_columns} in {split_name} split")
+            else:
+                logger.warning(f"  No specified columns found in {split_name} split, keeping all")
+                dataset_selected[split_name] = split_data
+        dataset = DatasetDict(dataset_selected)
+    else:
+        logger.info("No keep_columns specified, using dataset as-is")
+
+    # Step 3: Resolve negative indices for multiplet datasets and rename columns
+    # Default to multiplets type since we're making it the default
+    dataset_type = getattr(dataset_config, "type", "multiplets")
+    if dataset_type == "multiplets":
+        logger.info("Resolving negative indices and renaming columns for multiplet dataset")
+        index_col_to_use = index_column if index_column else "sample_idx"
+        dataset = resolve_negative_indices_and_rename(
+            dataset,
+            primary_cell_sentence_col=primary_cell_sentence,
+            positive_col="positive",
+            negative_prefix="negative",
+            index_col=index_col_to_use,
+            remove_index_col=True,  # Remove index column after resolving
+        )
+        logger.info(
+            f"Primary column '{primary_cell_sentence}' renamed to 'anchor', index column '{index_col_to_use}' removed"
+        )
+
+    # Step 4: Apply prefixes using the new simplified prefix_ds method
+    prefix_columns = getattr(
+        dataset_config, "prefix_columns", ["anchor", "negative_2"]
+    )  # These are the omics representations by default
+    if dataset_text_only:
+        # For text_only datasets, don't add prefix
+        prefix_columns = []
+    logger.info(f"Applying prefixes to columns: {prefix_columns}")
+
+    dataset_ready = enc.prefix_ds(dataset, columns_to_prefix=prefix_columns)
+
+    # Log prepared dataset info
+    logger.info(f"Dataset prepared - Keys: {list(dataset_ready.keys())}")
+    for split_name, split_data in dataset_ready.items():
+        logger.info(f"  Prepared {split_name} split: {len(split_data)} samples")
+        if len(split_data) > 0:
+            logger.info(f"    Prepared columns: {list(split_data.column_names)}")
+
+    logger.info(f"Finished processing dataset: {dataset_name}")
+    return dataset_ready
+
+
 def generate_model_name(
     cfg: DictConfig,
     dataset_configs: list = None,
@@ -345,34 +620,16 @@ def main(cfg: DictConfig):
         # Process omics datasets - these can be text_only or numeric
         if hasattr(cfg, "omics_datasets") and cfg.omics_datasets:
             for dataset_config in cfg.omics_datasets:
-                # Construct dataset name
+                # Construct dataset name - default to multiplets type
                 base_name = dataset_config.name
-                dataset_name = f"{base_name}_{dataset_config.type}_{dataset_config.caption}"
+                dataset_type = getattr(dataset_config, "type", "multiplets")
+                dataset_name = f"{base_name}_{dataset_type}_{dataset_config.caption}"
 
-                logger.info(f"Loading omics dataset: {dataset_name}")
+                logger.info(f"Processing omics dataset: {dataset_name}")
 
-                # Load the dataset
-                dataset = load_dataset(f"jo-mengr/{dataset_name}")
-                logger.info(f"Raw dataset loaded - Keys: {list(dataset.keys())}")
-
-                # Log dataset splits and sizes
-                for split_name, split_data in dataset.items():
-                    logger.info(f"  {split_name} split: {len(split_data)} samples")
-                    if len(split_data) > 0:
-                        logger.info(f"    Columns: {list(split_data.column_names)}")
-                        # Log first sample for debugging
-                        sample = split_data[0]
-                        logger.info(f"    First sample keys: {list(sample.keys())}")
-                        # Log sample content (truncated for readability)
-                        for key, value in sample.items():
-                            if isinstance(value, str):
-                                preview = value[:100] + "..." if len(value) > 100 else value
-                                logger.info(f"      {key}: {preview}")
-                            else:
-                                logger.info(f"      {key}: {type(value)} - {value}")
-
-                # Determine dataset-specific settings
+                # Determine dataset-specific settings FIRST (needed for revision name and primary column)
                 layer_axis = getattr(dataset_config, "layer_axis", "obs")  # Default to "obs"
+                dataset_text_only = getattr(dataset_config, "text_only", False)
 
                 # Determine primary cell sentence column based on layer_axis only
                 if layer_axis == "var":
@@ -384,14 +641,9 @@ def main(cfg: DictConfig):
                     f"Dataset '{dataset_name}' using layer_axis='{layer_axis}', primary_cell_sentence='{primary_cell_sentence}'"
                 )
                 eval_name = f"{dataset_name}_{primary_cell_sentence}"
-                # Check if this dataset should be processed as text_only
-                dataset_text_only = getattr(dataset_config, "text_only", False)
-
-                # Get dataset-specific cell sentence truncation parameters
-                dataset_cs_length = getattr(dataset_config, "cs_length", None)
-                dataset_cs_col = getattr(dataset_config, "cs_col", None)
 
                 # Track dataset mode for model naming
+                dataset_cs_length = getattr(dataset_config, "cs_length", None)
                 if dataset_text_only:
                     text_only_datasets.append(dataset_name)
                     # Track cs_length if specified for text_only datasets
@@ -404,129 +656,71 @@ def main(cfg: DictConfig):
                     f"Dataset '{dataset_name}' will be processed as: {'text_only' if dataset_text_only else 'numeric embeddings'}"
                 )
 
-                # Apply cell sentence truncation if configured (only for text_only datasets with cs_length specified)
+                # Generate revision name based on preprocessing parameters
+                revision_name = generate_revision_name(dataset_config)
+                logger.info(f"Generated revision name: '{revision_name}' for dataset '{dataset_name}'")
 
-                if dataset_text_only and dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
+                # Check if processed revision already exists
+                if check_revision_exists(dataset_name, revision_name):
                     logger.info(
-                        f"Truncating cell sentences in column '{dataset_cs_col}' to {dataset_cs_length} tokens for text_only dataset"
+                        f"Found existing revision '{revision_name}' for dataset '{dataset_name}', loading directly"
                     )
-
-                    # Apply truncation to all splits that contain the specified column
-                    truncated_dataset = {}
-                    for split_name, split_data in dataset.items():
-                        if dataset_cs_col in split_data.column_names:
-                            truncated_dataset[split_name] = truncate_cell_sentences(
-                                split_data,
-                                dataset_cs_col,
-                                dataset_cs_length,
-                                filter_strings=dataset_config.get("gene_filter_strings", None),
-                            )
-                            logger.info(f"  Truncated {split_name} split")
-                        else:
-                            truncated_dataset[split_name] = split_data
-                            logger.info(
-                                f"  Column '{dataset_cs_col}' not found in {split_name} split, keeping original"
-                            )
-
-                    # Use the truncated dataset for the rest of the processing
-                    dataset = DatasetDict(truncated_dataset)
-                elif dataset_text_only:
-                    logger.info(
-                        f"Text_only dataset '{dataset_name}' - no truncation applied (cs_length or cs_col not specified)"
-                    )
+                    dataset_ready = load_dataset(f"jo-mengr/{dataset_name}", revision=revision_name)
+                    logger.info(f"Successfully loaded preprocessed dataset from revision '{revision_name}'")
                 else:
-                    logger.info(f"Non-text_only dataset '{dataset_name}' - skipping cell sentence truncation")
+                    logger.info(
+                        f"Revision '{revision_name}' not found for dataset '{dataset_name}', processing from scratch"
+                    )
+                    # Load raw dataset and process it
+                    dataset = load_dataset(f"jo-mengr/{dataset_name}")
+                    logger.info(f"Raw dataset loaded - Keys: {list(dataset.keys())}")
 
-                # Step 1: Handle embedding registration FIRST (needs access to raw dataset with all columns)
-                if not dataset_text_only and chosen_method is not None:
-                    logger.info(f"Loading numeric embeddings for dataset '{dataset_name}' (before column selection)")
-                    token_df, _ = enc.get_initial_embeddings(
+                    # Handle embedding registration FIRST (for numeric datasets)
+                    if not dataset_text_only and chosen_method is not None:
+                        logger.info(f"Loading numeric embeddings for dataset '{dataset_name}'")
+                        token_df, _ = enc.get_initial_embeddings(
+                            dataset,
+                            layer_key=precomputed_key,
+                            download_dir=f"data/from_nxtcloud/{dataset_name}",
+                            axis=layer_axis,
+                            overwrite=getattr(cfg, "force_refresh_cache", False),
+                        )
+                        enc.register_initial_embeddings(token_df, data_origin=chosen_method)
+
+                    dataset_ready = prepare_ds(
                         dataset,
-                        layer_key=precomputed_key,
-                        download_dir=f"data/from_nxtcloud/{dataset_name}",
-                        axis=layer_axis,
-                        overwrite=getattr(cfg, "force_refresh_cache", False),  # Add this parameter to config
-                    )
-                    enc.register_initial_embeddings(token_df, data_origin=chosen_method)
-                elif chosen_method is None:
-                    # If embedding_method is null, force text_only mode
-                    logger.info(f"Dataset '{dataset_name}' forced to text_only mode because embedding_method is null")
-                    dataset_text_only = True  # Override dataset config
-                else:
-                    # In text_only mode, we'll use cell sentences directly
-                    logger.info(
-                        f"Dataset '{dataset_name}' using text_only mode - cell sentences will be processed as text"
+                        dataset_config,
+                        dataset_name,
+                        primary_cell_sentence,
+                        enc,
+                        chosen_method,
+                        precomputed_key,
+                        getattr(cfg, "force_refresh_cache", False),
                     )
 
-                # Step 2: Select columns based on dataset configuration
-                keep_columns = getattr(dataset_config, "keep_columns", None)
-                index_column = getattr(dataset_config, "index_column", None)
-
-                if keep_columns:
-                    # Automatically include index column if specified (needed for resolving indices)
-                    if index_column and index_column not in keep_columns:
-                        keep_columns = keep_columns + [index_column]
-                        logger.info(f"Added index column '{index_column}' to keep_columns")
-
-                    logger.info(f"Selecting columns: {keep_columns}")
-                    # Apply to all splits that contain the specified columns
-                    dataset_selected = {}
-                    for split_name, split_data in dataset.items():
-                        # Only keep columns that exist in this split
-                        available_columns = [col for col in keep_columns if col in split_data.column_names]
-                        if available_columns:
-                            dataset_selected[split_name] = split_data.select_columns(available_columns)
-                            logger.info(f"  Selected columns {available_columns} in {split_name} split")
+                    # Push processed dataset as new revision if enabled
+                    if getattr(cfg, "auto_push_processed_datasets", False):
+                        push_success = push_dataset_revision(
+                            dataset_ready,
+                            dataset_name,
+                            revision_name,
+                            commit_message=f"Processed dataset with {revision_name} settings",
+                        )
+                        if push_success:
+                            logger.info(f"Successfully pushed processed dataset as revision '{revision_name}'")
                         else:
-                            logger.warning(f"  No specified columns found in {split_name} split, keeping all")
-                            dataset_selected[split_name] = split_data
-                    dataset = DatasetDict(dataset_selected)
-                else:
-                    logger.info("No keep_columns specified, using dataset as-is")
+                            logger.warning(f"Failed to push processed dataset as revision '{revision_name}'")
+                    else:
+                        logger.info(
+                            f"Dataset processed. Set auto_push_processed_datasets=true to automatically push as revision '{revision_name}'"
+                        )
 
-                # Step 3: Resolve negative indices for multiplet datasets and rename columns
-                if dataset_config.type == "multiplets":
-                    logger.info("Resolving negative indices and renaming columns for multiplet dataset")
-                    index_col_to_use = index_column if index_column else "sample_idx"
-                    dataset = resolve_negative_indices_and_rename(
-                        dataset,
-                        primary_cell_sentence_col=primary_cell_sentence,
-                        positive_col="positive",
-                        negative_prefix="negative",
-                        index_col=index_col_to_use,
-                        remove_index_col=True,  # Remove index column after resolving
-                    )
-                    logger.info(
-                        f"Primary column '{primary_cell_sentence}' renamed to 'anchor', index column '{index_col_to_use}' removed"
-                    )
-
-                # Step 4: Apply prefixes using the new simplified prefix_ds method
-                prefix_columns = getattr(
-                    dataset_config, "prefix_columns", ["anchor", "negative_2"]
-                )  # These are the omics representations by default
-                if dataset_text_only:
-                    # For text_only datasets, don't add prefix
-                    prefix_columns = []
-                logger.info(f"Applying prefixes to columns: {prefix_columns}")
-
-                dataset_ready = enc.prefix_ds(dataset, columns_to_prefix=prefix_columns)
-
-                # Log prepared dataset info
-                logger.info(f"Dataset prepared - Keys: {list(dataset_ready.keys())}")
+                # Log final dataset info
+                logger.info(f"Dataset ready - Keys: {list(dataset_ready.keys())}")
                 for split_name, split_data in dataset_ready.items():
-                    logger.info(f"  Prepared {split_name} split: {len(split_data)} samples")
+                    logger.info(f"  {split_name} split: {len(split_data)} samples")
                     if len(split_data) > 0:
-                        logger.info(f"    Prepared columns: {list(split_data.column_names)}")
-                        # Log first prepared sample
-                        prepared_sample = split_data[0]
-                        logger.info(f"    First prepared sample keys: {list(prepared_sample.keys())}")
-                        for key, value in prepared_sample.items():
-                            if isinstance(value, str):
-                                preview = value[:100] + "..." if len(value) > 100 else value
-                                logger.info(f"      {key}: {preview}")
-                            else:
-                                logger.info(f"      {key}: {type(value)}")
-                logger.info(f"Finished processing omics dataset: {dataset_name}\n")
+                        logger.info(f"    Columns: {list(split_data.column_names)}")
 
                 # Add train split to train_datasets dictionary
                 train_datasets[dataset_name] = dataset_ready["train"]
@@ -535,15 +729,17 @@ def main(cfg: DictConfig):
                 val_datasets[dataset_name] = dataset_ready["val"]
 
                 # Create loss function for this dataset type
-                losses[dataset_name] = get_loss(dataset_type=dataset_config.type)
+                losses[dataset_name] = get_loss(dataset_type=dataset_type)
 
                 evaluator = get_evaluator(
-                    dataset_type=dataset_config.type,
+                    dataset_type=dataset_type,
                     dataset=dataset_ready["val"],
                     batch_size=cfg.trainer.per_device_eval_batch_size,
                     current_eval_name=eval_name,
                 )
                 evaluators.append(evaluator)
+
+                logger.info(f"Finished processing omics dataset: {dataset_name}\n")
 
         # -------------------------------------------------------------------------
         # 2.1. Load bio datasets (biological background knowledge, always text-only)
@@ -580,8 +776,9 @@ def main(cfg: DictConfig):
                     val_datasets[dataset_name] = dataset_ready["train"].select(
                         range(1000)
                     )  # add the training data also as evaluation just to check if these bio datasets are considered
+                    dataset_type = getattr(bio_dataset_config, "type", "multiplets")
                     evaluator = get_evaluator(
-                        dataset_type=bio_dataset_config.type,
+                        dataset_type=dataset_type,
                         dataset=val_datasets[dataset_name],
                         batch_size=cfg.trainer.per_device_eval_batch_size,
                         current_eval_name=dataset_name,
@@ -591,7 +788,7 @@ def main(cfg: DictConfig):
                     logger.warning(f"Bio dataset '{dataset_name}' has no 'train' split, skipping")
 
                 # Create loss function for this dataset type
-                losses[dataset_name] = get_loss(dataset_type=bio_dataset_config.type)
+                losses[dataset_name] = get_loss(dataset_type=dataset_type)
 
                 # Note: No evaluators created for bio datasets
                 logger.info(f"Finished processing bio dataset: {dataset_name}\n")
@@ -640,7 +837,7 @@ def main(cfg: DictConfig):
             logger.info("  Omics datasets configuration:")
             for dataset_config in cfg.omics_datasets:
                 logger.info(
-                    f"    - {dataset_config.name}: type={dataset_config.type}, "
+                    f"    - {dataset_config.name}:, "
                     f"text_only={getattr(dataset_config, 'text_only', False)}, "
                     f"layer_axis={getattr(dataset_config, 'layer_axis', 'obs')}"
                 )
@@ -714,8 +911,8 @@ def main(cfg: DictConfig):
         model_dir = Path(hydra_run_dir, "model")
         os.makedirs(model_dir, exist_ok=True)
         print("unique_model_name", unique_model_name)
-        # model.save(model_dir)
-        # model.push_to_hub(f"jo-mengr/{unique_model_name}")
+        model.save(model_dir)
+        model.push_to_hub(f"jo-mengr/{unique_model_name}")
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
     except Exception as e:
         logger.exception(e)
