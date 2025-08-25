@@ -34,18 +34,16 @@ PROJECT_ROOT="."
 
 # Configuration file path (relative to PROJECT_ROOT)
 # Override this by setting CONFIG_FILE environment variable before running
-CONFIG_FILE="${CONFIG_FILE:-conf/training/train_conf.yaml}"
+CONFIG_FILE="/home/menger/git/mmcontext/conf/training/basebert_mixed_no_bio.yaml"
 
 # Optional command-line overrides
 # These can be set as environment variables to override config file values
-EMBEDDING_METHOD="${EMBEDDING_METHOD:-}"
+EMBEDDING_METHOD="geneformer"
 TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
 # Validate that config file exists
-if [[ ! -f "$PROJECT_ROOT/$CONFIG_FILE" ]]; then
-    echo "Error: Configuration file not found at $PROJECT_ROOT/$CONFIG_FILE"
-    echo "Please provide a valid config file path via CONFIG_FILE environment variable"
-    echo "Example: CONFIG_FILE=conf/my_custom_config.yaml sbatch scripts/run_training.slurm"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Error: Configuration file not found at $CONFIG_FILE"
     exit 1
 fi
 

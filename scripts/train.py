@@ -874,7 +874,6 @@ def main(cfg: DictConfig):
             logging_steps=cfg.trainer.logging_steps,
             run_name=unique_model_name,
             dataloader_num_workers=cfg.trainer.dataloader_num_workers,
-            gradient_checkpointing=cfg.trainer.gradient_checkpointing,
         )
 
         if cfg.trainer.gradient_checkpointing:
