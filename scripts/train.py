@@ -153,7 +153,10 @@ def generate_unique_model_name(
 
 def validate_dataset_configurations(cfg: DictConfig) -> None:
     """
-    Validate dataset configurations for consistency between text_only and layer_axis settings.
+    Validate Dataset Configurations
+
+    Validate dataset configurations for consistency between text_only and layer_axis settings,
+    and ensure embedding_method is specified when needed.
 
     Parameters
     ----------
@@ -163,9 +166,13 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
     Raises
     ------
     ValueError
-        If any dataset has inconsistent text_only and layer_axis settings
+        If any dataset has inconsistent text_only and layer_axis settings,
+        or if embedding_method is missing when datasets require numeric embeddings
     """
     errors = []
+
+    # Check if any dataset requires numeric embeddings (text_only=false)
+    requires_embedding_method = False
 
     # Validate omics datasets
     if hasattr(cfg, "omics_datasets") and cfg.omics_datasets:
@@ -173,6 +180,10 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
             dataset_name = dataset_config.name
             text_only = getattr(dataset_config, "text_only", False)
             layer_axis = getattr(dataset_config, "layer_axis", "obs")
+
+            # Check if this dataset requires numeric embeddings
+            if not text_only:
+                requires_embedding_method = True
 
             if text_only and layer_axis != "var":
                 errors.append(
@@ -184,6 +195,14 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
                     f"Omics dataset '{dataset_name}' (index {i}): text_only=false requires layer_axis='obs', "
                     f"but got layer_axis='{layer_axis}'"
                 )
+
+    # Check if embedding_method is specified when needed
+    embedding_method = getattr(cfg, "embedding_method", None)
+    if requires_embedding_method and embedding_method is None:
+        errors.append(
+            "embedding_method must be specified when any dataset has text_only=false. "
+            f"Available methods: {list(cfg.input_dim_map.keys()) if hasattr(cfg, 'input_dim_map') else 'check input_dim_map in config'}"
+        )
 
     # Bio datasets are always text_only, so no validation needed for them
 
@@ -311,7 +330,7 @@ def prepare_ds(
     dataset_config: DictConfig,
     dataset_name: str,
     primary_cell_sentence: str,
-    enc: "MMContextEncoder",
+    model: "SentenceTransformer",
     chosen_method: str = None,
     precomputed_key: str = None,
     force_refresh_cache: bool = False,
@@ -329,8 +348,8 @@ def prepare_ds(
         Name of the dataset
     primary_cell_sentence : str
         Primary cell sentence column name
-    enc : MMContextEncoder
-        The encoder model
+    model : SentenceTransformer
+        The model
     chosen_method : str, optional
         Embedding method for numeric datasets
     precomputed_key : str, optional
@@ -386,21 +405,25 @@ def prepare_ds(
         logger.info(f"Non-text_only dataset '{dataset_name}' - skipping cell sentence truncation")
 
     # Step 1: Handle embedding registration FIRST (needs access to raw dataset with all columns)
-    if not dataset_text_only and chosen_method is not None:
+    if not dataset_text_only and hasattr(model[0], "get_initial_embeddings"):
         logger.info(f"Loading numeric embeddings for dataset '{dataset_name}' (before column selection)")
-        token_df, _ = enc.get_initial_embeddings(
+        token_df, _ = model[0].get_initial_embeddings(
             dataset,
             layer_key=precomputed_key,
             download_dir=f"data/from_nxtcloud/{dataset_name}",
             axis=layer_axis,
             overwrite=force_refresh_cache,
         )
-        enc.register_initial_embeddings(token_df, data_origin=chosen_method)
-    elif chosen_method is None:
+        model[0].register_initial_embeddings(token_df, data_origin=chosen_method)
+    elif not dataset_text_only and not hasattr(model[0], "get_initial_embeddings"):
         # If embedding_method is null, force text_only mode
-        logger.info(f"Dataset '{dataset_name}' forced to text_only mode because embedding_method is null")
-        dataset_text_only = True  # Override dataset config
-    else:
+        logger.error(
+            f"Dataset '{dataset_name}' has no get_initial_embeddings method. Can't process numeric embeddings."
+        )
+        raise ValueError(
+            f"Dataset '{dataset_name}' has no get_initial_embeddings method. Can't process numeric embeddings."
+        )
+    elif dataset_text_only:
         # In text_only mode, we'll use cell sentences directly
         logger.info(f"Dataset '{dataset_name}' using text_only mode - cell sentences will be processed as text")
 
@@ -452,12 +475,16 @@ def prepare_ds(
     prefix_columns = getattr(
         dataset_config, "prefix_columns", ["anchor", "negative_2"]
     )  # These are the omics representations by default
-    if dataset_text_only:
-        # For text_only datasets, don't add prefix
-        prefix_columns = []
-    logger.info(f"Applying prefixes to columns: {prefix_columns}")
 
-    dataset_ready = enc.prefix_ds(dataset, columns_to_prefix=prefix_columns)
+    if not dataset_text_only and hasattr(model[0], "prefix_ds"):
+        logger.info(f"Applying prefixes to columns: {prefix_columns}")
+        dataset_ready = model[0].prefix_ds(dataset, columns_to_prefix=prefix_columns)
+    elif not dataset_text_only and not hasattr(model[0], "prefix_ds"):
+        logger.warning(f"Model '{model[0].name}' has no prefix_ds method. Can't apply prefixes.")
+        raise ValueError(f"Model '{model[0].name}' has no prefix_ds method. Can't apply prefixes.")
+    else:
+        logger.info(f"Dataset '{dataset_name}' is text_only - skipping prefixes")
+        dataset_ready = dataset
 
     # Log prepared dataset info
     logger.info(f"Dataset prepared - Keys: {list(dataset_ready.keys())}")
@@ -472,10 +499,6 @@ def prepare_ds(
 
 def generate_model_name(
     cfg: DictConfig,
-    dataset_configs: list = None,
-    cs_len: int = None,
-    text_only_datasets: list = None,
-    numeric_datasets: list = None,
 ) -> str:
     """
     Generate a simplified model name focusing on core architecture components.
@@ -484,14 +507,6 @@ def generate_model_name(
     ----------
     cfg : DictConfig
         Configuration object containing model settings
-    dataset_configs : list, optional
-        List of dataset configurations (unused, kept for compatibility)
-    cs_len : int, optional
-        Length of cell sentences (unused, kept for compatibility)
-    text_only_datasets : list, optional
-        List of dataset names that are processed as text_only (unused, kept for compatibility)
-    numeric_datasets : list, optional
-        List of dataset names that use numeric embeddings (unused, kept for compatibility)
 
     Returns
     -------
@@ -570,19 +585,21 @@ def main(cfg: DictConfig):
         # -------------------------------------------------------------------------
         # 1. Create the model (MMContextEncoder => SentenceTransformer modules)
         # -------------------------------------------------------------------------
+        chosen_method = cfg.embedding_method
+        input_dim_map = cfg.input_dim_map
+        if chosen_method is not None and chosen_method not in input_dim_map:
+            raise ValueError(f"Unknown embedding_method '{chosen_method}'. Allowed: {list(input_dim_map.keys())}")
+            # Overwrite the model's embedding_dim with the mapped value (only if embedding_method is not null)
+        if chosen_method is not None:
+            cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
+            precomputed_key = f"X_{chosen_method}"
+        else:
+            precomputed_key = None
         if cfg.model:
             model = SentenceTransformer(cfg.model)
+            model[0].freeze_text_encoder = cfg.text_encoder.freeze_text_encoder
+            model[0]._manage_text_encoder_freezing()
         else:
-            input_dim_map = cfg.input_dim_map
-            chosen_method = cfg.embedding_method
-            if chosen_method is not None and chosen_method not in input_dim_map:
-                raise ValueError(f"Unknown embedding_method '{chosen_method}'. Allowed: {list(input_dim_map.keys())}")
-            # Overwrite the model's embedding_dim with the mapped value (only if embedding_method is not null)
-            if chosen_method is not None:
-                cfg.adapter.omics_input_dim = input_dim_map[chosen_method]
-                precomputed_key = f"X_{chosen_method}"
-            else:
-                precomputed_key = None
             # Get text model kwargs if specified in config and resolve torch dtype strings
             text_model_kwargs = getattr(cfg.text_encoder, "model_kwargs", None)
             if text_model_kwargs:
@@ -602,6 +619,7 @@ def main(cfg: DictConfig):
                 joint_adapter_hidden_dim=None,
                 text_model_kwargs=text_model_kwargs,
             )
+            model = SentenceTransformer(modules=[enc])
 
             # Primary cell sentence column and layer axis are now determined per dataset
         # -------------------------------------------------------------------------
@@ -658,7 +676,6 @@ def main(cfg: DictConfig):
 
                 # Generate revision name based on preprocessing parameters
                 revision_name = generate_revision_name(dataset_config)
-                logger.info(f"Generated revision name: '{revision_name}' for dataset '{dataset_name}'")
 
                 # Check if processed revision already exists
                 if check_revision_exists(dataset_name, revision_name) and dataset_text_only:
@@ -668,19 +685,20 @@ def main(cfg: DictConfig):
                     dataset_ready = load_dataset(f"jo-mengr/{dataset_name}", revision=revision_name)
                     logger.info(f"Successfully loaded preprocessed dataset from revision '{revision_name}'")
                 else:
-                    logger.info(
-                        f"Revision '{revision_name}' not found for dataset '{dataset_name}', processing from scratch"
-                    )
+                    if dataset_text_only:
+                        logger.info(
+                            f"Revision '{revision_name}' not found for dataset '{dataset_name}', processing from scratch"
+                        )
                     # Load raw dataset and process it
                     dataset = load_dataset(f"jo-mengr/{dataset_name}")
-                    logger.info(f"Raw dataset loaded - Keys: {list(dataset.keys())}")
+                    logger.info(f"Raw dataset loaded - Name: {dataset_name}, Keys: {list(dataset.keys())}")
 
                     dataset_ready = prepare_ds(
                         dataset,
                         dataset_config,
                         dataset_name,
                         primary_cell_sentence,
-                        enc,
+                        model,
                         chosen_method,
                         precomputed_key,
                         getattr(cfg, "force_refresh_cache", False),
@@ -698,10 +716,12 @@ def main(cfg: DictConfig):
                             logger.info(f"Successfully pushed processed dataset as revision '{revision_name}'")
                         else:
                             logger.warning(f"Failed to push processed dataset as revision '{revision_name}'")
-                    else:
+                    elif dataset_text_only:
                         logger.info(
                             f"Dataset processed. Set auto_push_processed_datasets=true to automatically push as revision '{revision_name}'"
                         )
+                    else:
+                        logger.info(f"Dataset '{dataset_name}' is numeric - skipping revision upload.")
 
                 # Log final dataset info
                 logger.info(f"Dataset ready - Keys: {list(dataset_ready.keys())}")
@@ -780,10 +800,6 @@ def main(cfg: DictConfig):
 
                 # Note: No evaluators created for bio datasets
                 logger.info(f"Finished processing bio dataset: {dataset_name}\n")
-
-        # Build the sentence Trasnformer model
-        modules = [enc]
-        model = SentenceTransformer(modules=modules)
 
         # Combine all evaluators into a single sequential evaluator (only if we have evaluators)
         if evaluators:
