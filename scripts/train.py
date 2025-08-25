@@ -661,7 +661,7 @@ def main(cfg: DictConfig):
                 logger.info(f"Generated revision name: '{revision_name}' for dataset '{dataset_name}'")
 
                 # Check if processed revision already exists
-                if check_revision_exists(dataset_name, revision_name):
+                if check_revision_exists(dataset_name, revision_name) and dataset_text_only:
                     logger.info(
                         f"Found existing revision '{revision_name}' for dataset '{dataset_name}', loading directly"
                     )
@@ -675,18 +675,6 @@ def main(cfg: DictConfig):
                     dataset = load_dataset(f"jo-mengr/{dataset_name}")
                     logger.info(f"Raw dataset loaded - Keys: {list(dataset.keys())}")
 
-                    # Handle embedding registration FIRST (for numeric datasets)
-                    if not dataset_text_only and chosen_method is not None:
-                        logger.info(f"Loading numeric embeddings for dataset '{dataset_name}'")
-                        token_df, _ = enc.get_initial_embeddings(
-                            dataset,
-                            layer_key=precomputed_key,
-                            download_dir=f"data/from_nxtcloud/{dataset_name}",
-                            axis=layer_axis,
-                            overwrite=getattr(cfg, "force_refresh_cache", False),
-                        )
-                        enc.register_initial_embeddings(token_df, data_origin=chosen_method)
-
                     dataset_ready = prepare_ds(
                         dataset,
                         dataset_config,
@@ -699,7 +687,7 @@ def main(cfg: DictConfig):
                     )
 
                     # Push processed dataset as new revision if enabled
-                    if getattr(cfg, "auto_push_processed_datasets", False):
+                    if getattr(cfg, "auto_push_processed_datasets", False) and dataset_text_only:
                         push_success = push_dataset_revision(
                             dataset_ready,
                             dataset_name,
