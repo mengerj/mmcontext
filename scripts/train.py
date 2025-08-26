@@ -156,7 +156,8 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
     Validate Dataset Configurations
 
     Validate dataset configurations for consistency between text_only and layer_axis settings,
-    and ensure embedding_method is specified when needed.
+    ensure embedding_method is specified when needed, and validate keep_columns consistency
+    with layer_axis.
 
     Parameters
     ----------
@@ -167,7 +168,10 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
     ------
     ValueError
         If any dataset has inconsistent text_only and layer_axis settings,
-        or if embedding_method is missing when datasets require numeric embeddings
+        if embedding_method is missing when datasets require numeric embeddings,
+        or if keep_columns first entry doesn't match layer_axis requirements:
+        - layer_axis='var' requires first keep_columns entry to be 'cell_sentence_2'
+        - layer_axis='obs' requires first keep_columns entry to be 'cell_sentence_1'
     """
     errors = []
 
@@ -195,6 +199,21 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
                     f"Omics dataset '{dataset_name}' (index {i}): text_only=false requires layer_axis='obs', "
                     f"but got layer_axis='{layer_axis}'"
                 )
+
+            # Validate keep_columns consistency with layer_axis
+            keep_columns = getattr(dataset_config, "keep_columns", None)
+            if keep_columns and len(keep_columns) > 0:
+                first_column = keep_columns[0]
+                if layer_axis == "var" and first_column != "cell_sentence_2":
+                    errors.append(
+                        f"Omics dataset '{dataset_name}' (index {i}): layer_axis='var' requires first keep_columns entry to be 'cell_sentence_2', "
+                        f"but got '{first_column}'"
+                    )
+                elif layer_axis == "obs" and first_column != "cell_sentence_1":
+                    errors.append(
+                        f"Omics dataset '{dataset_name}' (index {i}): layer_axis='obs' requires first keep_columns entry to be 'cell_sentence_1', "
+                        f"but got '{first_column}'"
+                    )
 
     # Check if embedding_method is specified when needed
     embedding_method = getattr(cfg, "embedding_method", None)
