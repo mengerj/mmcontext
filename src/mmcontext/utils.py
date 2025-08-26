@@ -652,6 +652,10 @@ def resolve_negative_indices_and_rename(
         if remove_index_col and index_col in proc.column_names:
             proc = proc.remove_columns([index_col])
 
+        # rename positive column to "positive"
+        if positive_col in proc.column_names and positive_col != "positive":
+            proc = proc.rename_column(positive_col, "positive")
+
         return proc
 
     # Process the dataset
