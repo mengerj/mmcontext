@@ -658,6 +658,7 @@ def main(cfg: DictConfig):
                 logger.info(
                     f"Dataset '{dataset_name}' using layer_axis='{layer_axis}', primary_cell_sentence='{primary_cell_sentence}'"
                 )
+                # just get the positive column name for the name of the evaluator
                 positive_col = dataset_config.get("positive_col", "positive")
                 if positive_col == "positive":
                     positive_col = "caption"
