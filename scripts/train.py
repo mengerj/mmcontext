@@ -658,7 +658,12 @@ def main(cfg: DictConfig):
                 logger.info(
                     f"Dataset '{dataset_name}' using layer_axis='{layer_axis}', primary_cell_sentence='{primary_cell_sentence}'"
                 )
-                eval_name = f"{dataset_name}_{primary_cell_sentence}"
+                # just get the positive column name for the name of the evaluator
+                positive_col = dataset_config.get("positive_col", "positive")
+                if positive_col == "positive":
+                    positive_col = "caption"
+                eval_name = f"{dataset_name}_{primary_cell_sentence}_{positive_col}"
+                logger.info(f"Dataset '{dataset_name}' using positive_col='{positive_col}'")
 
                 # Track dataset mode for model naming
                 dataset_cs_length = getattr(dataset_config, "cs_length", None)
