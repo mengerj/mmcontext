@@ -19,7 +19,7 @@ from sentence_transformers.evaluation import SequentialEvaluator
 from sentence_transformers.util import mine_hard_negatives
 from transformers.integrations import WandbCallback
 
-from mmcontext.callback import UnfreezeTextEncoderCallback
+from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
 from mmcontext.models.mmcontextencoder import MMContextEncoder
 
@@ -462,7 +462,7 @@ def prepare_ds(
         dataset = resolve_negative_indices_and_rename(
             dataset,
             primary_cell_sentence_col=primary_cell_sentence,
-            positive_col="positive",
+            positive_col=dataset_config.get("positive_col", "positive"),
             negative_prefix="negative",
             index_col=index_col_to_use,
             remove_index_col=True,  # Remove index column after resolving
@@ -895,6 +895,19 @@ def main(cfg: DictConfig):
 
         # Create callbacks list
         callbacks = [unfreeze_callback, WandbCallback()]
+
+        # Add adapter callback if adapter freezing is configured
+        if hasattr(cfg, "adapter_freezing"):
+            adapter_callback = UnfreezeAdapterCallback(
+                freeze_text_adapter=cfg.adapter_freezing.get("freeze_text_adapter", False),
+                freeze_omics_adapter=cfg.adapter_freezing.get("freeze_omics_adapter", False),
+                unfreeze_text_adapter_epoch=cfg.adapter_freezing.get("unfreeze_text_adapter_epoch", None),
+                unfreeze_omics_adapter_epoch=cfg.adapter_freezing.get("unfreeze_omics_adapter_epoch", None),
+            )
+            callbacks.append(adapter_callback)
+            logger.info("Adapter freezing callback added to training")
+        else:
+            logger.info("No adapter freezing configuration found, skipping adapter callback")
 
         # Add joint adapter callback if joint adapter is configured
         # if cfg.joint_adapter.hidden_dim is not None and cfg.joint_adapter.hidden_dim > 0:
