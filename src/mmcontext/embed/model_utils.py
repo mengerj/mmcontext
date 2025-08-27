@@ -181,7 +181,7 @@ def prepare_model_and_embed(
         logger.info("Registering initial embeddings with MMContextEncoder module of SentenceTransformer Model …")
         impl.register_initial_embeddings(token_df, data_origin=layer_key.split("X_")[1])  # type: ignore[arg-type]
 
-    if hasattr(impl, "prefix_ds"):
+    if hasattr(impl, "prefix_ds") and not text_only:
         logger.info("Calling prefix_ds on model-specific module …")
         # Step 4: Apply prefixes using the new simplified prefix_ds method
         logger.info(f"Applying prefixes to columns: {main_col}")
