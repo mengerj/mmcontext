@@ -396,7 +396,7 @@ def prepare_ds(
     )
 
     # Apply cell sentence truncation if configured (only for text_only datasets with cs_length specified)
-    if dataset_text_only and dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
+    if dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
         logger.info(
             f"Truncating cell sentences in column '{dataset_cs_col}' to {dataset_cs_length} tokens for text_only dataset"
         )
@@ -686,6 +686,7 @@ def main(cfg: DictConfig):
 
                 # Track dataset mode for model naming
                 dataset_cs_length = getattr(dataset_config, "cs_length", None)
+                dataset_cs_col = getattr(dataset_config, "cs_col", None)
                 if dataset_text_only:
                     text_only_datasets.append(dataset_name)
                     # Track cs_length if specified for text_only datasets
@@ -729,7 +730,7 @@ def main(cfg: DictConfig):
                     )
 
                     # Push processed dataset as new revision if enabled
-                    if getattr(cfg, "auto_push_processed_datasets", False) and dataset_text_only:
+                    if getattr(cfg, "auto_push_processed_datasets", False) and dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
                         push_success = push_dataset_revision(
                             dataset_ready,
                             dataset_name,
@@ -740,12 +741,12 @@ def main(cfg: DictConfig):
                             logger.info(f"Successfully pushed processed dataset as revision '{revision_name}'")
                         else:
                             logger.warning(f"Failed to push processed dataset as revision '{revision_name}'")
-                    elif dataset_text_only:
+                    elif dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
                         logger.info(
                             f"Dataset processed. Set auto_push_processed_datasets=true to automatically push as revision '{revision_name}'"
                         )
                     else:
-                        logger.info(f"Dataset '{dataset_name}' is numeric - skipping revision upload.")
+                        logger.info(f"Dataset '{dataset_name}' does not use cell sentence truncation - skipping revision upload.")
 
                 # Log final dataset info
                 logger.info(f"Dataset ready - Keys: {list(dataset_ready.keys())}")
