@@ -953,7 +953,8 @@ def main(cfg: DictConfig):
         os.makedirs(model_dir, exist_ok=True)
         print("unique_model_name", unique_model_name)
         model.save(model_dir)
-        model.push_to_hub(f"jo-mengr/{unique_model_name}")
+        if cfg.get("push_to_hub", True):
+            model.push_to_hub(f"jo-mengr/{unique_model_name}")
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
     except Exception as e:
         logger.exception(e)
