@@ -34,6 +34,15 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return (a_norm @ b_norm).astype(np.float32)
 
 
+def _safe_tight_layout() -> None:
+    """Safely apply tight_layout, suppressing warnings if it fails."""
+    try:
+        _safe_tight_layout()
+    except Exception:
+        # If tight_layout fails, just continue - bbox_inches="tight" in savefig will handle it
+        pass
+
+
 @register
 class LabelSimilarity(BaseEvaluator):
     """
@@ -103,6 +112,11 @@ class LabelSimilarity(BaseEvaluator):
         label_prototypes = np.zeros((len(uniq), emb2.shape[1]))
         for i, v in enumerate(uniq):
             mask = labels == v
+            matching_indices = np.where(mask)[0]
+            if len(matching_indices) == 0:
+                logger.error(f"🚨 ERROR: No embeddings found for label '{v}'")
+                raise ValueError(f"No embeddings found for label '{v}'")
+            logger.debug(f"🔍 Label '{v}': found {len(matching_indices)} matching embeddings")
             label_prototypes[i] = emb2[mask][0]  # first row for that value
 
         # Compute similarity matrix using vectorized operations
@@ -389,7 +403,7 @@ class LabelSimilarity(BaseEvaluator):
         # Try to load from cache first
         cache_path = None
         if self.cache_results and out_dir is not None:
-            cache_path = out_dir / "label_similarity_cache.pkl"
+            cache_path = out_dir / f"label_similarity_cache_{label_key}.pkl"
             cache_data = self._load_cache(cache_path)
             if cache_data is not None:
                 logger.info("Using cached similarity matrix")
@@ -484,17 +498,15 @@ class LabelSimilarity(BaseEvaluator):
         uniq = np.unique(labels)
 
         # Try to load from cache first
-        cache_path = out_dir / "label_similarity_cache.pkl"
+        cache_path = out_dir.parent / f"label_similarity_cache_{label_key}.pkl"
         cache_data = self._load_cache(cache_path)
 
         if cache_data is not None:
             # Use cached data
             similarity_matrix = cache_data["similarity_matrix"]
             umap_emb = cache_data["umap_emb"]
-            logger.info("Using cached similarity matrix and UMAP for plotting")
         else:
             # Compute from scratch
-            logger.info("Computing similarity matrix and UMAP for plotting")
             similarity_matrix = self._compute_similarity_matrix(emb1, emb2, labels, uniq)
             umap_emb = self._compute_umap(emb1)
 
@@ -553,9 +565,9 @@ class LabelSimilarity(BaseEvaluator):
         )
 
         # Create subdirectories for different plot types
-        roc_dir = out_dir / label_key / "roc_curves"
-        umap_dir = out_dir / label_key / "umap"
-        hist_dir = out_dir / label_key / "histograms"
+        roc_dir = out_dir / "roc_curves"
+        umap_dir = out_dir / "umap"
+        hist_dir = out_dir / "histograms"
 
         for d in [roc_dir, umap_dir, hist_dir]:
             d.mkdir(parents=True, exist_ok=True)
@@ -572,11 +584,13 @@ class LabelSimilarity(BaseEvaluator):
             colors = sns.color_palette("tab10", len(unique_labels))
         elif len(unique_labels) <= 20:
             colors = sns.color_palette("tab20", len(unique_labels))
+        elif len(unique_labels) <= 40:
+            # For 21-40 classes, combine tab20 and tab20b
+            colors = sns.color_palette("tab20", 20) + sns.color_palette("tab20b", len(unique_labels) - 20)
         else:
-            # For more than 20 classes, combine multiple categorical palettes
-            colors = (sns.color_palette("tab20", 20) + sns.color_palette("tab20b", min(len(unique_labels) - 20, 20)))[
-                : len(unique_labels)
-            ]
+            # For >40 classes, use a continuous colormap to ensure we have enough colors
+            # Use HSV colormap for maximum distinction between colors
+            colors = sns.color_palette("hsv", len(unique_labels))
 
         color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
         point_colors = [color_map[label] for label in labels]
@@ -604,7 +618,7 @@ class LabelSimilarity(BaseEvaluator):
         scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
-        plt.tight_layout()
+        _safe_tight_layout()
 
         plt.savefig(umap_dir / f"00_true_labels.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
@@ -630,7 +644,7 @@ class LabelSimilarity(BaseEvaluator):
 
         plt.xticks([])
         plt.yticks([])
-        plt.tight_layout()
+        _safe_tight_layout()
 
         plt.savefig(umap_dir / f"00_true_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
@@ -659,7 +673,7 @@ class LabelSimilarity(BaseEvaluator):
             ncol=min(len(unique_labels), 6),
             bbox_to_anchor=(0.5, 0.5),
         )
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(umap_dir / f"00_true_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
@@ -676,7 +690,7 @@ class LabelSimilarity(BaseEvaluator):
         scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
-        plt.tight_layout()
+        _safe_tight_layout()
 
         plt.savefig(umap_dir / f"01_predicted_labels.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
@@ -702,7 +716,7 @@ class LabelSimilarity(BaseEvaluator):
 
         plt.xticks([])
         plt.yticks([])
-        plt.tight_layout()
+        _safe_tight_layout()
 
         plt.savefig(umap_dir / f"01_predicted_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
@@ -731,7 +745,7 @@ class LabelSimilarity(BaseEvaluator):
             ncol=min(len(unique_labels), 6),
             bbox_to_anchor=(0.5, 0.5),
         )
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(umap_dir / f"01_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
@@ -759,7 +773,7 @@ class LabelSimilarity(BaseEvaluator):
             plt.xlabel("False Positive Rate")
             plt.ylabel("True Positive Rate")
             plt.title(f"{v} ({label_kind.value})")
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(roc_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -774,7 +788,7 @@ class LabelSimilarity(BaseEvaluator):
                 frameon=False,
                 bbox_to_anchor=(0.5, 0.5),
             )
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(roc_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -805,7 +819,7 @@ class LabelSimilarity(BaseEvaluator):
 
             plt.xticks([])
             plt.yticks([])
-            plt.tight_layout()
+            _safe_tight_layout()
 
             # Save plot without legend
             plt.savefig(umap_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
@@ -849,7 +863,7 @@ class LabelSimilarity(BaseEvaluator):
                 ncol=1,
                 bbox_to_anchor=(0.5, 0.5),
             )
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(umap_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -861,7 +875,7 @@ class LabelSimilarity(BaseEvaluator):
             plt.ylabel("Density")
             plt.xlim(-1, 1)
             plt.title(f"{v} ({label_kind.value})")
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(hist_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -879,7 +893,7 @@ class LabelSimilarity(BaseEvaluator):
                 frameon=False,
                 bbox_to_anchor=(0.5, 0.5),
             )
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(hist_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -894,7 +908,7 @@ class LabelSimilarity(BaseEvaluator):
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
         plt.title("Mean ROC Curve")
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(roc_dir / f"00_mean_roc.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
@@ -905,7 +919,7 @@ class LabelSimilarity(BaseEvaluator):
         ax_legend.legend(
             handles=legend_elements, loc="center", fontsize=legend_fontsize, frameon=False, bbox_to_anchor=(0.5, 0.5)
         )
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(roc_dir / f"00_mean_roc_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
@@ -946,7 +960,7 @@ class LabelSimilarity(BaseEvaluator):
             return
 
         # Load cached data
-        cache_path = out_dir / "label_similarity_cache.pkl"
+        cache_path = out_dir / f"label_similarity_cache_{label_key}.pkl"
         cache_data = self._load_cache(cache_path)
 
         if cache_data is None:
@@ -982,9 +996,9 @@ class LabelSimilarity(BaseEvaluator):
         )
 
         # Create subdirectories for different plot types
-        roc_dir = out_dir / label_key / "roc_curves"
-        umap_dir = out_dir / label_key / "umap"
-        hist_dir = out_dir / label_key / "histograms"
+        roc_dir = out_dir / "roc_curves"
+        umap_dir = out_dir / "umap"
+        hist_dir = out_dir / "histograms"
 
         for d in [roc_dir, umap_dir, hist_dir]:
             d.mkdir(parents=True, exist_ok=True)
@@ -1001,11 +1015,13 @@ class LabelSimilarity(BaseEvaluator):
             colors = sns.color_palette("tab10", len(unique_labels))
         elif len(unique_labels) <= 20:
             colors = sns.color_palette("tab20", len(unique_labels))
+        elif len(unique_labels) <= 40:
+            # For 21-40 classes, combine tab20 and tab20b
+            colors = sns.color_palette("tab20", 20) + sns.color_palette("tab20b", len(unique_labels) - 20)
         else:
-            # For more than 20 classes, combine multiple categorical palettes
-            colors = (sns.color_palette("tab20", 20) + sns.color_palette("tab20b", min(len(unique_labels) - 20, 20)))[
-                : len(unique_labels)
-            ]
+            # For >40 classes, use a continuous colormap to ensure we have enough colors
+            # Use HSV colormap for maximum distinction between colors
+            colors = sns.color_palette("hsv", len(unique_labels))
 
         color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
         point_colors = [color_map[label] for label in labels]
@@ -1032,7 +1048,7 @@ class LabelSimilarity(BaseEvaluator):
         scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
-        plt.tight_layout()
+        _safe_tight_layout()
 
         plt.savefig(umap_dir / f"00_true_labels.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
@@ -1059,7 +1075,7 @@ class LabelSimilarity(BaseEvaluator):
 
             plt.xticks([])
             plt.yticks([])
-            plt.tight_layout()
+            _safe_tight_layout()
 
             plt.savefig(umap_dir / f"00_true_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
@@ -1088,7 +1104,7 @@ class LabelSimilarity(BaseEvaluator):
             ncol=min(len(unique_labels), 6),
             bbox_to_anchor=(0.5, 0.5),
         )
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(umap_dir / f"00_true_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
@@ -1105,7 +1121,7 @@ class LabelSimilarity(BaseEvaluator):
         scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
-        plt.tight_layout()
+        _safe_tight_layout()
 
         plt.savefig(umap_dir / f"01_predicted_labels.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
@@ -1134,7 +1150,7 @@ class LabelSimilarity(BaseEvaluator):
 
             plt.xticks([])
             plt.yticks([])
-            plt.tight_layout()
+            _safe_tight_layout()
 
             plt.savefig(umap_dir / f"01_predicted_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
@@ -1163,7 +1179,7 @@ class LabelSimilarity(BaseEvaluator):
             ncol=min(len(unique_labels), 6),
             bbox_to_anchor=(0.5, 0.5),
         )
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(umap_dir / f"01_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
@@ -1191,7 +1207,7 @@ class LabelSimilarity(BaseEvaluator):
             plt.xlabel("False Positive Rate")
             plt.ylabel("True Positive Rate")
             plt.title(f"{v} ({label_kind.value})")
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(roc_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -1206,7 +1222,7 @@ class LabelSimilarity(BaseEvaluator):
                 frameon=False,
                 bbox_to_anchor=(0.5, 0.5),
             )
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(roc_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -1237,7 +1253,7 @@ class LabelSimilarity(BaseEvaluator):
 
             plt.xticks([])
             plt.yticks([])
-            plt.tight_layout()
+            _safe_tight_layout()
 
             # Save plot without legend
             plt.savefig(umap_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
@@ -1281,7 +1297,7 @@ class LabelSimilarity(BaseEvaluator):
                 ncol=1,
                 bbox_to_anchor=(0.5, 0.5),
             )
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(umap_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -1293,7 +1309,7 @@ class LabelSimilarity(BaseEvaluator):
             plt.ylabel("Density")
             plt.xlim(-1, 1)
             plt.title(f"{v} ({label_kind.value})")
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(hist_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -1311,7 +1327,7 @@ class LabelSimilarity(BaseEvaluator):
                 frameon=False,
                 bbox_to_anchor=(0.5, 0.5),
             )
-            plt.tight_layout()
+            _safe_tight_layout()
             plt.savefig(hist_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
@@ -1326,7 +1342,7 @@ class LabelSimilarity(BaseEvaluator):
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
         plt.title("Mean ROC Curve")
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(roc_dir / f"00_mean_roc.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
@@ -1337,7 +1353,7 @@ class LabelSimilarity(BaseEvaluator):
         ax_legend.legend(
             handles=legend_elements, loc="center", fontsize=legend_fontsize, frameon=False, bbox_to_anchor=(0.5, 0.5)
         )
-        plt.tight_layout()
+        _safe_tight_layout()
         plt.savefig(roc_dir / f"00_mean_roc_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
