@@ -65,29 +65,30 @@ def process_single_dataset_model(
     """
     dataset_name = ds_cfg.name
     model_id = model_cfg.source
+    model_name = model_cfg.name
     text_only = model_cfg.get("text_only", False)
 
     # add a small string to the model indicating if it was used as text-only
     if text_only:
-        model_id_for_path = model_id + "_text_only"
+        model_name_for_path = model_name + "_text_only"
     else:
-        model_id_for_path = model_id
+        model_name_for_path = model_name
 
-    logger.info(f"Processing {dataset_name} + {model_id_for_path}")
+    logger.info(f"Processing {dataset_name} + {model_name_for_path}")
 
     # Determine output directory
     out_dir = (
         Path(output_root)
         / ds_cfg.name  # <— dataset-specific folder
-        / Path(model_id_for_path).name.replace("/", "_")
+        / Path(model_name_for_path).name.replace("/", "_")
     )
 
     # Check if files already exist and skip if overwrite is False
     if not run_cfg.overwrite and check_required_files_exist(out_dir, output_format):
         logger.info(
-            f"Embeddings already exist for {ds_cfg.name} + {model_id_for_path}. Skipping. Use overwrite=true to force regeneration."
+            f"Embeddings already exist for {ds_cfg.name} + {model_name_for_path}. Skipping. Use overwrite=true to force regeneration."
         )
-        return dataset_name, model_id_for_path, True, "skipped_existing"
+        return dataset_name, model_name_for_path, True, "skipped_existing"
 
     try:
         # Load dataset
@@ -193,14 +194,16 @@ def process_single_dataset_model(
             logger.info("Wrote subset AnnData → %s", subset_out)
 
         # Save metadata
-        (out_dir / "meta.yaml").write_text(f"model: {model_id_for_path}\ndataset: {ds_cfg.name}\nrows: {len(emb_df)}\n")
+        (out_dir / "meta.yaml").write_text(
+            f"model: {model_name_for_path}\ndataset: {ds_cfg.name}\nrows: {len(emb_df)}\n"
+        )
 
-        logger.info(f"✓ Completed processing {dataset_name} + {model_id_for_path}")
-        return dataset_name, model_id_for_path, True, None
+        logger.info(f"✓ Completed processing {dataset_name} + {model_name_for_path}")
+        return dataset_name, model_name_for_path, True, None
 
     except Exception as e:
-        logger.error(f"✗ Error processing {dataset_name} + {model_id_for_path}: {e}")
-        return dataset_name, model_id_for_path, False, str(e)
+        logger.error(f"✗ Error processing {dataset_name} + {model_name_for_path}: {e}")
+        return dataset_name, model_name_for_path, False, str(e)
 
 
 def _process_single_worker(args):
@@ -229,9 +232,9 @@ def _process_single_worker(args):
     model_id = model_cfg.source
     text_only = model_cfg.get("text_only", False)
     if text_only:
-        model_id_for_path = model_id + "_text_only"
+        model_name_for_path = model_id + "_text_only"
     else:
-        model_id_for_path = model_id
+        model_name_for_path = model_id
 
     # Configure logging for this worker process
     worker_logger = logging.getLogger(f"embed_worker_{os.getpid()}")
@@ -253,7 +256,7 @@ def _process_single_worker(args):
     else:
         worker_logger.warning("CUDA not available in worker process")
 
-    worker_logger.info(f"Starting processing: {dataset_name}/{model_id_for_path}")
+    worker_logger.info(f"Starting processing: {dataset_name}/{model_name_for_path}")
     start_time = time.time()
 
     try:
@@ -279,9 +282,9 @@ def _process_single_worker(args):
         elapsed_time = time.time() - start_time
         error_msg = f"{str(e)}\n{traceback.format_exc()}"
         worker_logger.error(
-            f"Error processing {dataset_name}/{model_id_for_path} after {elapsed_time:.1f}s: {error_msg}"
+            f"Error processing {dataset_name}/{model_name_for_path} after {elapsed_time:.1f}s: {error_msg}"
         )
-        return dataset_name, model_id_for_path, False, str(e)
+        return dataset_name, model_name_for_path, False, str(e)
 
 
 def embed_pipeline(cfg) -> None:
@@ -328,14 +331,15 @@ def embed_pipeline(cfg) -> None:
         for i, (ds_cfg, model_cfg, run_cfg, output_root, output_format, adata_cache) in enumerate(tasks):
             dataset_name = ds_cfg.name
             model_id = model_cfg.source
+            model_name = model_cfg.name
             text_only = model_cfg.get("text_only", False)
             if text_only:
-                model_id_for_path = model_id + "_text_only"
+                model_name_for_path = model_name + "_text_only"
             else:
-                model_id_for_path = model_id
+                model_name_for_path = model_name
 
             task_start = time.time()
-            print(f"\n=== [{i + 1}/{len(tasks)}] Processing dataset: {dataset_name}, model: {model_id_for_path} ===")
+            print(f"\n=== [{i + 1}/{len(tasks)}] Processing dataset: {dataset_name}, model: {model_name_for_path} ===")
 
             try:
                 dataset_name_result, model_id_result, success, error_msg = process_single_dataset_model(
@@ -363,7 +367,7 @@ def embed_pipeline(cfg) -> None:
 
             except Exception as e:
                 failed += 1
-                print(f"✗ Error processing {dataset_name}/{model_id_for_path}: {e}")
+                print(f"✗ Error processing {dataset_name}/{model_name_for_path}: {e}")
                 print("  Continuing with next combination...")
                 continue
 
@@ -412,14 +416,15 @@ def embed_pipeline(cfg) -> None:
                 ds_cfg, model_cfg, run_cfg, output_root, output_format, adata_cache = task
                 dataset_name = ds_cfg.name
                 model_id = model_cfg.source
+                model_name = model_cfg.name
                 text_only = model_cfg.get("text_only", False)
                 if text_only:
-                    model_id_for_path = model_id + "_text_only"
+                    model_name_for_path = model_id + "_text_only"
                 else:
-                    model_id_for_path = model_id
+                    model_name_for_path = model_id
 
                 future = executor.submit(worker_func, *task_args_func(task))
-                future_to_task[future] = (dataset_name, model_id_for_path, i, time.time())
+                future_to_task[future] = (dataset_name, model_name_for_path, i, time.time())
 
             # Process completed tasks with timeout
             completed = 0
@@ -430,7 +435,7 @@ def embed_pipeline(cfg) -> None:
 
             try:
                 for future in as_completed(future_to_task, timeout=task_timeout + 60):  # Small buffer for cleanup
-                    dataset_name, model_id_for_path, task_idx, submit_time = future_to_task[future]
+                    dataset_name, model_name_for_path, task_idx, submit_time = future_to_task[future]
                     completed += 1
                     task_time = time.time() - submit_time
 
@@ -467,14 +472,14 @@ def embed_pipeline(cfg) -> None:
                         timed_out += 1
                         failed += 1
                         print(
-                            f"✗ [{completed}/{len(tasks)}] Timeout: {dataset_name}/{model_id_for_path} (>{task_timeout}s)"
+                            f"✗ [{completed}/{len(tasks)}] Timeout: {dataset_name}/{model_name_for_path} (>{task_timeout}s)"
                         )
                         future.cancel()  # Try to cancel the future
 
                     except Exception as e:
                         failed += 1
                         print(
-                            f"✗ [{completed}/{len(tasks)}] Exception in worker for {dataset_name}/{model_id_for_path}: {e}"
+                            f"✗ [{completed}/{len(tasks)}] Exception in worker for {dataset_name}/{model_name_for_path}: {e}"
                         )
 
             except concurrent.futures.TimeoutError:

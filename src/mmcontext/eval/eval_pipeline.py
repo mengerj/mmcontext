@@ -170,15 +170,15 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
     model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
     text_only = model_cfg.get("text_only", False)
     if text_only:
-        model_id = model_id + "_text_only"
+        model_name = model_name + "_text_only"
 
     plot_only = eval_cfg.get("plot_only", False)
     skip_missing_cache = eval_cfg.get("skip_missing_cache", True)
 
     if plot_only:
-        logger.info(f"Plot-only mode: {model_id} (name: {model_name}) for dataset: {dataset_name}")
+        logger.info(f"Plot-only mode: {model_name} for dataset: {dataset_name}")
     else:
-        logger.info(f"Processing model: {model_id} (name: {model_name}) for dataset: {dataset_name}")
+        logger.info(f"Processing model: {model_name} for dataset: {dataset_name}")
 
     label_specs = [LabelSpec(n, LabelKind.BIO) for n in ds_cfg.bio_label_list] + [
         LabelSpec(n, LabelKind.BATCH) for n in ds_cfg.batch_label_list
@@ -186,7 +186,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
 
     rows = []
 
-    emb_dir = Path(output_root) / dataset_name / Path(model_id).name.replace("/", "_")
+    emb_dir = Path(output_root) / dataset_name / Path(model_name).name.replace("/", "_")
     logger.info(f"Looking for embeddings in: {emb_dir}")
 
     # ── Handle plot-only mode ───────────────────────────────────────
@@ -209,10 +209,10 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         logger.info(f"✓ Loaded AnnData: {adata.n_obs} obs × {adata.n_vars} vars")
 
     except FileNotFoundError as e:
-        logger.error(f"✗ Missing file for {dataset_name}/{model_id}: {e}")
+        logger.error(f"✗ Missing file for {dataset_name}/{model_name}: {e}")
         raise
     except Exception as e:
-        logger.error(f"✗ Error loading data for {dataset_name}/{model_id}: {e}")
+        logger.error(f"✗ Error loading data for {dataset_name}/{model_name}: {e}")
         raise
 
     # ──── Run standard evaluators ────────────────────
@@ -309,7 +309,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         save_table(out_df, emb_dir / "eval/metrics", fmt="csv")
         logger.info(f"✓ Saved {len(rows)} evaluation results")
 
-    logger.info(f"✓ Completed processing model {model_id} for dataset {dataset_name}")
+    logger.info(f"✓ Completed processing model {model_name} for dataset {dataset_name}")
 
     return rows
 
