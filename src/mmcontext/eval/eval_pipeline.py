@@ -91,14 +91,18 @@ def run_scib_evaluation(cfg) -> None:
             ScibClass = get_evaluator("scib")
             scib_evaluator = ScibClass()
 
+            # Handle cases where label lists might be None or empty
+            bio_labels = ds_cfg.bio_label_list or []
+            batch_labels = ds_cfg.batch_label_list or []
+
             scib_results = scib_evaluator.compute_dataset_model(
                 emb1=E1,
                 adata=adata,
                 dataset_name=dataset_name,
                 model_id=model_id,
                 model_name=model_name,
-                bio_labels=ds_cfg.bio_label_list,
-                batch_labels=ds_cfg.batch_label_list,
+                bio_labels=bio_labels,
+                batch_labels=batch_labels,
                 **cfg.eval,
             )
 
@@ -180,8 +184,12 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
     else:
         logger.info(f"Processing model: {model_name} for dataset: {dataset_name}")
 
-    label_specs = [LabelSpec(n, LabelKind.BIO) for n in ds_cfg.bio_label_list] + [
-        LabelSpec(n, LabelKind.BATCH) for n in ds_cfg.batch_label_list
+    # Handle cases where label lists might be None or empty
+    bio_labels = ds_cfg.bio_label_list or []
+    batch_labels = ds_cfg.batch_label_list or []
+
+    label_specs = [LabelSpec(n, LabelKind.BIO) for n in bio_labels] + [
+        LabelSpec(n, LabelKind.BATCH) for n in batch_labels
     ]
 
     rows = []
@@ -220,7 +228,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
     logger.info(f"Running evaluators: {evaluators}")
 
     # try to load label embeddings only once
-    label_emb_cache = {}  # (kind, name) → ndarray | None
+    label_emb_cache = {}  # (kind, name) → tuple[ndarray, dict] | None
     # ------------- ITERATE over labels AND evaluators --------------
     for label_spec in label_specs:
         if label_spec.name not in adata.obs.columns:
@@ -231,10 +239,24 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         if (label_spec.kind, label_spec.name) not in label_emb_cache:
             prefix = "bio_label_embeddings" if label_spec.kind == LabelKind.BIO else "batch_label_embeddings"
             path = emb_dir / f"{prefix}_{label_spec.name}.parquet"
+            mapping_path = emb_dir / f"{prefix}_{label_spec.name}_mapping.json"
             if path.exists():
                 try:
                     df2 = pd.read_parquet(path)
-                    label_emb_cache[(label_spec.kind, label_spec.name)] = np.vstack(df2["embedding"].to_numpy())
+                    embeddings = np.vstack(df2["embedding"].to_numpy())
+
+                    # Load label mapping if available
+                    label_to_index = None
+                    if mapping_path.exists():
+                        import json
+
+                        with open(mapping_path) as f:
+                            label_to_index = json.load(f)
+                        logger.info(f"    ✓ Loaded label mapping for {label_spec.name}")
+                    else:
+                        logger.warning(f"    - No label mapping found for {label_spec.name}, using legacy format")
+
+                    label_emb_cache[(label_spec.kind, label_spec.name)] = (embeddings, label_to_index)
                     logger.info(f"    ✓ Loaded label embeddings for {label_spec.name}")
                 except Exception as e:
                     logger.error(f"    ✗ Error loading label embeddings for {label_spec.name}: {e}")
@@ -242,7 +264,13 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
             else:
                 logger.info(f"    - No label embeddings found for {label_spec.name}")
                 label_emb_cache[(label_spec.kind, label_spec.name)] = None
-        E2 = label_emb_cache[(label_spec.kind, label_spec.name)]
+
+        # Extract embeddings and mapping
+        cache_entry = label_emb_cache[(label_spec.kind, label_spec.name)]
+        if cache_entry is not None:
+            E2, label_to_index = cache_entry
+        else:
+            E2, label_to_index = None, None
 
         for ev_name in evaluators:
             logger.info(f"    Running evaluator: {ev_name}")
@@ -262,6 +290,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                     label_kind=label_spec.kind,  # evaluators may ignore
                     label_key=label_spec.name,  # evaluators may ignore
                     out_dir=emb_dir,  # Pass output directory for caching
+                    label_to_index=label_to_index,  # Pass label mapping for new format
                     **eval_cfg,
                 )
 
@@ -295,6 +324,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                         adata=adata,
                         label_kind=label_spec.kind,  # "bio"  or  "batch"
                         label_key=label_spec.name,  # column name (e.g. "celltype")
+                        label_to_index=label_to_index,  # Pass label mapping for new format
                         **eval_cfg,  # forward any extra Hydra knobs
                     )
                     logger.info(f"      ✓ Plots saved to {plot_dir}")

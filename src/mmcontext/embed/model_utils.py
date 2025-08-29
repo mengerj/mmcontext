@@ -235,9 +235,9 @@ def prepare_model_and_embed(
     return emb_df, path_map
 
 
-def create_label_dataset(adata, label_col: str) -> HFDataset:
+def create_label_dataset(adata, label_col: str) -> tuple[HFDataset, dict[str, int]]:
     """
-    Create a small HF Dataset from a label column in an AnnData object.
+    Create a small HF Dataset from unique labels in an AnnData object.
 
     Parameters
     ----------
@@ -248,19 +248,26 @@ def create_label_dataset(adata, label_col: str) -> HFDataset:
 
     Returns
     -------
-    HFDataset
-        A HuggingFace dataset with two columns: 'sample_idx' and 'label'
+    tuple[HFDataset, dict[str, int]]
+        A tuple containing:
+        - HuggingFace dataset with unique labels and their indices
+        - Mapping from label string to embedding index
     """
     from datasets import Dataset
 
-    # Get unique labels and their indices
-    labels = adata.obs[label_col].astype(str).tolist()
-    indices = adata.obs.index.tolist()
+    # Get unique labels only
+    unique_labels = adata.obs[label_col].astype(str).unique().tolist()
 
-    # Create dataset
-    ds = Dataset.from_dict({"sample_idx": indices, "label": labels})
+    # Create mapping from label to embedding index
+    label_to_index = {label: idx for idx, label in enumerate(unique_labels)}
 
-    return ds
+    # Create indices for the unique labels (just sequential)
+    indices = list(range(len(unique_labels)))
+
+    # Create dataset with unique labels only
+    ds = Dataset.from_dict({"sample_idx": indices, "label": unique_labels})
+
+    return ds, label_to_index
 
 
 def embed_labels(
@@ -271,9 +278,9 @@ def embed_labels(
     batch_size: int = 32,
     num_workers: int = 0,
     pin_memory: bool = torch.cuda.is_available(),
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, int]]:
     """
-    Embed labels from an AnnData object using a SentenceTransformer model.
+    Embed unique labels from an AnnData object using a SentenceTransformer model.
 
     Parameters
     ----------
@@ -292,11 +299,13 @@ def embed_labels(
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame with columns ['sample_idx', 'embedding'] containing the label embeddings
+    tuple[pd.DataFrame, dict[str, int]]
+        A tuple containing:
+        - DataFrame with columns ['sample_idx', 'embedding'] containing unique label embeddings
+        - Mapping from label string to embedding index in the DataFrame
     """
-    # Create dataset from labels
-    label_ds = create_label_dataset(adata, label_col)
+    # Create dataset from unique labels
+    label_ds, label_to_index = create_label_dataset(adata, label_col)
 
     # Use prepare_model_and_embed with text_only=True since we're just embedding text labels
     emb_df, _ = prepare_model_and_embed(
@@ -310,4 +319,4 @@ def embed_labels(
         text_only=True,
     )
 
-    return emb_df
+    return emb_df, label_to_index

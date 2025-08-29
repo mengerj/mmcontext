@@ -159,8 +159,16 @@ def process_single_dataset_model(
             fmt=output_format,
         )
 
+        # Save metadata
+        (out_dir / "meta.yaml").write_text(
+            f"model: {model_name_for_path}\ndataset: {ds_cfg.name}\nrows: {len(emb_df)}\n"
+        )
+
         # Handle label embeddings if available
         if adata_subset is not None:
+            subset_out = out_dir / "subset.zarr"
+            adata_subset.write_zarr(subset_out)
+            logger.info("Wrote subset AnnData → %s", subset_out)
             # Define label types and their output prefixes
             label_types = {"bio_label_list": "bio_label_embeddings", "batch_label_list": "batch_label_embeddings"}
 
@@ -168,35 +176,33 @@ def process_single_dataset_model(
             for label_list_attr, output_prefix in label_types.items():
                 if hasattr(ds_cfg, label_list_attr):
                     label_cols = getattr(ds_cfg, label_list_attr)
-                    for label_col in label_cols:
-                        if label_col in adata_subset.obs.columns:
-                            logger.info(f"Embedding {label_list_attr} from column: {label_col}")
-                            label_emb_df = embed_labels(
-                                st_model,
-                                adata_subset,
-                                label_col,
-                                batch_size=run_cfg.batch_size,
-                                num_workers=run_cfg.num_workers,
-                            )
-                            # Save label embeddings
-                            save_table(
-                                label_emb_df,
-                                out_path=out_dir / f"{output_prefix}_{label_col}",
-                                fmt=output_format,
-                            )
-                        else:
-                            logger.warning(f"Label column {label_col} not found in adata.obs")
+                    if label_cols is not None:
+                        for label_col in label_cols:
+                            if label_col in adata_subset.obs.columns:
+                                logger.info(f"Embedding {label_list_attr} from column: {label_col}")
+                                label_emb_df, label_to_index = embed_labels(
+                                    st_model,
+                                    adata_subset,
+                                    label_col,
+                                    batch_size=run_cfg.batch_size,
+                                    num_workers=run_cfg.num_workers,
+                                )
+                                # Save label embeddings
+                                save_table(
+                                    label_emb_df,
+                                    out_path=out_dir / f"{output_prefix}_{label_col}",
+                                    fmt=output_format,
+                                )
 
-        # if available, save the zarr store
-        if adata_subset:
-            subset_out = out_dir / "subset.zarr"
-            adata_subset.write_zarr(subset_out)
-            logger.info("Wrote subset AnnData → %s", subset_out)
+                                # Save label mapping as JSON for downstream use
+                                import json
 
-        # Save metadata
-        (out_dir / "meta.yaml").write_text(
-            f"model: {model_name_for_path}\ndataset: {ds_cfg.name}\nrows: {len(emb_df)}\n"
-        )
+                                mapping_path = out_dir / f"{output_prefix}_{label_col}_mapping.json"
+                                with open(mapping_path, "w") as f:
+                                    json.dump(label_to_index, f, indent=2)
+                                logger.info(f"Saved label mapping to {mapping_path}")
+                            else:
+                                logger.warning(f"Label column {label_col} not found in adata.obs")
 
         logger.info(f"✓ Completed processing {dataset_name} + {model_name_for_path}")
         return dataset_name, model_name_for_path, True, None

@@ -12,7 +12,7 @@ import pandas as pd
 import seaborn as sns
 import umap
 from scipy.stats import mannwhitneyu
-from sklearn.metrics import auc, roc_curve
+from sklearn.metrics import auc, confusion_matrix, roc_curve
 
 from .base import BaseEvaluator, EvalResult
 from .registry import register
@@ -37,7 +37,7 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def _safe_tight_layout() -> None:
     """Safely apply tight_layout, suppressing warnings if it fails."""
     try:
-        _safe_tight_layout()
+        plt.tight_layout()
     except Exception:
         # If tight_layout fails, just continue - bbox_inches="tight" in savefig will handle it
         pass
@@ -65,13 +65,22 @@ class LabelSimilarity(BaseEvaluator):
         - Mean AUC across all labels
         - Standard deviation of AUC scores
         - Accuracy score (ratio of correct assignments)
+        - Per-label accuracy (recall for each label)
+        - Balanced accuracy (mean of per-class recalls)
+        - Normalized accuracy (using per-label normalized similarity scores)
+        - Balanced normalized accuracy (mean of per-class recalls using normalized predictions)
         - Random baseline accuracy
         - Accuracy over random baseline ratio
+        - Normalized accuracy over random baseline ratio
+        - Balanced normalized accuracy over random baseline ratio
 
     Produces:
         - ROC curve plots
         - UMAP visualizations
         - Similarity score histograms
+        - Confusion matrices (normalized and count-based)
+        - Normalized prediction confusion matrices (using per-label normalized scores)
+        - UMAP plots colored by normalized predictions (with and without text)
     """
 
     name = "LabelSimilarity"
@@ -85,9 +94,16 @@ class LabelSimilarity(BaseEvaluator):
     umap_random_state: int = 42
     cache_results: bool = True  # Enable caching of similarity matrices
     skip_plotting: bool = False  # Skip all plotting for faster evaluation
+    save_labels: bool = True  # Save true/predicted labels as parquet and CSV
+    output_sample_size: int = 100  # Number of cells to include in CSV sample
 
     def _compute_similarity_matrix(
-        self, emb1: np.ndarray, emb2: np.ndarray, labels: np.ndarray, uniq: np.ndarray
+        self,
+        emb1: np.ndarray,
+        emb2: np.ndarray,
+        labels: np.ndarray,
+        uniq: np.ndarray,
+        label_to_index: dict[str, int] = None,
     ) -> np.ndarray:
         """
         Compute similarity matrix between cell embeddings and label prototypes.
@@ -97,11 +113,13 @@ class LabelSimilarity(BaseEvaluator):
         emb1 : np.ndarray
             Cell embeddings (N x D)
         emb2 : np.ndarray
-            Label embeddings (M x D)
+            Label embeddings (M x D) - either unique embeddings or legacy format
         labels : np.ndarray
             True labels for each cell (N,)
         uniq : np.ndarray
             Unique labels
+        label_to_index : dict[str, int], optional
+            Mapping from label string to embedding index (for new format)
 
         Returns
         -------
@@ -110,14 +128,34 @@ class LabelSimilarity(BaseEvaluator):
         """
         # Get label prototypes for each unique label
         label_prototypes = np.zeros((len(uniq), emb2.shape[1]))
-        for i, v in enumerate(uniq):
-            mask = labels == v
-            matching_indices = np.where(mask)[0]
-            if len(matching_indices) == 0:
-                logger.error(f"🚨 ERROR: No embeddings found for label '{v}'")
-                raise ValueError(f"No embeddings found for label '{v}'")
-            logger.debug(f"🔍 Label '{v}': found {len(matching_indices)} matching embeddings")
-            label_prototypes[i] = emb2[mask][0]  # first row for that value
+
+        if label_to_index is not None:
+            # New format: emb2 contains unique embeddings, use mapping
+            logger.debug("Using new format with unique label embeddings")
+            for i, v in enumerate(uniq):
+                label_str = str(v)  # Ensure string format for lookup
+                if label_str in label_to_index:
+                    emb_idx = label_to_index[label_str]
+                    if emb_idx < emb2.shape[0]:
+                        label_prototypes[i] = emb2[emb_idx]
+                        logger.debug(f"🔍 Label '{v}': using embedding at index {emb_idx}")
+                    else:
+                        logger.error(f"🚨 ERROR: Embedding index {emb_idx} out of bounds for label '{v}'")
+                        raise ValueError(f"Embedding index {emb_idx} out of bounds for label '{v}'")
+                else:
+                    logger.error(f"🚨 ERROR: No embedding mapping found for label '{v}'")
+                    raise ValueError(f"No embedding mapping found for label '{v}'")
+        else:
+            # Legacy format: emb2 contains embeddings for all cells, pick first occurrence
+            logger.debug("Using legacy format with per-cell label embeddings")
+            for i, v in enumerate(uniq):
+                mask = labels == v
+                matching_indices = np.where(mask)[0]
+                if len(matching_indices) == 0:
+                    logger.error(f"🚨 ERROR: No embeddings found for label '{v}'")
+                    raise ValueError(f"No embeddings found for label '{v}'")
+                logger.debug(f"🔍 Label '{v}': found {len(matching_indices)} matching embeddings")
+                label_prototypes[i] = emb2[mask][0]  # first row for that value
 
         # Compute similarity matrix using vectorized operations
         if self.similarity == "cosine":
@@ -141,6 +179,102 @@ class LabelSimilarity(BaseEvaluator):
             n_neighbors=self.umap_n_neighbors, min_dist=self.umap_min_dist, random_state=self.umap_random_state
         )
         return reducer.fit_transform(emb1)
+
+    def _plot_confusion_matrix(
+        self,
+        true_labels: np.ndarray,
+        pred_labels: np.ndarray,
+        output_path: Path,
+        title: str = "Confusion Matrix",
+        normalize: bool = True,
+        figsize: tuple = (8, 8),
+        font_size: int = 12,
+        save_format: str = "png",
+        dpi: int = 300,
+    ) -> None:
+        """
+        Plot a confusion matrix heatmap comparing true and predicted labels.
+
+        Parameters
+        ----------
+        true_labels : np.ndarray
+            Ground truth labels
+        pred_labels : np.ndarray
+            Predicted labels
+        output_path : Path
+            File path to save the confusion matrix figure
+        title : str
+            Title for the plot
+        normalize : bool
+            Whether to normalize the confusion matrix
+        figsize : tuple
+            Figure size
+        font_size : int
+            Font size for annotations
+        save_format : str
+            Format for saving the plot
+        dpi : int
+            DPI for the saved plot
+        """
+        # Convert to pandas Series and ensure string type for consistent handling
+        true_labels = pd.Series(true_labels).astype(str)
+        pred_labels = pd.Series(pred_labels).astype(str)
+
+        # Unified label set for consistent axis order
+        labels = sorted(set(true_labels) | set(pred_labels))
+
+        # Compute confusion matrix
+        cm = confusion_matrix(true_labels, pred_labels, labels=labels)
+
+        # Normalize if requested
+        if normalize:
+            cm = cm.astype("float") / cm.sum(axis=1, keepdims=True)
+            cm = np.nan_to_num(cm)  # handle divide-by-zero cases
+
+        # Adjust figure size based on number of labels
+        width_per_label = 0.7
+        height_per_label = 0.7
+        fig_width = max(figsize[0], width_per_label * len(labels))
+        fig_height = max(figsize[1], height_per_label * len(labels))
+
+        plt.figure(figsize=(fig_width, fig_height), dpi=dpi)
+
+        # Create heatmap
+        ax = sns.heatmap(
+            cm,
+            annot=True,
+            square=True,
+            fmt=".2f" if normalize else "d",
+            cmap="Blues",
+            xticklabels=labels,
+            yticklabels=labels,
+            cbar_kws={"label": "Proportion" if normalize else "Count", "shrink": 0.6, "aspect": 20},
+            annot_kws={"size": max(6, font_size - 2)},  # Slightly smaller font for annotations
+            vmax=1.0 if normalize else None,
+            vmin=0,
+        )
+
+        # Customize colorbar
+        cbar = ax.collections[0].colorbar
+        if normalize:
+            cbar.set_ticks([0, 0.5, 1])
+        cbar.outline.set_edgecolor("black")
+
+        # Set labels and title
+        plt.xlabel("Predicted Label", fontsize=font_size)
+        plt.ylabel("True Label", fontsize=font_size)
+        plt.title(title, fontsize=font_size + 2, fontweight="bold")
+
+        # Rotate x-axis labels if there are many classes
+        if len(labels) > 10:
+            plt.xticks(rotation=45, ha="right")
+            plt.yticks(rotation=0)
+
+        # Save the plot
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        _safe_tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        plt.close()
 
     def _add_non_overlapping_annotations(self, points: np.ndarray, labels: list, fontsize: int = 8) -> None:
         """
@@ -281,6 +415,73 @@ class LabelSimilarity(BaseEvaluator):
 
         return accuracy
 
+    def _normalize_similarity_matrix_per_label(self, similarity_matrix: np.ndarray) -> np.ndarray:
+        """
+        Normalize similarity matrix per label (column-wise normalization).
+
+        This gives each label equal weight in the decision process by normalizing
+        the similarity scores for each label independently.
+
+        Parameters
+        ----------
+        similarity_matrix : np.ndarray
+            Similarity matrix (N x len(uniq))
+
+        Returns
+        -------
+        np.ndarray
+            Label-normalized similarity matrix
+        """
+        # Normalize each column (label) independently using z-score normalization
+        normalized_matrix = similarity_matrix.copy()
+
+        for i in range(similarity_matrix.shape[1]):
+            col = similarity_matrix[:, i]
+            mean_val = np.mean(col)
+            std_val = np.std(col)
+
+            # Avoid division by zero
+            if std_val > 1e-8:
+                normalized_matrix[:, i] = (col - mean_val) / std_val
+            else:
+                # If std is 0, all values are the same, so set to 0
+                normalized_matrix[:, i] = 0.0
+
+        return normalized_matrix
+
+    def _compute_normalized_accuracy(
+        self, similarity_matrix: np.ndarray, labels: np.ndarray, uniq: np.ndarray
+    ) -> tuple[float, np.ndarray]:
+        """
+        Compute accuracy using label-normalized similarity matrix.
+
+        Parameters
+        ----------
+        similarity_matrix : np.ndarray
+            Precomputed similarity matrix (N x len(uniq))
+        labels : np.ndarray
+            True labels for each cell (N,)
+        uniq : np.ndarray
+            Unique labels
+
+        Returns
+        -------
+        tuple[float, np.ndarray]
+            Normalized accuracy score and predicted labels
+        """
+        # Normalize similarity matrix per label
+        normalized_matrix = self._normalize_similarity_matrix_per_label(similarity_matrix)
+
+        # Find the label with highest normalized similarity for each cell
+        predicted_indices = np.argmax(normalized_matrix, axis=1)
+        predicted_labels = uniq[predicted_indices]
+
+        # Compute accuracy
+        correct = np.sum(predicted_labels == labels)
+        accuracy = correct / len(labels)
+
+        return accuracy, predicted_labels
+
     def _compute_accuracy(self, emb1: np.ndarray, emb2: np.ndarray, labels: np.ndarray, uniq: np.ndarray) -> float:
         """
         Compute accuracy by finding the label with highest similarity for each cell.
@@ -308,9 +509,11 @@ class LabelSimilarity(BaseEvaluator):
             Baseline random accuracy
         """
         unique_labels, counts = np.unique(labels, return_counts=True)
-        proportions = counts / len(labels)
-        # Random baseline accuracy is sum of squared proportions
-        random_accuracy = np.sum(proportions**2)
+        # proportions = counts / len(labels)
+        # Random baseline respecting the distribution of the labels
+        # random_accuracy = np.sum(proportions**2)
+        # In cell whisperer, random accuracy is 1/number of classes. Makes more sense for zero shot classification.
+        random_accuracy = 1 / len(unique_labels)
         return random_accuracy
 
     def _save_cache(
@@ -380,6 +583,77 @@ class LabelSimilarity(BaseEvaluator):
             logger.warning(f"Failed to load cache: {e}")
             return None
 
+    def _save_label_predictions(
+        self,
+        out_dir: Path,
+        labels: np.ndarray,
+        predicted_labels: np.ndarray,
+        similarity_matrix: np.ndarray,
+        uniq: np.ndarray,
+        label_key: str,
+    ) -> None:
+        """
+        Save true and predicted labels with similarity scores as parquet and CSV.
+
+        Parameters
+        ----------
+        out_dir : Path
+            Output directory
+        labels : np.ndarray
+            True labels for each cell
+        predicted_labels : np.ndarray
+            Predicted labels for each cell
+        similarity_matrix : np.ndarray
+            Similarity matrix (N x len(uniq))
+        uniq : np.ndarray
+            Unique labels
+        label_key : str
+            Label key for filename
+        """
+        if not self.save_labels:
+            return
+
+        # Create labels directory
+        labels_dir = out_dir / "labels"
+        labels_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get max similarity scores for each cell (confidence scores)
+        max_similarities = np.max(similarity_matrix, axis=1)
+
+        # Create DataFrame with all data
+        df_data = {
+            "cell_id": np.arange(len(labels)),
+            "true_label": labels,
+            "predicted_label": predicted_labels,
+            "max_similarity": max_similarities,
+            "correct_prediction": labels == predicted_labels,
+        }
+
+        # Add individual similarity scores for each label
+        for i, label in enumerate(uniq):
+            df_data[f"similarity_{label}"] = similarity_matrix[:, i]
+
+        df = pd.DataFrame(df_data)
+
+        # Save full dataset as parquet
+        parquet_path = labels_dir / f"{label_key}_predictions.parquet"
+        df.to_parquet(parquet_path, index=False)
+        logger.info(f"Saved full label predictions to {parquet_path}")
+
+        # Save random sample as CSV for visual inspection
+        if len(df) > self.output_sample_size:
+            # Set random seed for reproducible sampling
+            np.random.seed(42)
+            sample_indices = np.random.choice(len(df), size=self.output_sample_size, replace=False)
+            df_sample = df.iloc[sample_indices].copy()
+            df_sample = df_sample.sort_values("cell_id").reset_index(drop=True)
+        else:
+            df_sample = df.copy()
+
+        csv_path = labels_dir / f"{label_key}_predictions_sample.csv"
+        df_sample.to_csv(csv_path, index=False)
+        logger.info(f"Saved sample label predictions ({len(df_sample)} cells) to {csv_path}")
+
     def compute(
         self,
         emb1: np.ndarray,
@@ -390,6 +664,7 @@ class LabelSimilarity(BaseEvaluator):
         label_kind: LabelKind,
         out_dir: Path = None,
         skip_plotting: bool = None,
+        label_to_index: dict[str, int] = None,
         **kw,
     ) -> EvalResult:
         """Compute similarity scores and ROC metrics for each unique label."""
@@ -403,18 +678,25 @@ class LabelSimilarity(BaseEvaluator):
         # Try to load from cache first
         cache_path = None
         if self.cache_results and out_dir is not None:
-            cache_path = out_dir / f"label_similarity_cache_{label_key}.pkl"
+            # In compute(), out_dir is emb_dir, so cache goes in the eval subdirectory
+            eval_dir = out_dir / "eval" / "LabelSimilarity" / label_key
+            cache_path = eval_dir / f"label_similarity_cache_{label_key}.pkl"
             cache_data = self._load_cache(cache_path)
             if cache_data is not None:
                 logger.info("Using cached similarity matrix")
                 return EvalResult(**cache_data["results"])
 
         # Compute similarity matrix once using vectorized operations
-        similarity_matrix = self._compute_similarity_matrix(emb1, emb2, labels, uniq)
+        similarity_matrix = self._compute_similarity_matrix(emb1, emb2, labels, uniq, label_to_index)
 
         # Compute results using the precomputed matrix
         out = {}
         auc_scores = []
+        per_label_accuracies = []  # For balanced accuracy calculation
+
+        # Compute predicted labels for per-label accuracy
+        predicted_indices = np.argmax(similarity_matrix, axis=1)
+        predicted_labels = uniq[predicted_indices]
 
         for i, v in enumerate(uniq):
             mask = labels == v
@@ -424,19 +706,68 @@ class LabelSimilarity(BaseEvaluator):
             _, _, roc_auc = self._compute_roc(sim, mask)
             auc_scores.append(roc_auc)
 
+            # Compute per-label accuracy (recall for this label)
+            # How often is this label predicted correctly when it's the true label?
+            if np.sum(mask) > 0:  # Only compute if this label exists in the dataset
+                correct_predictions_for_label = np.sum((labels == v) & (predicted_labels == v))
+                total_true_instances = np.sum(mask)
+                per_label_accuracy = correct_predictions_for_label / total_true_instances
+            else:
+                per_label_accuracy = 0.0
+
+            per_label_accuracies.append(per_label_accuracy)
+
             prefix = f"{v}"
             out[f"{prefix}/auc"] = float(roc_auc)
+            out[f"{prefix}/accuracy"] = float(per_label_accuracy)
 
         # Compute accuracy metrics using vectorized operations
         accuracy = self._compute_accuracy_from_matrix(similarity_matrix, labels, uniq)
         random_baseline = self._compute_random_baseline_accuracy(labels)
 
+        # Compute normalized accuracy (per-label normalization)
+        normalized_accuracy, normalized_predicted_labels = self._compute_normalized_accuracy(
+            similarity_matrix, labels, uniq
+        )
+
+        # Compute balanced normalized accuracy (per-class recall using normalized predictions)
+        normalized_per_label_accuracies = []
+        for v in uniq:
+            mask = labels == v
+            if np.sum(mask) > 0:
+                correct_predictions_for_label = np.sum((labels == v) & (normalized_predicted_labels == v))
+                total_true_instances = np.sum(mask)
+                per_label_accuracy = correct_predictions_for_label / total_true_instances
+            else:
+                per_label_accuracy = 0.0
+            normalized_per_label_accuracies.append(per_label_accuracy)
+
+        balanced_normalized_accuracy = float(np.mean(normalized_per_label_accuracies))
+
+        # Save label predictions if enabled and output directory is provided
+        if out_dir is not None:
+            # In compute(), out_dir is emb_dir, so we need to create the eval subdirectory structure
+            eval_dir = out_dir / "eval" / "LabelSimilarity" / label_key
+            self._save_label_predictions(eval_dir, labels, predicted_labels, similarity_matrix, uniq, label_key)
+
+        # Compute balanced accuracy (mean of per-class recalls)
+        balanced_accuracy = float(np.mean(per_label_accuracies))
+
         # Add mean AUC, standard deviation, and accuracy metrics
         out["mean_auc"] = float(np.mean(auc_scores))
         out["std_auc"] = float(np.std(auc_scores))
         out["accuracy"] = float(accuracy)
+        out["balanced_accuracy"] = balanced_accuracy
+        out["normalized_accuracy"] = float(normalized_accuracy)
+        out["balanced_normalized_accuracy"] = balanced_normalized_accuracy
         out["random_baseline_accuracy"] = float(random_baseline)
         out["accuracy_over_random"] = float(accuracy / random_baseline) if random_baseline > 0 else 0.0
+        out["normalized_accuracy_over_random"] = (
+            float(normalized_accuracy / random_baseline) if random_baseline > 0 else 0.0
+        )
+        out["balanced_normalized_accuracy_over_random"] = (
+            float(balanced_normalized_accuracy / random_baseline) if random_baseline > 0 else 0.0
+        )
         out["label_kind"] = label_kind.value
         out["n_labels"] = len(uniq)
 
@@ -448,9 +779,20 @@ class LabelSimilarity(BaseEvaluator):
             # Also cache label embeddings and combined UMAP for text annotations
             unique_labels = np.unique(labels)
             label_embeddings = np.zeros((len(unique_labels), emb2.shape[1]))
-            for i, label in enumerate(unique_labels):
-                label_mask = labels == label
-                label_embeddings[i] = emb2[label_mask][0]
+            if label_to_index is not None:
+                # New format: use mapping to get embeddings
+                for i, label in enumerate(unique_labels):
+                    label_str = str(label)
+                    if label_str in label_to_index:
+                        emb_idx = label_to_index[label_str]
+                        label_embeddings[i] = emb2[emb_idx]
+                    else:
+                        logger.warning(f"Label '{label}' not found in mapping, using zero embedding")
+            else:
+                # Legacy format: find first occurrence
+                for i, label in enumerate(unique_labels):
+                    label_mask = labels == label
+                    label_embeddings[i] = emb2[label_mask][0]
 
             # Compute combined UMAP
             combined_embeddings = np.vstack([emb1, label_embeddings])
@@ -482,6 +824,7 @@ class LabelSimilarity(BaseEvaluator):
         axis_tick_size: int = 10,
         frameon: bool = False,
         skip_plotting: bool = None,
+        label_to_index: dict[str, int] = None,
         **kw,
     ) -> None:
         """Generate plots for each unique label using cached similarity matrix if available."""
@@ -498,7 +841,8 @@ class LabelSimilarity(BaseEvaluator):
         uniq = np.unique(labels)
 
         # Try to load from cache first
-        cache_path = out_dir.parent / f"label_similarity_cache_{label_key}.pkl"
+        # In plot(), out_dir is already the eval subdirectory (plot_dir)
+        cache_path = out_dir / f"label_similarity_cache_{label_key}.pkl"
         cache_data = self._load_cache(cache_path)
 
         if cache_data is not None:
@@ -507,7 +851,7 @@ class LabelSimilarity(BaseEvaluator):
             umap_emb = cache_data["umap_emb"]
         else:
             # Compute from scratch
-            similarity_matrix = self._compute_similarity_matrix(emb1, emb2, labels, uniq)
+            similarity_matrix = self._compute_similarity_matrix(emb1, emb2, labels, uniq, label_to_index)
             umap_emb = self._compute_umap(emb1)
 
             # Save to cache for future use
@@ -515,29 +859,90 @@ class LabelSimilarity(BaseEvaluator):
                 # We need to compute the results again for caching
                 out = {}
                 auc_scores = []
+                per_label_accuracies = []  # For balanced accuracy calculation
+
+                # Compute predicted labels for per-label accuracy
+                predicted_indices = np.argmax(similarity_matrix, axis=1)
+                predicted_labels = uniq[predicted_indices]
+
                 for i, v in enumerate(uniq):
                     mask = labels == v
                     sim = similarity_matrix[:, i]
                     _, _, roc_auc = self._compute_roc(sim, mask)
                     auc_scores.append(roc_auc)
+
+                    # Compute per-label accuracy (recall for this label)
+                    if np.sum(mask) > 0:  # Only compute if this label exists in the dataset
+                        correct_predictions_for_label = np.sum((labels == v) & (predicted_labels == v))
+                        total_true_instances = np.sum(mask)
+                        per_label_accuracy = correct_predictions_for_label / total_true_instances
+                    else:
+                        per_label_accuracy = 0.0
+
+                    per_label_accuracies.append(per_label_accuracy)
+
                     out[f"{v}/auc"] = float(roc_auc)
+                    out[f"{v}/accuracy"] = float(per_label_accuracy)
 
                 accuracy = self._compute_accuracy_from_matrix(similarity_matrix, labels, uniq)
                 random_baseline = self._compute_random_baseline_accuracy(labels)
+
+                # Compute normalized accuracy (per-label normalization)
+                normalized_accuracy, normalized_predicted_labels_cache = self._compute_normalized_accuracy(
+                    similarity_matrix, labels, uniq
+                )
+
+                # Compute balanced normalized accuracy (per-class recall using normalized predictions)
+                normalized_per_label_accuracies = []
+                for v in uniq:
+                    mask = labels == v
+                    if np.sum(mask) > 0:
+                        correct_predictions_for_label = np.sum((labels == v) & (normalized_predicted_labels_cache == v))
+                        total_true_instances = np.sum(mask)
+                        per_label_accuracy = correct_predictions_for_label / total_true_instances
+                    else:
+                        per_label_accuracy = 0.0
+                    normalized_per_label_accuracies.append(per_label_accuracy)
+
+                balanced_normalized_accuracy = float(np.mean(normalized_per_label_accuracies))
+
+                # Compute balanced accuracy (mean of per-class recalls)
+                balanced_accuracy = float(np.mean(per_label_accuracies))
+
                 out["mean_auc"] = float(np.mean(auc_scores))
                 out["std_auc"] = float(np.std(auc_scores))
                 out["accuracy"] = float(accuracy)
+                out["balanced_accuracy"] = balanced_accuracy
+                out["normalized_accuracy"] = float(normalized_accuracy)
+                out["balanced_normalized_accuracy"] = balanced_normalized_accuracy
                 out["random_baseline_accuracy"] = float(random_baseline)
                 out["accuracy_over_random"] = float(accuracy / random_baseline) if random_baseline > 0 else 0.0
+                out["normalized_accuracy_over_random"] = (
+                    float(normalized_accuracy / random_baseline) if random_baseline > 0 else 0.0
+                )
+                out["balanced_normalized_accuracy_over_random"] = (
+                    float(balanced_normalized_accuracy / random_baseline) if random_baseline > 0 else 0.0
+                )
                 out["label_kind"] = label_kind.value
                 out["n_labels"] = len(uniq)
 
                 # Also cache label embeddings and combined UMAP for text annotations
                 unique_labels = np.unique(labels)
                 label_embeddings = np.zeros((len(unique_labels), emb2.shape[1]))
-                for i, label in enumerate(unique_labels):
-                    label_mask = labels == label
-                    label_embeddings[i] = emb2[label_mask][0]
+                if label_to_index is not None:
+                    # New format: use mapping to get embeddings
+                    for i, label in enumerate(unique_labels):
+                        label_str = str(label)
+                        if label_str in label_to_index:
+                            emb_idx = label_to_index[label_str]
+                            label_embeddings[i] = emb2[emb_idx]
+                        else:
+                            logger.warning(f"Label '{label}' not found in mapping, using zero embedding")
+                else:
+                    # Legacy format: find first occurrence
+                    for i, label in enumerate(unique_labels):
+                        label_mask = labels == label
+                        label_embeddings[i] = emb2[label_mask][0]
 
                 # Compute combined UMAP
                 combined_embeddings = np.vstack([emb1, label_embeddings])
@@ -568,13 +973,75 @@ class LabelSimilarity(BaseEvaluator):
         roc_dir = out_dir / "roc_curves"
         umap_dir = out_dir / "umap"
         hist_dir = out_dir / "histograms"
+        cm_dir = out_dir / "confusion_matrix"
 
-        for d in [roc_dir, umap_dir, hist_dir]:
+        for d in [roc_dir, umap_dir, hist_dir, cm_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
         # Compute predicted labels using the precomputed similarity matrix
         predicted_indices = np.argmax(similarity_matrix, axis=1)
         predicted_labels = uniq[predicted_indices]
+
+        # Save label predictions if enabled
+        # In plot(), out_dir is already the eval subdirectory (plot_dir)
+        self._save_label_predictions(out_dir, labels, predicted_labels, similarity_matrix, uniq, label_key)
+
+        # Plot confusion matrix
+        cm_title = f"Confusion Matrix - {label_key} ({label_kind.value})"
+        self._plot_confusion_matrix(
+            labels,
+            predicted_labels,
+            cm_dir / f"confusion_matrix.{save_format}",
+            title=cm_title,
+            normalize=True,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
+
+        # Also create unnormalized version
+        self._plot_confusion_matrix(
+            labels,
+            predicted_labels,
+            cm_dir / f"confusion_matrix_counts.{save_format}",
+            title=f"{cm_title} (Counts)",
+            normalize=False,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
+
+        # Compute normalized predictions and create normalized confusion matrix
+        _, normalized_predicted_labels = self._compute_normalized_accuracy(similarity_matrix, labels, uniq)
+
+        # Plot normalized confusion matrix
+        norm_cm_title = f"Normalized Confusion Matrix - {label_key} ({label_kind.value})"
+        self._plot_confusion_matrix(
+            labels,
+            normalized_predicted_labels,
+            cm_dir / f"confusion_matrix_normalized_predictions.{save_format}",
+            title=norm_cm_title,
+            normalize=True,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
+
+        # Also create unnormalized version of normalized predictions
+        self._plot_confusion_matrix(
+            labels,
+            normalized_predicted_labels,
+            cm_dir / f"confusion_matrix_normalized_predictions_counts.{save_format}",
+            title=f"{norm_cm_title} (Counts)",
+            normalize=False,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
 
         # Plot UMAP colored by true labels (with and without text annotations)
         unique_labels = np.unique(labels)
@@ -597,9 +1064,20 @@ class LabelSimilarity(BaseEvaluator):
 
         # Get label embeddings for each unique label
         label_embeddings = np.zeros((len(unique_labels), emb2.shape[1]))
-        for i, label in enumerate(unique_labels):
-            label_mask = labels == label
-            label_embeddings[i] = emb2[label_mask][0]  # first embedding for that label
+        if label_to_index is not None:
+            # New format: use mapping to get embeddings
+            for i, label in enumerate(unique_labels):
+                label_str = str(label)
+                if label_str in label_to_index:
+                    emb_idx = label_to_index[label_str]
+                    label_embeddings[i] = emb2[emb_idx]
+                else:
+                    logger.warning(f"Label '{label}' not found in mapping, using zero embedding")
+        else:
+            # Legacy format: find first occurrence
+            for i, label in enumerate(unique_labels):
+                label_mask = labels == label
+                label_embeddings[i] = emb2[label_mask][0]  # first embedding for that label
 
         # Compute UMAP on combined cell + label embeddings
         combined_embeddings = np.vstack([emb1, label_embeddings])
@@ -747,6 +1225,82 @@ class LabelSimilarity(BaseEvaluator):
         )
         _safe_tight_layout()
         plt.savefig(umap_dir / f"01_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Plot UMAP colored by normalized predicted labels (with and without text annotations)
+        norm_pred_color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
+        norm_pred_point_colors = [norm_pred_color_map[label] for label in normalized_predicted_labels]
+
+        # Version 1: Without text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        scatter = plt.scatter(
+            cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
+        )
+        plt.xticks([])
+        plt.yticks([])
+        _safe_tight_layout()
+
+        plt.savefig(umap_dir / f"02_normalized_predicted_labels.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Version 2: With text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        scatter = plt.scatter(
+            cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
+        )
+
+        # Fix axis limits before adding annotations to prevent plot area from expanding
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+
+        # Add text annotations with arrows to avoid overlap
+        self._add_non_overlapping_annotations(label_umap, unique_labels, fontsize=max(6, legend_fontsize - 2))
+
+        # Restore original axis limits to maintain consistent plot size
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+        plt.xticks([])
+        plt.yticks([])
+        _safe_tight_layout()
+
+        plt.savefig(umap_dir / f"02_normalized_predicted_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Create and save separate legend for normalized predictions (same as others since they use the same color scheme)
+        fig_legend, ax_legend = plt.subplots(figsize=(min(len(unique_labels) * 1.2, 12), 1), dpi=dpi)
+        ax_legend.axis("off")
+        legend_elements = [
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=norm_pred_color_map[label],
+                markersize=8,
+                label=str(label),
+                markeredgecolor="none",
+            )
+            for label in unique_labels
+        ]
+        ax_legend.legend(
+            handles=legend_elements,
+            loc="center",
+            fontsize=legend_fontsize,
+            frameon=False,
+            ncol=min(len(unique_labels), 6),
+            bbox_to_anchor=(0.5, 0.5),
+        )
+        _safe_tight_layout()
+        plt.savefig(umap_dir / f"02_normalized_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
         # Plot mean ROC curve
@@ -999,13 +1553,74 @@ class LabelSimilarity(BaseEvaluator):
         roc_dir = out_dir / "roc_curves"
         umap_dir = out_dir / "umap"
         hist_dir = out_dir / "histograms"
+        cm_dir = out_dir / "confusion_matrix"
 
-        for d in [roc_dir, umap_dir, hist_dir]:
+        for d in [roc_dir, umap_dir, hist_dir, cm_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
         # Compute predicted labels using the cached similarity matrix
         predicted_indices = np.argmax(similarity_matrix, axis=1)
         predicted_labels = uniq[predicted_indices]
+
+        # Save label predictions if enabled
+        self._save_label_predictions(out_dir, labels, predicted_labels, similarity_matrix, uniq, label_key)
+
+        # Plot confusion matrix
+        cm_title = f"Confusion Matrix - {label_key} ({label_kind.value})"
+        self._plot_confusion_matrix(
+            labels,
+            predicted_labels,
+            cm_dir / f"confusion_matrix.{save_format}",
+            title=cm_title,
+            normalize=True,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
+
+        # Also create unnormalized version
+        self._plot_confusion_matrix(
+            labels,
+            predicted_labels,
+            cm_dir / f"confusion_matrix_counts.{save_format}",
+            title=f"{cm_title} (Counts)",
+            normalize=False,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
+
+        # Compute normalized predictions and create normalized confusion matrix
+        _, normalized_predicted_labels = self._compute_normalized_accuracy(similarity_matrix, labels, uniq)
+
+        # Plot normalized confusion matrix
+        norm_cm_title = f"Normalized Confusion Matrix - {label_key} ({label_kind.value})"
+        self._plot_confusion_matrix(
+            labels,
+            normalized_predicted_labels,
+            cm_dir / f"confusion_matrix_normalized_predictions.{save_format}",
+            title=norm_cm_title,
+            normalize=True,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
+
+        # Also create unnormalized version of normalized predictions
+        self._plot_confusion_matrix(
+            labels,
+            normalized_predicted_labels,
+            cm_dir / f"confusion_matrix_normalized_predictions_counts.{save_format}",
+            title=f"{norm_cm_title} (Counts)",
+            normalize=False,
+            figsize=figsize,
+            font_size=font_size,
+            save_format=save_format,
+            dpi=dpi,
+        )
 
         # Plot UMAP colored by true labels (with and without text annotations)
         unique_labels = np.unique(labels)
@@ -1181,6 +1796,86 @@ class LabelSimilarity(BaseEvaluator):
         )
         _safe_tight_layout()
         plt.savefig(umap_dir / f"01_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Plot UMAP colored by normalized predicted labels (with and without text annotations)
+        _, normalized_predicted_labels_plot = self._compute_normalized_accuracy(similarity_matrix, labels, uniq)
+        norm_pred_color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
+        norm_pred_point_colors = [norm_pred_color_map[label] for label in normalized_predicted_labels_plot]
+
+        # Version 1: Without text annotations
+        plt.figure(figsize=figsize, dpi=dpi)
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        scatter = plt.scatter(
+            cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
+        )
+        plt.xticks([])
+        plt.yticks([])
+        _safe_tight_layout()
+
+        plt.savefig(umap_dir / f"02_normalized_predicted_labels.{save_format}", dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Version 2: With text annotations (if cached data is available)
+        if label_umap is not None:
+            plt.figure(figsize=figsize, dpi=dpi)
+            ax = plt.gca()
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+            scatter = plt.scatter(
+                cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
+            )
+
+            # Fix axis limits before adding annotations to prevent plot area from expanding
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+
+            # Add text annotations with arrows to avoid overlap
+            self._add_non_overlapping_annotations(label_umap, unique_labels, fontsize=max(6, legend_fontsize - 2))
+
+            # Restore original axis limits to maintain consistent plot size
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+
+            plt.xticks([])
+            plt.yticks([])
+            _safe_tight_layout()
+
+            plt.savefig(
+                umap_dir / f"02_normalized_predicted_labels_with_text.{save_format}", dpi=dpi, bbox_inches="tight"
+            )
+            plt.close()
+
+        # Create and save separate legend for normalized predictions (same as others since they use the same color scheme)
+        _fig_legend, ax_legend = plt.subplots(figsize=(min(len(unique_labels) * 1.2, 12), 1), dpi=dpi)
+        ax_legend.axis("off")
+        legend_elements = [
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=norm_pred_color_map[label],
+                markersize=8,
+                label=str(label),
+                markeredgecolor="none",
+            )
+            for label in unique_labels
+        ]
+        ax_legend.legend(
+            handles=legend_elements,
+            loc="center",
+            fontsize=legend_fontsize,
+            frameon=False,
+            ncol=min(len(unique_labels), 6),
+            bbox_to_anchor=(0.5, 0.5),
+        )
+        _safe_tight_layout()
+        plt.savefig(umap_dir / f"02_normalized_predicted_labels_legend.{save_format}", dpi=dpi, bbox_inches="tight")
         plt.close()
 
         # Plot mean ROC curve
