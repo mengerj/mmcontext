@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=embed
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:1            # Request amount of GPUs
-#SBATCH --mem=64G               # Request 64GB of host RAM, not GPU VRAM!
-#SBATCH --time=04:00:00         # Max job time of 1 hour
+#SBATCH --partition=slurm
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --time=48:00:00         # Max job time
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0) Define a unified RUN_ID: real job ID under SLURM, or a timestamp locally
@@ -46,14 +46,8 @@ echo "venv activated"
 ###
 # 4. Run your training script with Hydra overrides
 ##
-# only continue if cuda is available
-python3 scripts/cuda_available.py
-if [ $? -ne 0 ]; then
-    echo "CUDA is not available"
-    exit 1
-fi
 
-python3 scripts/embed_serial.py \
+python3 scripts/embed.py \
     ++hydra.run.dir="$BASE_OUT"
     # Add run.overwrite=true to force overwrite existing embeddings
     # Example: run.overwrite=true
