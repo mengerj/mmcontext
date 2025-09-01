@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 eval:
-  suite: ["LabelSimilarity"] # Standard evaluators + scib (handled separately)
+  suite: ["LabelSimilarity", "ARI"] # Standard evaluators + scib (handled separately)
   n_top_genes: 5000 # For scib
 
   # Evaluation mode settings
@@ -29,7 +29,7 @@ eval:
   point_size: 100 # Size of points in scatter plots (null uses default)
 
   # Font and text styling
-  font_size: 26 # General font size
+  font_size: 20 # General font size
   font_style: "normal" # Font style: "normal", "italic", "oblique"
   font_weight: "normal" # Font weight: "normal", "bold", "light", "heavy"
 

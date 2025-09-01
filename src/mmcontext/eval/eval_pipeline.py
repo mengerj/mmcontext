@@ -72,7 +72,7 @@ def run_scib_evaluation(cfg) -> None:
 
         # Check if required files exist
         embeddings_file = emb_dir / "embeddings.parquet"
-        adata_file = emb_dir / "subset.zarr"
+        adata_file = emb_dir / "subset.h5ad"
 
         if not embeddings_file.exists() or not adata_file.exists():
             print(f"✗ Missing required files for {dataset_name}/{model_id}")
@@ -84,7 +84,7 @@ def run_scib_evaluation(cfg) -> None:
             print(f"Loading data from: {emb_dir}")
             emb_df = pd.read_parquet(embeddings_file)
             E1 = np.vstack(emb_df["embedding"].to_numpy())
-            adata = ad.read_zarr(adata_file)
+            adata = ad.read_h5ad(adata_file)
 
             print(f"Loaded embeddings: {E1.shape}, AnnData: {adata.n_obs} obs × {adata.n_vars} vars")
 
