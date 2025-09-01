@@ -1,7 +1,8 @@
 # conf/eval.yaml
 defaults:
-  - dataset_list
-  - model_list
+  - datasets: dataset_list.yaml
+  - models: model_list.yaml
+  - _self_
 
 eval:
   suite: ["LabelSimilarity"] # Standard evaluators + scib (handled separately)
