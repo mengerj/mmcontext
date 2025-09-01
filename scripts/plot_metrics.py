@@ -30,12 +30,9 @@ def clean_metric_names(df: pd.DataFrame) -> pd.DataFrame:
 def create_combined_metric_name(row):
     """Create combined metric names for visualization."""
     # Only combine for metrics that have label and label_kind columns
-    # For LabelSimilarity/AUC metrics, only separate by label_kind, not individual label
+    # Group all metrics by label_kind only (not individual labels) so they appear in the same plot
     if pd.notna(row.get("label")) and pd.notna(row.get("label_kind")):
-        if "LabelSimilarity" in row["metric"] or "mean_auc" in row["metric"]:
-            return f"{row['metric']}_{row['label_kind']}"
-        else:
-            return f"{row['metric']}_{row['label_kind']}_{row['label']}"
+        return f"{row['metric']}_{row['label_kind']}"
     else:
         return row["metric"]
 
@@ -105,13 +102,15 @@ def create_single_metrics_plot(
                     data=metric_data,
                     y="model_name",
                     x="value",
-                    hue="dataset",
+                    hue="dataset_label",
                     palette=dataset_colors,
                     ax=ax,
                     orient="h",
                 )
             else:
-                sns.barplot(data=metric_data, x="model_name", y="value", hue="dataset", palette=dataset_colors, ax=ax)
+                sns.barplot(
+                    data=metric_data, x="model_name", y="value", hue="dataset_label", palette=dataset_colors, ax=ax
+                )
         except Exception as e:
             print(f"Error plotting {metric}: {e}")
             ax.set_title(f"{metric} (Plot error)", fontsize=font_size)
@@ -127,7 +126,7 @@ def create_single_metrics_plot(
             ax.set_xlabel("Value", fontsize=font_size)
             ax.set_ylabel("Model", fontsize=font_size)
             # Set consistent x-axis limits from 0 to 1
-            ax.set_xlim(0, 1)
+            # ax.set_xlim(0, 1)
             # Rotate y-axis labels for better readability if needed
             ax.tick_params(axis="y", labelsize=font_size - 1)
             ax.tick_params(axis="x", labelsize=font_size - 1)
@@ -135,7 +134,7 @@ def create_single_metrics_plot(
             ax.set_xlabel("Model", fontsize=font_size)
             ax.set_ylabel("Value", fontsize=font_size)
             # Set consistent y-axis limits from 0 to 1
-            ax.set_ylim(0, 1)
+            # ax.set_ylim(0, 1)
             # Rotate x-axis labels for better readability
             ax.tick_params(axis="x", rotation=45, labelsize=font_size - 1)
             ax.tick_params(axis="y", labelsize=font_size - 1)
@@ -222,11 +221,29 @@ def plot_metrics(
         print("Filtering out batch metrics (--skip-batch flag used)")
         df_clean = df_clean[df_clean["label_kind"] != "batch"]
 
+    # Create dataset-label combinations for datasets with multiple labels
+    def create_dataset_label_name(row):
+        """Create dataset name that includes label if dataset has multiple labels."""
+        dataset = row["dataset"]
+        label = row["label"]
+
+        # Count unique labels for this dataset
+        dataset_labels = df_clean[df_clean["dataset"] == dataset]["label"].nunique()
+
+        if dataset_labels > 1:
+            # Multiple labels - append label to dataset name
+            return f"{dataset}_{label}"
+        else:
+            # Single label - keep original dataset name
+            return dataset
+
+    df_clean["dataset_label"] = df_clean.apply(create_dataset_label_name, axis=1)
+
     # Create combined metric names
     df_clean["combined_metric"] = df_clean.apply(create_combined_metric_name, axis=1)
 
-    # Create legend for all datasets (shared across plots)
-    unique_datasets = sorted(df_clean["dataset"].unique())
+    # Create legend for all dataset-label combinations (shared across plots)
+    unique_datasets = sorted(df_clean["dataset_label"].unique())
     colors = sns.color_palette("husl", len(unique_datasets))
     dataset_colors = dict(zip(unique_datasets, colors, strict=False))
 
@@ -239,7 +256,9 @@ def plot_metrics(
     ].copy()
 
     # Fix the filtering for LabelSimilarity metrics to include both mean_auc and accuracy_over_random
-    labelsim_data = df_clean[df_clean["metric"].str.contains("mean_auc|accuracy_over_random")].copy()
+    labelsim_data = df_clean[
+        df_clean["metric"].str.contains("mean_auc|accuracy_over_random|accuracy|random_baseline_accuracy")
+    ].copy()
 
     # Create separate plots for each metric type
     if not scib_data.empty and not skip_scib:
@@ -270,9 +289,9 @@ def plot_metrics(
                 # Deduplicate mean_auc data since it's calculated as overall metric across all labels
                 if metric == "mean_auc":
                     print(f"Deduplicating {metric} data (removing duplicate rows with same values)...")
-                    # Keep only one row per dataset/model combination for mean_auc
+                    # Keep only one row per dataset_label/model combination for mean_auc
                     metric_data = metric_data.drop_duplicates(
-                        subset=["dataset", "model", "model_name", "metric", "value"]
+                        subset=["dataset_label", "model", "model_name", "metric", "value"]
                     )
                     print(
                         f"  Reduced from {len(labelsim_data[labelsim_data['metric'] == metric])} to {len(metric_data)} rows"
@@ -296,7 +315,8 @@ def plot_metrics(
 
     # Print summary for debugging
     print("Data summary:")
-    print(f"  Datasets: {sorted(df_clean['dataset'].unique())}")
+    print(f"  Original datasets: {sorted(df_clean['dataset'].unique())}")
+    print(f"  Dataset-label combinations: {sorted(df_clean['dataset_label'].unique())}")
     print(f"  Model names: {sorted(df_clean['model_name'].unique())}")
     print(f"  Model sources: {sorted(df_clean['model'].unique())}")
     print(f"  Original metrics: {sorted(df_clean['metric'].unique())}")

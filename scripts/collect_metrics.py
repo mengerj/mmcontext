@@ -110,11 +110,15 @@ def collect_all_metrics(cfg: DictConfig) -> pd.DataFrame:
             model_id = model_cfg.source
             model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
             text_only = model_cfg.get("text_only", False)
-            if text_only:
-                model_id = model_id + "_text_only"
 
-            # Construct path to evaluation results
-            model_dir = eval_root / dataset_name / Path(model_id).name.replace("/", "_")
+            # Use model name for directory path construction
+            model_dir_name = model_name
+            if text_only:
+                model_dir_name = model_dir_name + "_text_only"
+                model_id = model_id + "_text_only"  # Keep for backward compatibility in results
+
+            # Construct path to evaluation results using model name
+            model_dir = eval_root / dataset_name / model_dir_name
 
             if not model_dir.exists():
                 print(f"Warning: Model directory not found: {model_dir}")

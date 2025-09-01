@@ -52,12 +52,14 @@ def run_scib_evaluation(cfg) -> None:
         model_id = model_cfg.source
         model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
         text_only = model_cfg.get("text_only", False)
+        model_dir_name = model_name
         if text_only:
             model_id = model_id + "_text_only"
+            model_dir_name = model_dir_name + "_text_only"
 
         print(f"\n=== [{i + 1}/{len(tasks)}] ScIB for: {dataset_name}/{model_id} (name: {model_name}) ===")
 
-        emb_dir = Path(cfg.output.root) / dataset_name / Path(model_id).name.replace("/", "_")
+        emb_dir = Path(cfg.output.root) / dataset_name / model_dir_name
 
         # ── Check if eval directory exists and skip if requested ─────────────
         skip_if_eval_exists = cfg.eval.get("skip_if_eval_exists", False)
