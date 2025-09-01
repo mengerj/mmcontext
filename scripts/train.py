@@ -16,7 +16,6 @@ from sentence_transformers import (
     SentenceTransformerTrainingArguments,
 )
 from sentence_transformers.evaluation import SequentialEvaluator
-from sentence_transformers.util import mine_hard_negatives
 from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
@@ -29,6 +28,7 @@ from mmcontext.utils import (  # , load_test_adata_from_hf_dataset
     get_loss,
     resolve_negative_indices_and_rename,
     truncate_cell_sentences,
+    truncate_semantic_cell_sentences_dataset,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,16 +189,17 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
             if not text_only:
                 requires_embedding_method = True
 
-            if text_only and layer_axis != "var":
-                errors.append(
-                    f"Omics dataset '{dataset_name}' (index {i}): text_only=true requires layer_axis='var', "
-                    f"but got layer_axis='{layer_axis}'"
-                )
-            elif not text_only and layer_axis != "obs":
-                errors.append(
-                    f"Omics dataset '{dataset_name}' (index {i}): text_only=false requires layer_axis='obs', "
-                    f"but got layer_axis='{layer_axis}'"
-                )
+            if layer_axis is not None:
+                if text_only and layer_axis != "var":
+                    errors.append(
+                        f"Omics dataset '{dataset_name}' (index {i}): text_only=true requires layer_axis='var', "
+                        f"but got layer_axis='{layer_axis}'"
+                    )
+                elif not text_only and layer_axis != "obs":
+                    errors.append(
+                        f"Omics dataset '{dataset_name}' (index {i}): text_only=false requires layer_axis='obs', "
+                        f"but got layer_axis='{layer_axis}'"
+                    )
 
             # Validate keep_columns consistency with layer_axis
             keep_columns = getattr(dataset_config, "keep_columns", None)
@@ -251,7 +252,8 @@ def generate_revision_name(dataset_config: DictConfig) -> str:
 
     # Add layer axis
     layer_axis = getattr(dataset_config, "layer_axis", "obs")
-    parts.append(layer_axis)
+    if layer_axis is not None:
+        parts.append(layer_axis)
 
     # Add gene filter strings if layer_axis is var
     if layer_axis == "var":
@@ -265,6 +267,8 @@ def generate_revision_name(dataset_config: DictConfig) -> str:
         cs_length = getattr(dataset_config, "cs_length", None)
         if cs_length and cs_length > 0:
             parts.append(f"cs{cs_length}")
+    elif layer_axis is None:
+        parts.append("semantic_cs")
 
     return "_".join(parts)
 
@@ -404,7 +408,7 @@ def prepare_ds(
         # Apply truncation to all splits that contain the specified column
         truncated_dataset = {}
         for split_name, split_data in dataset.items():
-            if dataset_cs_col in split_data.column_names:
+            if dataset_cs_col in split_data.column_names and dataset_cs_col == "cell_sentence_2":
                 truncated_dataset[split_name] = truncate_cell_sentences(
                     split_data,
                     dataset_cs_col,
@@ -412,6 +416,24 @@ def prepare_ds(
                     filter_strings=dataset_config.get("gene_filter_strings", None),
                 )
                 logger.info(f"  Truncated {split_name} split")
+            elif (
+                dataset_cs_col in split_data.column_names
+                and dataset_cs_col == "cell_sentence_3"
+                or dataset_cs_col == "cell_sentence_4"
+            ):
+                truncated_dataset[split_name] = truncate_semantic_cell_sentences_dataset(
+                    split_data,
+                    "cell_sentence_3",
+                    dataset_cs_length,
+                    filter_strings=dataset_config.get("gene_filter_strings", None),
+                )
+                truncated_dataset[split_name] = truncate_semantic_cell_sentences_dataset(
+                    truncated_dataset[split_name],
+                    "cell_sentence_4",
+                    dataset_cs_length,
+                    filter_strings=dataset_config.get("gene_filter_strings", None),
+                )
+
             else:
                 truncated_dataset[split_name] = split_data
                 logger.info(f"  Column '{dataset_cs_col}' not found in {split_name} split, keeping original")
@@ -671,8 +693,10 @@ def main(cfg: DictConfig):
                 # Determine primary cell sentence column based on layer_axis only
                 if layer_axis == "var":
                     primary_cell_sentence = "cell_sentence_2"  # Gene-based
-                else:
+                elif layer_axis == "obs":
                     primary_cell_sentence = "cell_sentence_1"  # Cell-based
+                else:
+                    primary_cell_sentence = dataset_config.get("keep_columns", ["cell_sentence_1"])[0]
 
                 logger.info(
                     f"Dataset '{dataset_name}' using layer_axis='{layer_axis}', primary_cell_sentence='{primary_cell_sentence}'"
@@ -730,7 +754,12 @@ def main(cfg: DictConfig):
                     )
 
                     # Push processed dataset as new revision if enabled
-                    if getattr(cfg, "auto_push_processed_datasets", False) and dataset_cs_length and dataset_cs_length > 0 and dataset_cs_col:
+                    if (
+                        getattr(cfg, "auto_push_processed_datasets", False)
+                        and dataset_cs_length
+                        and dataset_cs_length > 0
+                        and dataset_cs_col
+                    ):
                         push_success = push_dataset_revision(
                             dataset_ready,
                             dataset_name,
@@ -746,7 +775,9 @@ def main(cfg: DictConfig):
                             f"Dataset processed. Set auto_push_processed_datasets=true to automatically push as revision '{revision_name}'"
                         )
                     else:
-                        logger.info(f"Dataset '{dataset_name}' does not use cell sentence truncation - skipping revision upload.")
+                        logger.info(
+                            f"Dataset '{dataset_name}' does not use cell sentence truncation - skipping revision upload."
+                        )
 
                 # Log final dataset info
                 logger.info(f"Dataset ready - Keys: {list(dataset_ready.keys())}")
