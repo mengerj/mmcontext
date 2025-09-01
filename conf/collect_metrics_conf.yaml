@@ -39,5 +39,5 @@ collect_metrics:
     # Add more as needed
 
   # Label configurations to include
-  bio_labels: ["celltype", "cell_type"] # Can be overridden per dataset
-  batch_labels: ["tech", "batch", "donor"] # Can be overridden per dataset
+  #bio_labels: ["celltype", "cell_type"] # Can be overridden per dataset
+  #batch_labels: ["tech", "batch", "donor"] # Can be overridden per dataset

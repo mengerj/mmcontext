@@ -10,10 +10,11 @@ eval:
   # Evaluation mode settings
   skip_plotting: false # If true, skip plotting
   plot_only: false # If true, skip computation and only regenerate plots from cached data
-  skip_missing_cache: true # If true, skip datasets/models without cache when plot_only=true
+  skip_missing_cache: false # If true, skip datasets/models without cache when plot_only=true
+  skip_if_eval_exists: false # If true, skip processing if eval directory already exists
 
   # Parallelization settings
-  enable_parallel: true # Enable parallel processing of dataset/model combinations
+  enable_parallel: false # Enable parallel processing of dataset/model combinations
   max_workers: null # Maximum number of parallel workers (null = auto-detect CPU count)
   task_timeout: 3600 # Maximum time (seconds) per dataset/model combination (1 hour default)
 
