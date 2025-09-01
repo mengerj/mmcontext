@@ -45,6 +45,7 @@ def run_scib_evaluation(cfg) -> None:
 
     successful = 0
     failed = 0
+    skipped = 0
 
     for i, (ds_cfg, model_cfg) in enumerate(tasks):
         dataset_name = ds_cfg.name
@@ -57,6 +58,15 @@ def run_scib_evaluation(cfg) -> None:
         print(f"\n=== [{i + 1}/{len(tasks)}] ScIB for: {dataset_name}/{model_id} (name: {model_name}) ===")
 
         emb_dir = Path(cfg.output.root) / dataset_name / Path(model_id).name.replace("/", "_")
+
+        # ── Check if eval directory exists and skip if requested ─────────────
+        skip_if_eval_exists = cfg.eval.get("skip_if_eval_exists", False)
+        eval_dir = emb_dir / "eval"
+
+        if skip_if_eval_exists and eval_dir.exists():
+            print(f"↷ Skipping {dataset_name}/{model_id} - eval directory already exists: {eval_dir}")
+            skipped += 1
+            continue
 
         # Check if required files exist
         embeddings_file = emb_dir / "embeddings.parquet"
@@ -149,6 +159,7 @@ def run_scib_evaluation(cfg) -> None:
     print("\n=== ScIB Evaluation Summary ===")
     print(f"Total tasks: {len(tasks)}")
     print(f"Successful: {successful}")
+    print(f"Skipped: {skipped}")
     print(f"Failed: {failed}")
     print(f"Success rate: {successful / len(tasks) * 100:.1f}%")
 
@@ -196,6 +207,14 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
 
     emb_dir = Path(output_root) / dataset_name / Path(model_name).name.replace("/", "_")
     logger.info(f"Looking for embeddings in: {emb_dir}")
+
+    # ── Check if eval directory exists and skip if requested ─────────────
+    skip_if_eval_exists = eval_cfg.get("skip_if_eval_exists", False)
+    eval_dir = emb_dir / "eval"
+
+    if skip_if_eval_exists and eval_dir.exists():
+        logger.info(f"Skipping {dataset_name}/{model_name} - eval directory already exists: {eval_dir}")
+        return []  # Return empty list to indicate skipped
 
     # ── Handle plot-only mode ───────────────────────────────────────
     if plot_only:
@@ -445,7 +464,7 @@ def _process_single_worker(args):
 
     Returns
     -------
-        Tuple of (dataset_name, model_id, success, result_count, error_msg)
+        Tuple of (dataset_name, model_id, success, result_count, error_msg, was_skipped)
     """
     import os
     import sys
@@ -476,11 +495,18 @@ def _process_single_worker(args):
     try:
         results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root)
 
+        # Check if this was skipped (empty results + skip flag enabled)
+        was_skipped = False
+        if len(results) == 0 and eval_cfg.get("skip_if_eval_exists", False):
+            eval_dir = Path(output_root) / dataset_name / Path(model_name).name.replace("/", "_") / "eval"
+            if eval_dir.exists():
+                was_skipped = True
+
         elapsed_time = time.time() - start_time
         worker_logger.info(
             f"Completed processing: {dataset_name}/{model_id} (name: {model_name}) in {elapsed_time:.1f}s"
         )
-        return dataset_name, model_id, True, len(results), None
+        return dataset_name, model_id, True, len(results), None, was_skipped
 
     except Exception as e:
         # Get full traceback for debugging
@@ -489,7 +515,7 @@ def _process_single_worker(args):
         worker_logger.error(
             f"Error processing {dataset_name}/{model_id} (name: {model_name}) after {elapsed_time:.1f}s: {error_msg}"
         )
-        return dataset_name, model_id, False, 0, str(e)
+        return dataset_name, model_id, False, 0, str(e), False
 
 
 def run_eval_suite(cfg) -> None:
@@ -535,6 +561,7 @@ def run_eval_suite(cfg) -> None:
         print("Running in sequential mode...")
         successful = 0
         failed = 0
+        skipped = 0
 
         for i, (ds_cfg, model_cfg, eval_cfg, output_root) in enumerate(tasks):
             dataset_name = ds_cfg.name
@@ -551,6 +578,17 @@ def run_eval_suite(cfg) -> None:
             try:
                 results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root)
                 task_time = time.time() - task_start
+
+                if len(results) == 0 and eval_cfg.get("skip_if_eval_exists", False):
+                    # Check if this was actually skipped (empty results + skip flag enabled)
+                    eval_dir = Path(output_root) / dataset_name / Path(model_name).name.replace("/", "_") / "eval"
+                    if eval_dir.exists():
+                        skipped += 1
+                        print(
+                            f"↷ Skipped {model_id} (name: {model_name}) for dataset {dataset_name} - eval directory exists ({task_time:.1f}s)"
+                        )
+                        continue
+
                 successful += 1
                 print(
                     f"✓ Completed processing model {model_id} (name: {model_name}) for dataset {dataset_name} ({task_time:.1f}s)"
@@ -573,6 +611,7 @@ def run_eval_suite(cfg) -> None:
         print("\n=== Summary ===")
         print(f"Total tasks: {len(tasks)}")
         print(f"Successful: {successful}")
+        print(f"Skipped: {skipped}")
         print(f"Failed: {failed}")
         print(f"Success rate: {successful / len(tasks) * 100:.1f}%")
         print(f"Total time: {total_time:.1f}s")
@@ -604,6 +643,7 @@ def run_eval_suite(cfg) -> None:
             completed = 0
             successful = 0
             failed = 0
+            skipped = 0
             timed_out = 0
 
             try:
@@ -614,16 +654,22 @@ def run_eval_suite(cfg) -> None:
 
                     try:
                         # Get result with timeout
-                        dataset_name_result, model_id_result, success, result_count, error_msg = future.result(
-                            timeout=10
+                        dataset_name_result, model_id_result, success, result_count, error_msg, was_skipped = (
+                            future.result(timeout=10)
                         )
 
                         if success:
-                            successful += 1
-                            print(
-                                f"✓ [{completed}/{len(tasks)}] Completed: {dataset_name_result}/{model_id_result} (name: {model_name}) ({task_time:.1f}s)"
-                            )
-                            print(f"  → {result_count} evaluation metrics")
+                            if was_skipped:
+                                skipped += 1
+                                print(
+                                    f"↷ [{completed}/{len(tasks)}] Skipped: {dataset_name_result}/{model_id_result} (name: {model_name}) - eval exists ({task_time:.1f}s)"
+                                )
+                            else:
+                                successful += 1
+                                print(
+                                    f"✓ [{completed}/{len(tasks)}] Completed: {dataset_name_result}/{model_id_result} (name: {model_name}) ({task_time:.1f}s)"
+                                )
+                                print(f"  → {result_count} evaluation metrics")
                         else:
                             failed += 1
                             print(
@@ -664,6 +710,7 @@ def run_eval_suite(cfg) -> None:
             print("\n=== Summary ===")
             print(f"Total tasks: {len(tasks)}")
             print(f"Successful: {successful}")
+            print(f"Skipped: {skipped}")
             print(f"Failed: {failed}")
             if timed_out > 0:
                 print(f"Timed out: {timed_out}")

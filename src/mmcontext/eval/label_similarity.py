@@ -191,6 +191,7 @@ class LabelSimilarity(BaseEvaluator):
         font_size: int = 12,
         save_format: str = "png",
         dpi: int = 300,
+        show_annotations: bool = None,
     ) -> None:
         """
         Plot a confusion matrix heatmap comparing true and predicted labels.
@@ -215,6 +216,8 @@ class LabelSimilarity(BaseEvaluator):
             Format for saving the plot
         dpi : int
             DPI for the saved plot
+        show_annotations : bool, optional
+            Whether to show numerical annotations. If None, defaults to False for normalized matrices, True for count matrices
         """
         # Convert to pandas Series and ensure string type for consistent handling
         true_labels = pd.Series(true_labels).astype(str)
@@ -231,6 +234,11 @@ class LabelSimilarity(BaseEvaluator):
             cm = cm.astype("float") / cm.sum(axis=1, keepdims=True)
             cm = np.nan_to_num(cm)  # handle divide-by-zero cases
 
+        # Determine whether to show annotations
+        if show_annotations is None:
+            # Default: show annotations for count matrices, hide for normalized matrices
+            show_annotations = not normalize
+
         # Adjust figure size based on number of labels
         width_per_label = 0.7
         height_per_label = 0.7
@@ -242,14 +250,14 @@ class LabelSimilarity(BaseEvaluator):
         # Create heatmap
         ax = sns.heatmap(
             cm,
-            annot=True,
+            annot=show_annotations,
             square=True,
             fmt=".2f" if normalize else "d",
             cmap="Blues",
             xticklabels=labels,
             yticklabels=labels,
             cbar_kws={"label": "Proportion" if normalize else "Count", "shrink": 0.6, "aspect": 20},
-            annot_kws={"size": max(6, font_size - 2)},  # Slightly smaller font for annotations
+            annot_kws={"size": max(6, font_size - 2)} if show_annotations else {},  # Only set if showing annotations
             vmax=1.0 if normalize else None,
             vmin=0,
         )
