@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+from collections.abc import Iterable
 from datetime import datetime
 
 import anndata
@@ -126,6 +128,408 @@ def truncate_cell_sentences(
         logger.info(f"Gene filtering and truncation completed for {len(processed_dataset)} samples")
 
     return processed_dataset
+
+
+_GENE_TOKEN_RE = re.compile(r"[A-Z0-9-]+")  # fast & permissive for symbols like MT-CO1, RPS27A
+
+
+def _is_gene_like(raw: str) -> bool:
+    """Return True if `raw` looks like a gene symbol (uppercase, digits, hyphens)."""
+    if not raw:
+        return False
+    tok = raw.strip()
+    # trim common trailing punctuation/quotes
+    for char in ".''\"":
+        tok = tok.strip(char)
+    if tok in {"...", "…"}:
+        return False
+    # Some datasets inject 'and' in lists: make it not gene-like.
+    if tok.upper() in {"AND"}:
+        return False
+    # Require uppercase-ish & pattern match
+    return tok == tok.upper() and bool(_GENE_TOKEN_RE.fullmatch(tok)) and len(tok) >= 2
+
+
+def _is_actual_gene_symbol(token: str) -> bool:
+    """
+    Return True if the token is likely a gene symbol, filtering out common English words.
+
+    This is a more restrictive check than _is_gene_like to avoid false positives
+    with common English words that happen to be uppercase.
+    """
+    if not token:
+        return False
+
+    # Common English words that shouldn't be considered genes
+    common_words = {
+        "GENES",
+        "LIKE",
+        "ARE",
+        "IS",
+        "THE",
+        "AND",
+        "OR",
+        "OF",
+        "IN",
+        "TO",
+        "FOR",
+        "WITH",
+        "HALLMARKS",
+        "MARKERS",
+        "EXPRESSION",
+        "LEVELS",
+        "HIGH",
+        "LOW",
+        "POSITIVE",
+        "NEGATIVE",
+        "CELL",
+        "CELLS",
+        "TYPE",
+        "TYPES",
+        "TISSUE",
+        "TISSUES",
+        "SAMPLE",
+        "SAMPLES",
+        "EFFECTOR",
+        "MEMORY",
+        "NAIVE",
+        "ACTIVATED",
+        "RESTING",
+        "PROLIFERATING",
+        "ALPHA",
+        "BETA",
+        "GAMMA",
+        "DELTA",
+        "EPSILON",
+        "ZETA",
+        "ETA",
+        "THETA",
+        "ALPHA-BETA",
+        "CD8-POSITIVE",
+        "CD4-POSITIVE",
+        "CD8-NEGATIVE",
+        "CD4-NEGATIVE",
+        "TERMINALLY",
+        "DIFFERENTIATED",
+        "UNDIFFERENTIATED",
+        "MATURE",
+        "IMMATURE",
+        "IMPORTANT",
+        "KEY",
+        "MAIN",
+        "MAJOR",
+        "MINOR",
+        "SIGNIFICANT",
+        "CRITICAL",
+        "SHOWS",
+        "SHOW",
+        "DEMONSTRATES",
+        "INDICATE",
+        "INDICATES",
+        "SUGGEST",
+        "SUGGESTS",
+        "ACTIVITY",
+        "FUNCTION",
+        "ROLE",
+        "PATHWAY",
+        "PATHWAYS",
+        "NETWORK",
+        "NETWORKS",
+    }
+
+    if token.upper() in common_words:
+        return False
+
+    # Require at least one digit OR a hyphen (many gene symbols have these)
+    # This helps distinguish gene symbols from common English words
+    has_digit = any(c.isdigit() for c in token)
+    has_hyphen = "-" in token
+
+    # If it's a short token (2-3 chars) without digits or hyphens, be more restrictive
+    if len(token) <= 3 and not (has_digit or has_hyphen):
+        # Allow some known short gene patterns
+        if token in {"TP53", "MYC", "RAS", "AKT", "MDM", "BCL", "BAX", "BAD", "BID"}:
+            return True
+        # Reject purely alphabetic short tokens that are likely English words
+        if token.isalpha():
+            return False
+
+    return True
+
+
+def _clean_gene_token(raw: str) -> str:
+    """Normalize a raw token into a clean gene symbol (strip punctuation/whitespace)."""
+    return raw.strip().strip(".,;:!'’\"").upper()
+
+
+def _find_gene_span(parts: list[str]) -> tuple[int, int]:
+    """
+    Find a gene sppan
+
+    From a list of comma-split parts, find the start/end indices [start, end)
+    of the longest contiguous run where most items are gene-like.
+
+    Returns
+    -------
+    start : int
+        Inclusive start index of the best span.
+    end : int
+        Exclusive end index of the best span.
+    """
+    best_start = best_end = 0
+    start = 0
+    while start < len(parts):
+        # Skip non-gene-like until we hit a gene-like token
+        while start < len(parts) and not _is_gene_like(parts[start].strip()):
+            start += 1
+        if start >= len(parts):
+            break
+        end = start
+        while end < len(parts) and _is_gene_like(parts[end].strip()):
+            end += 1
+        if (end - start) > (best_end - best_start):
+            best_start, best_end = start, end
+        start = end + 1
+    return best_start, best_end
+
+
+def truncate_semantic_cell_sentence(
+    sentence: str,
+    max_genes: int,
+    filter_strings: Iterable[str] | None = None,
+    add_ellipsis_when_truncated: bool = True,
+) -> str:
+    """
+    Truncate the gene list inside a semantic cell sentence
+
+    Truncate the comma-separated gene list inside a semantic cell sentence, preserving
+    any prose before/after the list.
+
+    Parameters
+    ----------
+    sentence : str
+        A sentence containing arbitrary prose with a long, comma-separated list of gene symbols.
+        Example: "Genes like MALAT1, EEF1A1, MT-CO1, ... are hallmarks of ..."
+    max_genes : int
+        Maximum number of genes to keep from the detected list (from the start of the list).
+    filter_strings : Iterable[str], optional
+        Substrings; any gene containing any of these will be removed prior to truncation
+        (e.g., ['RPS', 'RPL'] to drop ribosomal genes).
+    add_ellipsis_when_truncated : bool, default True
+        If True, append an ellipsis right after the truncated gene list when there were
+        more genes originally.
+
+    Returns
+    -------
+    str
+        The sentence with its gene list filtered and truncated, with all non-gene text preserved.
+
+    Notes
+    -----
+    - Gene span detection uses the longest contiguous run of "gene-like" tokens between commas.
+    - "Gene-like" ≈ uppercase alphanumerics with optional hyphens, length ≥ 2.
+    - Gracefully ignores tokens like "...", "and", and trailing punctuation.
+    """
+    if max_genes <= 0:
+        # Degenerate request: drop the gene list entirely
+        parts = list(sentence.split(","))
+        s, e = _find_gene_span(parts)
+        if e <= s:
+            return sentence  # no detected list
+        prefix = ", ".join(parts[:s]).strip()
+        suffix = ", ".join(parts[e:]).strip()
+        glue_left = (prefix + ", ") if prefix else ""
+        glue_right = (", " + suffix) if suffix else ""
+        return (glue_left + glue_right).strip().strip(", ")
+
+    # Optimized gene extraction: find first and last gene positions, assume genes in between
+    parts = sentence.split(",")
+
+    # Find first part containing a gene (search from start)
+    first_gene_part = -1
+    first_gene = None
+    for i, part in enumerate(parts):
+        tokens = part.strip().split()
+        for token in tokens:
+            clean_token = _clean_gene_token(token)
+            if _is_gene_like(clean_token) and _is_actual_gene_symbol(clean_token):
+                first_gene_part = i
+                first_gene = clean_token
+                break
+        if first_gene_part != -1:
+            break
+
+    # Find last part containing a gene (search from end)
+    last_gene_part = -1
+    last_gene = None
+    for i in range(len(parts) - 1, -1, -1):
+        part = parts[i]
+        tokens = part.strip().split()
+        for token in tokens:
+            clean_token = _clean_gene_token(token)
+            if _is_gene_like(clean_token) and _is_actual_gene_symbol(clean_token):
+                last_gene_part = i
+                last_gene = clean_token
+                break
+        if last_gene_part != -1:
+            break
+
+    # If no genes found, return original
+    if first_gene_part == -1 or last_gene_part == -1:
+        return sentence
+
+    # Extract genes: first gene + all parts between + last gene (if different)
+    original_genes = [first_gene]
+
+    # Add genes from intermediate parts (assume they are all genes)
+    for i in range(first_gene_part + 1, last_gene_part):
+        part_clean = _clean_gene_token(parts[i])
+        if part_clean:  # Only add non-empty cleaned tokens
+            original_genes.append(part_clean)
+
+    # Add last gene if it's different from first
+    if last_gene_part != first_gene_part and last_gene:
+        original_genes.append(last_gene)
+
+    # Optional filtering
+    filtered_genes = original_genes
+    if filter_strings:
+        fs = list(filter_strings)
+        filtered_genes = []
+        for g in original_genes:
+            if not any(f in g for f in fs):
+                filtered_genes.append(g)
+
+    # Truncate to max_genes (no ellipsis)
+    truncated_genes = filtered_genes[:max_genes]
+
+    # Simple replacement approach: replace the original gene sequence with truncated list
+    original_sequence = ", ".join(original_genes)
+    truncated_sequence = ", ".join(truncated_genes)
+
+    # Try to find and replace the gene sequence
+    if original_sequence in sentence:
+        result = sentence.replace(original_sequence, truncated_sequence, 1)
+    else:
+        # Fallback: more complex replacement by removing genes one by one
+        result = sentence
+
+        # Remove genes that are not in the truncated list
+        genes_to_remove = []
+        if filter_strings:
+            # If filtering, remove filtered genes
+            for gene in original_genes:
+                if any(f in gene for f in filter_strings):
+                    genes_to_remove.append(gene)
+
+        # Also remove genes beyond max_genes from the filtered list
+        if len(filtered_genes) > max_genes:
+            genes_to_remove.extend(filtered_genes[max_genes:])
+
+        # Remove the unwanted genes
+        for gene in genes_to_remove:
+            # Try different patterns to remove the gene
+            patterns_to_try = [
+                f", {gene},",  # middle gene
+                f", {gene} ",  # gene followed by space
+                f" {gene},",  # gene preceded by space
+                f" {gene} ",  # gene with spaces
+                gene,  # just the gene
+            ]
+
+            for pattern in patterns_to_try:
+                if pattern in result:
+                    if pattern == f", {gene},":
+                        result = result.replace(pattern, ",", 1)
+                    elif pattern == f", {gene} ":
+                        result = result.replace(pattern, " ", 1)
+                    elif pattern == f" {gene},":
+                        result = result.replace(pattern, ",", 1)
+                    elif pattern == f" {gene} ":
+                        result = result.replace(pattern, " ", 1)
+                    else:
+                        result = result.replace(pattern, "", 1)
+                    break
+
+    # Clean up extra spaces and commas
+    result = result.replace("  ", " ").replace(", ,", ",").replace(",,", ",")
+    result = result.strip()
+
+    # Ensure sentence-ending punctuation is preserved
+    if sentence.rstrip()[-1:] in {".", "!", "?"} and result.rstrip()[-1:] not in {".", "!", "?"}:
+        result += "."
+
+    return result
+
+
+def truncate_semantic_cell_sentences_dataset(
+    dataset,
+    column_name: str,
+    max_genes: int,
+    num_proc: int | None = None,
+    filter_strings: list[str] | None = None,
+    add_ellipsis_when_truncated: bool = False,
+):
+    """
+    Vectorized version for HuggingFace Datasets.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        HuggingFace dataset containing semantic cell sentences.
+    column_name : str
+        Name of the column with the semantic cell sentences.
+    max_genes : int
+        Maximum number of genes to keep from the detected gene list.
+    num_proc : int, optional
+        Parallel workers; auto-chosen based on dataset size if None.
+    filter_strings : list of str, optional
+        Substrings to filter out from the gene symbols.
+    add_ellipsis_when_truncated : bool, default True
+        Append ellipsis if truncation occurred.
+
+    Returns
+    -------
+    Dataset
+        Dataset with truncated semantic cell sentences in `column_name`.
+    """
+
+    def _process_batch(batch):
+        out = []
+        for s in batch[column_name]:
+            out.append(
+                truncate_semantic_cell_sentence(
+                    s,
+                    max_genes=max_genes,
+                    filter_strings=filter_strings,
+                    add_ellipsis_when_truncated=add_ellipsis_when_truncated,
+                )
+            )
+        batch[column_name] = out
+        return batch
+
+    # Auto determine num_proc
+    if num_proc is None:
+        sz = len(dataset)
+        if sz > 50000:
+            import os
+
+            num_proc = min(os.cpu_count() or 1, 4)
+        else:
+            num_proc = 1
+
+    desc = f"Truncating gene lists in '{column_name}' to {max_genes}"
+    if filter_strings:
+        desc += f" (filter: {filter_strings})"
+
+    return dataset.map(
+        _process_batch,
+        batched=True,
+        batch_size=10000,
+        desc=desc,
+        load_from_cache_file=False,
+        num_proc=num_proc,
+    )
 
 
 def consolidate_low_frequency_categories(
