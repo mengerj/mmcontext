@@ -233,8 +233,8 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         E1 = np.vstack(emb_df["embedding"].to_numpy())
         logger.info(f"✓ Stacked embeddings: {E1.shape}")
 
-        logger.info(f"Loading AnnData from: {emb_dir / 'subset.zarr'}")
-        adata = ad.read_zarr(emb_dir / "subset.zarr")
+        logger.info(f"Loading AnnData from: {emb_dir / 'subset.h5ad'}")
+        adata = ad.read_h5ad(emb_dir / "subset.h5ad")
         logger.info(f"✓ Loaded AnnData: {adata.n_obs} obs × {adata.n_vars} vars")
 
     except FileNotFoundError as e:
