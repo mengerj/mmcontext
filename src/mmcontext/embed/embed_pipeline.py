@@ -38,7 +38,7 @@ def check_required_files_exist(out_dir: Path, output_format: str) -> bool:
 
 
 def process_single_dataset_model(
-    ds_cfg, model_cfg, run_cfg, output_root, output_format, adata_cache
+    ds_cfg, model_cfg, run_cfg, output_root, output_format, adata_cache, hf_cache=None
 ) -> tuple[str, str, bool, str]:
     """
     Process a single dataset/model combination for embedding generation.
@@ -57,6 +57,8 @@ def process_single_dataset_model(
         Output format (resolved)
     adata_cache : str
         AnnData cache directory (resolved)
+    hf_cache : str, optional
+        HuggingFace cache directory (resolved). If None, uses run_cfg.hf_cache for backward compatibility.
 
     Returns
     -------
@@ -93,13 +95,16 @@ def process_single_dataset_model(
     try:
         # Load dataset
         adata_download_dir = Path(adata_cache) / ds_cfg.name
+        # Use hf_cache parameter if provided, otherwise fall back to run_cfg.hf_cache for backward compatibility
+        cache_dir = hf_cache if hf_cache is not None else getattr(run_cfg, "hf_cache", None)
+
         raw_ds = load_generic_dataset(
             source=ds_cfg.source,
             fmt=ds_cfg.format,
             split=ds_cfg.get("split", "test"),
             max_rows=run_cfg.n_rows,
             seed=run_cfg.seed,
-            cache_dir=run_cfg.hf_cache_dir,
+            cache_dir=cache_dir,
         )
         numeric_data_available = "share_link" in raw_ds.column_names
 
