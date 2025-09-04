@@ -45,6 +45,7 @@ def load_generic_dataset(
     split: str | None,
     max_rows: int | None,
     seed: int,
+    cache_dir: str | Path | None = None,
 ) -> Dataset:
     """
     Load a dataset in Arrow (hub / on-disk) **or** CSV form.
@@ -64,15 +65,15 @@ def load_generic_dataset(
     if fmt == "hub":
         if max_rows is not None:
             # Use streaming to load only the requested number of rows
-            ds_iter = load_dataset(str(source), split=split or "test", streaming=True)
+            ds_iter = load_dataset(str(source), split=split or "test", streaming=True, cache_dir=cache_dir)
             # Convert iterator to list with the requested number of items
             subset_list = list(islice(ds_iter, max_rows))
             ds = Dataset.from_list(subset_list)
             logger.info("Loaded %s via streaming (%d rows)", fmt, len(ds))
         else:
             # Load the full dataset if no max_rows specified
-            ds = load_dataset(str(source), split=split or "test", download_mode="force_redownload")
-            logger.info("Loaded %s (%d rows)", fmt, len(ds))
+            ds = load_dataset(str(source), split=split or "test", download_mode="force_redownload", cache_dir=cache_dir)
+            logger.info("Loaded %s (%d rows). Data stored in %s", fmt, len(ds), cache_dir)
     elif fmt == "hf_disk":
         disk = load_from_disk(str(source))
         ds = disk[split] if split else disk
