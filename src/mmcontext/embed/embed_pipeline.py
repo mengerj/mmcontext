@@ -99,6 +99,7 @@ def process_single_dataset_model(
             split=ds_cfg.get("split", "test"),
             max_rows=run_cfg.n_rows,
             seed=run_cfg.seed,
+            cache_dir=run_cfg.hf_cache_dir,
         )
         numeric_data_available = "share_link" in raw_ds.column_names
 
@@ -166,8 +167,8 @@ def process_single_dataset_model(
 
         # Handle label embeddings if available
         if adata_subset is not None:
-            subset_out = out_dir / "subset.zarr"
-            adata_subset.write_zarr(subset_out)
+            subset_out = out_dir / "subset.h5ad"
+            adata_subset.write_h5ad(subset_out)
             logger.info("Wrote subset AnnData → %s", subset_out)
             # Define label types and their output prefixes
             label_types = {"bio_label_list": "bio_label_embeddings", "batch_label_list": "batch_label_embeddings"}
