@@ -113,7 +113,7 @@ def process_single_dataset_model(
             revision_name = generate_revision_name(ds_cfg)
 
             # Check if revision exists and load it if available
-            if revision_name != "processed" and check_revision_exists(ds_cfg.name, revision_name):
+            if revision_name != "processed" and check_revision_exists(ds_cfg.source, revision_name):
                 logger.info(f"Found existing revision '{revision_name}' for dataset '{ds_cfg.name}', loading directly")
                 raw_ds = load_generic_dataset(
                     source=ds_cfg.source,
@@ -171,7 +171,7 @@ def process_single_dataset_model(
             if use_revisions and ds_cfg.format == "hub" and revision_name != "processed":
                 push_success = push_dataset_revision(
                     raw_ds,
-                    ds_cfg.name,
+                    ds_cfg.source,
                     revision_name,
                     commit_message=f"Processed dataset with {revision_name} settings",
                 )

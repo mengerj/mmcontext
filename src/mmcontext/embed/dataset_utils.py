@@ -280,18 +280,16 @@ def generate_revision_name(dataset_config: dict) -> str:
     return "_".join(parts) if parts else "processed"
 
 
-def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-mengr") -> bool:
+def check_revision_exists(dataset_source: str, revision: str) -> bool:
     """
     Check if a specific revision exists for a dataset on Hugging Face Hub.
 
     Parameters
     ----------
-    dataset_name : str
-        Name of the dataset
+    dataset_source : str
+        Full dataset source (e.g., "jo-mengr/dataset_name")
     revision : str
         Revision name to check
-    username : str, optional
-        Username/organization on Hugging Face Hub (default: "jo-mengr")
 
     Returns
     -------
@@ -300,9 +298,8 @@ def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-
     """
     try:
         api = HfApi()
-        full_dataset_name = f"{username}/{dataset_name}"
         # Try to get dataset info with specific revision
-        api.dataset_info(full_dataset_name, revision=revision)
+        api.dataset_info(dataset_source, revision=revision)
         return True
     except Exception:
         # If any error occurs (404, auth, etc.), assume revision doesn't exist
@@ -311,9 +308,8 @@ def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-
 
 def push_dataset_revision(
     dataset: Dataset,
-    dataset_name: str,
+    dataset_source: str,
     revision: str,
-    username: str = "jo-mengr",
     commit_message: str = None,
 ) -> bool:
     """
@@ -323,12 +319,10 @@ def push_dataset_revision(
     ----------
     dataset : Dataset
         The processed dataset to push
-    dataset_name : str
-        Name of the dataset
+    dataset_source : str
+        Full dataset source (e.g., "jo-mengr/dataset_name")
     revision : str
         Revision name for the processed dataset
-    username : str, optional
-        Username/organization on Hugging Face Hub (default: "jo-mengr")
     commit_message : str, optional
         Commit message for the revision
 
@@ -338,18 +332,17 @@ def push_dataset_revision(
         True if push was successful, False otherwise
     """
     try:
-        full_dataset_name = f"{username}/{dataset_name}"
         if commit_message is None:
             commit_message = f"Add preprocessed dataset revision: {revision}"
 
-        logger.info(f"Pushing dataset '{dataset_name}' as revision '{revision}' to {full_dataset_name}")
+        logger.info(f"Pushing dataset as revision '{revision}' to {dataset_source}")
         dataset.push_to_hub(
-            full_dataset_name,
+            dataset_source,
             revision=revision,
             commit_message=commit_message,
         )
-        logger.info(f"Successfully pushed revision '{revision}' for dataset '{dataset_name}'")
+        logger.info(f"Successfully pushed revision '{revision}' for dataset '{dataset_source}'")
         return True
     except Exception as e:
-        logger.error(f"Failed to push revision '{revision}' for dataset '{dataset_name}': {e}")
+        logger.error(f"Failed to push revision '{revision}' for dataset '{dataset_source}': {e}")
         return False
