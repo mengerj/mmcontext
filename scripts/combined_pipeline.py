@@ -54,6 +54,18 @@ def process_combined_dataset_model(
 
     try:
         # ═══════════════════════════════════════════════════════════════
+        # STEP 0: CHECK IF EVALUATION ALREADY EXISTS (BEFORE EMBEDDING)
+        # ═══════════════════════════════════════════════════════════════
+        final_eval_dir = Path(cfg.settings.final_root) / dataset_name / model_name_for_path / "eval"
+        skip_existing_eval = cfg.settings.get("skip_existing_evaluations", False)
+
+        if skip_existing_eval and final_eval_dir.exists():
+            logger.info(
+                f"Evaluation already exists for {dataset_name}/{model_name_for_path} in final directory. Skipping entire pipeline."
+            )
+            return dataset_name, model_name_for_path, True, "evaluation_skipped_existing", 0
+
+        # ═══════════════════════════════════════════════════════════════
         # STEP 1: EMBEDDING GENERATION
         # ═══════════════════════════════════════════════════════════════
         logger.info(f"Step 1/2: Generating embeddings for {dataset_name}/{model_name_for_path}")
@@ -81,14 +93,6 @@ def process_combined_dataset_model(
         # STEP 2: EVALUATION
         # ═══════════════════════════════════════════════════════════════
         logger.info(f"Step 2/2: Running evaluation for {dataset_name}/{model_name_for_path}")
-
-        # Check if evaluation already exists in final directory
-        final_eval_dir = Path(cfg.settings.final_root) / dataset_name / model_name_for_path / "eval"
-        skip_existing_eval = cfg.settings.get("skip_existing_evaluations", False)
-
-        if skip_existing_eval and final_eval_dir.exists():
-            logger.info(f"Evaluation already exists for {dataset_name}/{model_name_for_path} in final directory")
-            return dataset_name, model_name_for_path, True, "evaluation_skipped_existing", 0
 
         # Run evaluation using computation directory as source
         eval_results = eval_single(
