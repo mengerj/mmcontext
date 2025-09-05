@@ -5,7 +5,13 @@ from pathlib import Path
 import pandas as pd
 import torch
 
-from mmcontext.embed.dataset_utils import collect_adata_subset, load_generic_dataset
+from mmcontext.embed.dataset_utils import (
+    check_revision_exists,
+    collect_adata_subset,
+    generate_revision_name,
+    load_generic_dataset,
+    push_dataset_revision,
+)
 from mmcontext.embed.model_utils import embed_labels, load_st_model, prepare_model_and_embed
 from mmcontext.file_utils import save_table
 from mmcontext.utils import truncate_cell_sentences
@@ -98,14 +104,53 @@ def process_single_dataset_model(
         # Use hf_cache parameter if provided, otherwise fall back to run_cfg.hf_cache for backward compatibility
         cache_dir = hf_cache if hf_cache is not None else getattr(run_cfg, "hf_cache", None)
 
-        raw_ds = load_generic_dataset(
-            source=ds_cfg.source,
-            fmt=ds_cfg.format,
-            split=ds_cfg.get("split", "test"),
-            max_rows=run_cfg.n_rows,
-            seed=run_cfg.seed,
-            cache_dir=cache_dir,
-        )
+        # Check if we should use revisions
+        use_revisions = getattr(run_cfg, "use_revisions", False)
+        revision_loaded = False
+
+        if use_revisions and ds_cfg.format == "hub":
+            # Generate revision name based on preprocessing parameters
+            revision_name = generate_revision_name(ds_cfg)
+
+            # Check if revision exists and load it if available
+            if revision_name != "processed" and check_revision_exists(ds_cfg.name, revision_name):
+                logger.info(f"Found existing revision '{revision_name}' for dataset '{ds_cfg.name}', loading directly")
+                raw_ds = load_generic_dataset(
+                    source=ds_cfg.source,
+                    fmt=ds_cfg.format,
+                    split=ds_cfg.get("split", "test"),
+                    max_rows=run_cfg.n_rows,
+                    seed=run_cfg.seed,
+                    cache_dir=cache_dir,
+                    revision=revision_name,
+                )
+                revision_loaded = True
+                logger.info(f"Successfully loaded preprocessed dataset from revision '{revision_name}'")
+            else:
+                if revision_name != "processed":
+                    logger.info(
+                        f"Revision '{revision_name}' not found for dataset '{ds_cfg.name}', processing from scratch"
+                    )
+                # Load raw dataset
+                raw_ds = load_generic_dataset(
+                    source=ds_cfg.source,
+                    fmt=ds_cfg.format,
+                    split=ds_cfg.get("split", "test"),
+                    max_rows=run_cfg.n_rows,
+                    seed=run_cfg.seed,
+                    cache_dir=cache_dir,
+                )
+        else:
+            # Load raw dataset without revision
+            raw_ds = load_generic_dataset(
+                source=ds_cfg.source,
+                fmt=ds_cfg.format,
+                split=ds_cfg.get("split", "test"),
+                max_rows=run_cfg.n_rows,
+                seed=run_cfg.seed,
+                cache_dir=cache_dir,
+            )
+
         numeric_data_available = "share_link" in raw_ds.column_names
 
         # Load model
@@ -115,11 +160,27 @@ def process_single_dataset_model(
         else:
             main_col = "cell_sentence_1"
 
-        # truncate cell sentences
-        if ds_cfg.get("cs_length", None) is not None and main_col == "cell_sentence_2":
+        # truncate cell sentences (only if revision wasn't loaded)
+        if not revision_loaded and ds_cfg.get("cs_length", None) is not None and main_col == "cell_sentence_2":
+            logger.info(f"Applying cell sentence truncation (cs_length={ds_cfg.cs_length})")
             raw_ds = truncate_cell_sentences(
                 raw_ds, main_col, ds_cfg.cs_length, filter_strings=ds_cfg.get("gene_filter_strings", None)
             )
+
+            # Push processed dataset as new revision if enabled
+            if use_revisions and ds_cfg.format == "hub" and revision_name != "processed":
+                push_success = push_dataset_revision(
+                    raw_ds,
+                    ds_cfg.name,
+                    revision_name,
+                    commit_message=f"Processed dataset with {revision_name} settings",
+                )
+                if push_success:
+                    logger.info(f"Successfully pushed processed dataset as revision '{revision_name}'")
+                else:
+                    logger.warning(f"Failed to push processed dataset as revision '{revision_name}'")
+        elif revision_loaded:
+            logger.info("Skipping cell sentence truncation - using preprocessed revision")
 
         # Generate embeddings
         emb_df, path_map = prepare_model_and_embed(

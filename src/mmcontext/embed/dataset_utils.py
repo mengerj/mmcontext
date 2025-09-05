@@ -10,7 +10,8 @@ from typing import Literal
 import anndata as ad
 import pandas as pd
 import torch
-from datasets import Dataset, load_dataset, load_from_disk
+from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
+from huggingface_hub import HfApi
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +47,30 @@ def load_generic_dataset(
     max_rows: int | None,
     seed: int,
     cache_dir: str | Path | None = None,
+    revision: str | None = None,
 ) -> Dataset:
     """
     Load a dataset in Arrow (hub / on-disk) **or** CSV form.
 
     For hub datasets, uses streaming to efficiently load only the requested
     number of rows without downloading the entire dataset.
+
+    Parameters
+    ----------
+    source : str | Path
+        Dataset source (HF hub name, local path, etc.)
+    fmt : Literal["hub", "hf_disk", "csv"]
+        Dataset format
+    split : str | None
+        Dataset split to load
+    max_rows : int | None
+        Maximum number of rows to load
+    seed : int
+        Random seed for shuffling
+    cache_dir : str | Path | None
+        Cache directory for HF datasets
+    revision : str | None
+        Specific revision/branch to load (only for hub datasets)
 
     Returns
     -------
@@ -65,15 +84,25 @@ def load_generic_dataset(
     if fmt == "hub":
         if max_rows is not None:
             # Use streaming to load only the requested number of rows
-            ds_iter = load_dataset(str(source), split=split or "test", streaming=True, cache_dir=cache_dir)
+            ds_iter = load_dataset(
+                str(source), split=split or "test", streaming=True, cache_dir=cache_dir, revision=revision
+            )
             # Convert iterator to list with the requested number of items
             subset_list = list(islice(ds_iter, max_rows))
             ds = Dataset.from_list(subset_list)
-            logger.info("Loaded %s via streaming (%d rows)", fmt, len(ds))
+            revision_info = f" (revision: {revision})" if revision else ""
+            logger.info("Loaded %s via streaming (%d rows)%s", fmt, len(ds), revision_info)
         else:
             # Load the full dataset if no max_rows specified
-            ds = load_dataset(str(source), split=split or "test", download_mode="force_redownload", cache_dir=cache_dir)
-            logger.info("Loaded %s (%d rows). Data stored in %s", fmt, len(ds), cache_dir)
+            ds = load_dataset(
+                str(source),
+                split=split or "test",
+                download_mode="force_redownload",
+                cache_dir=cache_dir,
+                revision=revision,
+            )
+            revision_info = f" (revision: {revision})" if revision else ""
+            logger.info("Loaded %s (%d rows)%s. Data stored in %s", fmt, len(ds), revision_info, cache_dir)
     elif fmt == "hf_disk":
         disk = load_from_disk(str(source))
         ds = disk[split] if split else disk
@@ -218,3 +247,109 @@ def collect_adata_subset(
     # restore original order  -----------------------------------------
     adata = adata[sample_ids].copy()
     return adata
+
+
+def generate_revision_name(dataset_config: dict) -> str:
+    """
+    Generate a revision name for a dataset based on preprocessing parameters.
+
+    Parameters
+    ----------
+    dataset_config : dict
+        Dataset configuration containing gene_filter_strings, cs_length, etc.
+
+    Returns
+    -------
+    str
+        Revision name in format: [rps_rpl_mt][_cs{cs_length}]
+    """
+    parts = []
+
+    # Add gene filter strings if present
+    gene_filter_strings = dataset_config.get("gene_filter_strings", None)
+    if gene_filter_strings:
+        # Convert to lowercase and join with underscores
+        filter_str = "_".join([s.lower() for s in gene_filter_strings])
+        parts.append(filter_str)
+
+    # Add cs_length if specified
+    cs_length = dataset_config.get("cs_length", None)
+    if cs_length and cs_length > 0:
+        parts.append(f"cs{cs_length}")
+
+    return "_".join(parts) if parts else "processed"
+
+
+def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-mengr") -> bool:
+    """
+    Check if a specific revision exists for a dataset on Hugging Face Hub.
+
+    Parameters
+    ----------
+    dataset_name : str
+        Name of the dataset
+    revision : str
+        Revision name to check
+    username : str, optional
+        Username/organization on Hugging Face Hub (default: "jo-mengr")
+
+    Returns
+    -------
+    bool
+        True if the revision exists, False otherwise
+    """
+    try:
+        api = HfApi()
+        full_dataset_name = f"{username}/{dataset_name}"
+        # Try to get dataset info with specific revision
+        api.dataset_info(full_dataset_name, revision=revision)
+        return True
+    except Exception:
+        # If any error occurs (404, auth, etc.), assume revision doesn't exist
+        return False
+
+
+def push_dataset_revision(
+    dataset: Dataset,
+    dataset_name: str,
+    revision: str,
+    username: str = "jo-mengr",
+    commit_message: str = None,
+) -> bool:
+    """
+    Push a processed dataset as a new revision to HuggingFace Hub.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The processed dataset to push
+    dataset_name : str
+        Name of the dataset
+    revision : str
+        Revision name for the processed dataset
+    username : str, optional
+        Username/organization on Hugging Face Hub (default: "jo-mengr")
+    commit_message : str, optional
+        Commit message for the revision
+
+    Returns
+    -------
+    bool
+        True if push was successful, False otherwise
+    """
+    try:
+        full_dataset_name = f"{username}/{dataset_name}"
+        if commit_message is None:
+            commit_message = f"Add preprocessed dataset revision: {revision}"
+
+        logger.info(f"Pushing dataset '{dataset_name}' as revision '{revision}' to {full_dataset_name}")
+        dataset.push_to_hub(
+            full_dataset_name,
+            revision=revision,
+            commit_message=commit_message,
+        )
+        logger.info(f"Successfully pushed revision '{revision}' for dataset '{dataset_name}'")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to push revision '{revision}' for dataset '{dataset_name}': {e}")
+        return False
