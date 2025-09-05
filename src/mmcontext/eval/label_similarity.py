@@ -1101,7 +1101,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
         _safe_tight_layout()
@@ -1115,7 +1115,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
 
         # Fix axis limits before adding annotations to prevent plot area from expanding
         xlim = ax.get_xlim()
@@ -1173,7 +1173,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
         _safe_tight_layout()
@@ -1187,7 +1187,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
 
         # Fix axis limits before adding annotations to prevent plot area from expanding
         xlim = ax.get_xlim()
@@ -1245,9 +1245,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(
-            cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
-        )
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
         _safe_tight_layout()
@@ -1261,9 +1259,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(
-            cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
-        )
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none")
 
         # Fix axis limits before adding annotations to prevent plot area from expanding
         xlim = ax.get_xlim()
@@ -1352,81 +1348,6 @@ class LabelSimilarity(BaseEvaluator):
             )
             _safe_tight_layout()
             plt.savefig(roc_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
-            plt.close()
-
-            # Plot UMAP
-            plt.figure(figsize=figsize, dpi=dpi)
-            # Create plot without frame
-            ax = plt.gca()
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-
-            # Create linewidths to highlight true label cells with borders
-            linewidths = np.where(mask, 0.3, 0.0)
-
-            scatter = plt.scatter(
-                umap_emb[:, 0],
-                umap_emb[:, 1],
-                c=sim,
-                cmap="RdBu_r",
-                vmin=-1,
-                vmax=1,
-                s=5,
-                alpha=0.7,
-                edgecolors="black",
-                linewidths=linewidths,
-            )
-            cbar = plt.colorbar(scatter, label="Similarity Score")
-            cbar.set_ticks([-1, 0, 1])
-
-            plt.xticks([])
-            plt.yticks([])
-            _safe_tight_layout()
-
-            # Save plot without legend
-            plt.savefig(umap_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
-            plt.close()
-
-            # Create and save separate legend for border meaning
-            fig_legend, ax_legend = plt.subplots(figsize=(3, 1.5), dpi=dpi)
-            ax_legend.axis("off")
-            legend_elements = [
-                plt.Line2D(
-                    [0],
-                    [0],
-                    marker="o",
-                    color="w",
-                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
-                    markeredgecolor="black",
-                    markeredgewidth=1,
-                    markersize=8,
-                    label=f"True {v}",
-                    linestyle="None",
-                ),
-                plt.Line2D(
-                    [0],
-                    [0],
-                    marker="o",
-                    color="w",
-                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
-                    markeredgecolor="none",
-                    markersize=8,
-                    label="Other cells",
-                    linestyle="None",
-                ),
-            ]
-            ax_legend.legend(
-                handles=legend_elements,
-                loc="center",
-                frameon=True,
-                fancybox=True,
-                shadow=True,
-                fontsize=legend_fontsize,
-                ncol=1,
-                bbox_to_anchor=(0.5, 0.5),
-            )
-            _safe_tight_layout()
-            plt.savefig(umap_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
             # Plot histogram with consistent scale
@@ -1668,7 +1589,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
         _safe_tight_layout()
@@ -1683,7 +1604,7 @@ class LabelSimilarity(BaseEvaluator):
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
-            scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
+            plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=5, alpha=0.7, edgecolors="none")
 
             # Fix axis limits before adding annotations to prevent plot area from expanding
             xlim = ax.get_xlim()
@@ -1741,7 +1662,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
         _safe_tight_layout()
@@ -1756,9 +1677,7 @@ class LabelSimilarity(BaseEvaluator):
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
-            scatter = plt.scatter(
-                cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none"
-            )
+            plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=5, alpha=0.7, edgecolors="none")
 
             # Fix axis limits before adding annotations to prevent plot area from expanding
             xlim = ax.get_xlim()
@@ -1817,9 +1736,7 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        scatter = plt.scatter(
-            cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
-        )
+        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none")
         plt.xticks([])
         plt.yticks([])
         _safe_tight_layout()
@@ -1834,9 +1751,7 @@ class LabelSimilarity(BaseEvaluator):
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
-            scatter = plt.scatter(
-                cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none"
-            )
+            plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=norm_pred_point_colors, s=5, alpha=0.7, edgecolors="none")
 
             # Fix axis limits before adding annotations to prevent plot area from expanding
             xlim = ax.get_xlim()
@@ -1927,81 +1842,6 @@ class LabelSimilarity(BaseEvaluator):
             )
             _safe_tight_layout()
             plt.savefig(roc_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
-            plt.close()
-
-            # Plot UMAP
-            plt.figure(figsize=figsize, dpi=dpi)
-            # Create plot without frame
-            ax = plt.gca()
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-
-            # Create linewidths to highlight true label cells with borders
-            linewidths = np.where(mask, 0.3, 0.0)
-
-            scatter = plt.scatter(
-                umap_emb[:, 0],
-                umap_emb[:, 1],
-                c=sim,
-                cmap="RdBu_r",
-                vmin=-1,
-                vmax=1,
-                s=5,
-                alpha=0.7,
-                edgecolors="black",
-                linewidths=linewidths,
-            )
-            cbar = plt.colorbar(scatter, label="Similarity Score")
-            cbar.set_ticks([-1, 0, 1])
-
-            plt.xticks([])
-            plt.yticks([])
-            _safe_tight_layout()
-
-            # Save plot without legend
-            plt.savefig(umap_dir / f"{safe_v}.{save_format}", dpi=dpi, bbox_inches="tight")
-            plt.close()
-
-            # Create and save separate legend for border meaning
-            fig_legend, ax_legend = plt.subplots(figsize=(3, 1.5), dpi=dpi)
-            ax_legend.axis("off")
-            legend_elements = [
-                plt.Line2D(
-                    [0],
-                    [0],
-                    marker="o",
-                    color="w",
-                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
-                    markeredgecolor="black",
-                    markeredgewidth=1,
-                    markersize=16,
-                    label=f"True {v}",
-                    linestyle="None",
-                ),
-                plt.Line2D(
-                    [0],
-                    [0],
-                    marker="o",
-                    color="w",
-                    markerfacecolor=(0.7, 0.7, 0.7, 0.6),
-                    markeredgecolor="none",
-                    markersize=16,
-                    label="Other cells",
-                    linestyle="None",
-                ),
-            ]
-            ax_legend.legend(
-                handles=legend_elements,
-                loc="center",
-                frameon=True,
-                fancybox=True,
-                shadow=True,
-                fontsize=legend_fontsize,
-                ncol=1,
-                bbox_to_anchor=(0.5, 0.5),
-            )
-            _safe_tight_layout()
-            plt.savefig(umap_dir / f"{safe_v}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
             # Plot histogram with consistent scale
