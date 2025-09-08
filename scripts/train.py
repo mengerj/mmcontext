@@ -706,6 +706,7 @@ def main(cfg: DictConfig):
                 if positive_col == "positive":
                     positive_col = "caption"
                 eval_name = f"{dataset_name}_{primary_cell_sentence}_{positive_col}"
+                train_name = eval_name
                 logger.info(f"Dataset '{dataset_name}' using positive_col='{positive_col}'")
 
                 # Track dataset mode for model naming
@@ -787,13 +788,13 @@ def main(cfg: DictConfig):
                         logger.info(f"    Columns: {list(split_data.column_names)}")
 
                 # Add train split to train_datasets dictionary
-                train_datasets[dataset_name] = dataset_ready["train"]
+                train_datasets[train_name] = dataset_ready["train"]
 
                 # Add validation split to val_datasets dictionary
-                val_datasets[dataset_name] = dataset_ready["val"]
+                val_datasets[train_name] = dataset_ready["val"]
 
                 # Create loss function for this dataset type
-                losses[dataset_name] = get_loss(dataset_type=dataset_type)
+                losses[train_name] = get_loss(dataset_type=dataset_type)
 
                 evaluator = get_evaluator(
                     dataset_type=dataset_type,
