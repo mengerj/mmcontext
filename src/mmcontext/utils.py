@@ -18,7 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 def truncate_cell_sentences(
-    dataset, column_name: str, max_length: int, num_proc: int = None, filter_strings: list[str] = None
+    dataset,
+    column_name: str,
+    max_length: int,
+    num_proc: int = None,
+    filter_strings: list[str] = None,
+    gene_special_token: str = None,
+    delimiter: str = " ",
 ):
     """
     Truncate cell sentences to the first max_length tokens efficiently, with optional gene filtering.
@@ -38,6 +44,12 @@ def truncate_cell_sentences(
         List of strings to filter out from genes. Any gene containing any of these
         strings will be removed before truncation. Useful for filtering ribosomal
         genes (e.g., ['RPS', 'RPL']) or other unwanted gene sets.
+    gene_special_token : str, optional
+        Special token to add in front of each gene name (e.g., '[GENE]'). If None,
+        no special token is added.
+    delimiter : str, optional
+        Delimiter to use between tokens (default: " "). Can be customized for
+        different training experiments.
 
     Returns
     -------
@@ -83,11 +95,15 @@ def truncate_cell_sentences(
                     )
                     logger.debug(f"Filtered {total_removed} genes from sentence: {filter_details}")
 
-            # Take first max_length tokens and join
-            if len(tokens) <= max_length:
-                truncated.append(" ".join(tokens))  # Join filtered tokens
-            else:
-                truncated.append(" ".join(tokens[:max_length]))
+            # Take first max_length tokens and apply gene special token if specified
+            final_tokens = tokens[:max_length] if len(tokens) > max_length else tokens
+
+            # Add gene special token in front of each token if specified
+            if gene_special_token:
+                final_tokens = [f"{gene_special_token}{delimiter}{token}" for token in final_tokens]
+
+            # Join with delimiter
+            truncated.append(delimiter.join(final_tokens))
 
         batch[column_name] = truncated
         return batch
@@ -298,6 +314,8 @@ def truncate_semantic_cell_sentence(
     max_genes: int,
     filter_strings: Iterable[str] | None = None,
     add_ellipsis_when_truncated: bool = True,
+    gene_special_token: str = None,
+    delimiter: str = " ",
 ) -> str:
     """
     Truncate the gene list inside a semantic cell sentence
@@ -318,6 +336,12 @@ def truncate_semantic_cell_sentence(
     add_ellipsis_when_truncated : bool, default True
         If True, append an ellipsis right after the truncated gene list when there were
         more genes originally.
+    gene_special_token : str, optional
+        Special token to add in front of each gene name (e.g., '[GENE]'). If None,
+        no special token is added.
+    delimiter : str, optional
+        Delimiter to use between tokens (default: " "). Can be customized for
+        different training experiments.
 
     Returns
     -------
@@ -403,9 +427,15 @@ def truncate_semantic_cell_sentence(
     # Truncate to max_genes (no ellipsis)
     truncated_genes = filtered_genes[:max_genes]
 
+    # Apply gene special token if specified
+    if gene_special_token:
+        processed_truncated_genes = [f"{gene_special_token}{delimiter}{gene}" for gene in truncated_genes]
+    else:
+        processed_truncated_genes = truncated_genes
+
     # Simple replacement approach: replace the original gene sequence with truncated list
     original_sequence = ", ".join(original_genes)
-    truncated_sequence = ", ".join(truncated_genes)
+    truncated_sequence = delimiter.join(processed_truncated_genes)
 
     # Try to find and replace the gene sequence
     if original_sequence in sentence:
@@ -469,6 +499,8 @@ def truncate_semantic_cell_sentences_dataset(
     num_proc: int | None = None,
     filter_strings: list[str] | None = None,
     add_ellipsis_when_truncated: bool = False,
+    gene_special_token: str = None,
+    delimiter: str = " ",
 ):
     """
     Vectorized version for HuggingFace Datasets.
@@ -487,6 +519,12 @@ def truncate_semantic_cell_sentences_dataset(
         Substrings to filter out from the gene symbols.
     add_ellipsis_when_truncated : bool, default True
         Append ellipsis if truncation occurred.
+    gene_special_token : str, optional
+        Special token to add in front of each gene name (e.g., '[GENE]'). If None,
+        no special token is added.
+    delimiter : str, optional
+        Delimiter to use between tokens (default: " "). Can be customized for
+        different training experiments.
 
     Returns
     -------
@@ -503,6 +541,8 @@ def truncate_semantic_cell_sentences_dataset(
                     max_genes=max_genes,
                     filter_strings=filter_strings,
                     add_ellipsis_when_truncated=add_ellipsis_when_truncated,
+                    gene_special_token=gene_special_token,
+                    delimiter=delimiter,
                 )
             )
         batch[column_name] = out

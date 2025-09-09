@@ -234,7 +234,7 @@ def validate_dataset_configurations(cfg: DictConfig) -> None:
     logger.info("Dataset configuration validation passed")
 
 
-def generate_revision_name(dataset_config: DictConfig) -> str:
+def generate_revision_name(dataset_config: DictConfig, gene_special_token: str = None, delimiter: str = " ") -> str:
     """
     Generate a revision name for a dataset based on preprocessing parameters.
 
@@ -242,11 +242,15 @@ def generate_revision_name(dataset_config: DictConfig) -> str:
     ----------
     dataset_config : DictConfig
         Dataset configuration containing layer_axis, gene_filter_strings, cs_length, etc.
+    gene_special_token : str, optional
+        Special token to add in front of each gene name (e.g., '[GENE]')
+    delimiter : str, optional
+        Delimiter to use between tokens (default: " ")
 
     Returns
     -------
     str
-        Revision name in format: {layer_axis}[_rps_rpl_mt][_cs{cs_length}]
+        Revision name in format: {layer_axis}[_rps_rpl_mt][_cs{cs_length}][_gene{token}][_delim{delimiter}]
     """
     parts = []
 
@@ -267,6 +271,29 @@ def generate_revision_name(dataset_config: DictConfig) -> str:
         cs_length = getattr(dataset_config, "cs_length", None)
         if cs_length and cs_length > 0:
             parts.append(f"cs{cs_length}")
+
+        # Add gene special token if specified
+        if gene_special_token:
+            # Clean the token for filename safety (remove brackets and special chars)
+            clean_token = gene_special_token.replace("[", "").replace("]", "").replace("<", "").replace(">", "").lower()
+            parts.append(f"gene{clean_token}")
+
+        # Add delimiter if not default space
+        if delimiter and delimiter != " ":
+            # Clean delimiter for filename safety
+            if delimiter == "|":
+                parts.append("delimpipe")
+            elif delimiter == ",":
+                parts.append("delimcomma")
+            elif delimiter == ";":
+                parts.append("delimsemi")
+            elif delimiter == "_":
+                parts.append("delimunder")
+            else:
+                # For other delimiters, use a generic representation
+                clean_delim = delimiter.replace("/", "slash").replace("\\", "backslash").replace(":", "colon")
+                parts.append(f"delim{clean_delim}")
+
     elif layer_axis is None:
         parts.append("semantic_cs")
 
@@ -357,6 +384,8 @@ def prepare_ds(
     chosen_method: str = None,
     precomputed_key: str = None,
     force_refresh_cache: bool = False,
+    gene_special_token: str = None,
+    delimiter: str = " ",
 ) -> "DatasetDict":
     """
     Prepare a dataset by applying all preprocessing steps.
@@ -379,6 +408,10 @@ def prepare_ds(
         Key for precomputed embeddings
     force_refresh_cache : bool, optional
         Whether to force refresh cache
+    gene_special_token : str, optional
+        Special token to add in front of each gene name (e.g., '[GENE]')
+    delimiter : str, optional
+        Delimiter to use between tokens (default: " ")
 
     Returns
     -------
@@ -404,6 +437,14 @@ def prepare_ds(
         logger.info(
             f"Truncating cell sentences in column '{dataset_cs_col}' to {dataset_cs_length} tokens for text_only dataset"
         )
+        logger.info(f"  Gene special token: {gene_special_token}")
+        logger.info(f"  Delimiter: '{delimiter}'")
+
+        # PERFORMANCE FIX: Extract OmegaConf parameters to native Python variables
+        # This avoids the 27x slowdown caused by passing OmegaConf objects to intensive functions
+        filter_strings_raw = dataset_config.get("gene_filter_strings", None)
+        filter_strings = list(filter_strings_raw) if filter_strings_raw else None
+        logger.info(f"  Filter strings: {filter_strings}")
 
         # Apply truncation to all splits that contain the specified column
         truncated_dataset = {}
@@ -411,9 +452,11 @@ def prepare_ds(
             if dataset_cs_col in split_data.column_names and dataset_cs_col == "cell_sentence_2":
                 truncated_dataset[split_name] = truncate_cell_sentences(
                     split_data,
-                    dataset_cs_col,
-                    dataset_cs_length,
-                    filter_strings=dataset_config.get("gene_filter_strings", None),
+                    dataset_cs_col,  # Already extracted above
+                    dataset_cs_length,  # Already extracted above
+                    filter_strings=filter_strings,  # Native Python list
+                    gene_special_token=gene_special_token,  # Native Python string
+                    delimiter=delimiter,  # Native Python string
                 )
                 logger.info(f"  Truncated {split_name} split")
             elif (
@@ -425,13 +468,17 @@ def prepare_ds(
                     split_data,
                     "cell_sentence_3",
                     dataset_cs_length,
-                    filter_strings=dataset_config.get("gene_filter_strings", None),
+                    filter_strings=filter_strings,  # Native Python list
+                    gene_special_token=gene_special_token,  # Native Python string
+                    delimiter=delimiter,  # Native Python string
                 )
                 truncated_dataset[split_name] = truncate_semantic_cell_sentences_dataset(
                     truncated_dataset[split_name],
                     "cell_sentence_4",
                     dataset_cs_length,
-                    filter_strings=dataset_config.get("gene_filter_strings", None),
+                    filter_strings=filter_strings,  # Native Python list
+                    gene_special_token=gene_special_token,  # Native Python string
+                    delimiter=delimiter,  # Native Python string
                 )
 
             else:
@@ -626,6 +673,11 @@ def main(cfg: DictConfig):
         # -------------------------------------------------------------------------
         # 1. Create the model (MMContextEncoder => SentenceTransformer modules)
         # -------------------------------------------------------------------------
+        # Extract cache_dir from config for dataset loading
+        cache_dir = getattr(cfg, "cache_dir", None)
+        if cache_dir:
+            logger.info(f"Using custom cache directory: {cache_dir}")
+
         chosen_method = cfg.embedding_method
         input_dim_map = cfg.input_dim_map
         if chosen_method is not None and chosen_method not in input_dim_map:
@@ -662,7 +714,22 @@ def main(cfg: DictConfig):
             )
             model = SentenceTransformer(modules=[enc])
 
-            # Primary cell sentence column and layer axis are now determined per dataset
+        # Register special token if specified (applies to both new and loaded models)
+        gene_special_token = getattr(cfg, "gene_special_token", None)
+        if gene_special_token:
+            logger.info(f"Registering special token: {gene_special_token}")
+            # Add the special token to the tokenizer
+            tokenizer = model[0].tokenizer.text_tok
+            num_added_tokens = tokenizer.add_tokens([gene_special_token])
+            if num_added_tokens > 0:
+                logger.info(f"Added {num_added_tokens} new token(s) to tokenizer: {gene_special_token}")
+                # Resize the model's token embeddings to accommodate the new token
+                model[0].text_encoder.resize_token_embeddings(len(tokenizer))
+                logger.info(f"Resized token embeddings to {len(tokenizer)} tokens")
+            else:
+                logger.info(f"Token {gene_special_token} already exists in tokenizer")
+
+        # Primary cell sentence column and layer axis are now determined per dataset
         # -------------------------------------------------------------------------
         # 2. Load multiple datasets
         # -------------------------------------------------------------------------
@@ -725,14 +792,20 @@ def main(cfg: DictConfig):
                 )
 
                 # Generate revision name based on preprocessing parameters
-                revision_name = generate_revision_name(dataset_config)
+                revision_name = generate_revision_name(
+                    dataset_config,
+                    gene_special_token=getattr(cfg, "gene_special_token", None),
+                    delimiter=getattr(cfg, "delimiter", " "),
+                )
 
                 # Check if processed revision already exists
                 if check_revision_exists(dataset_name, revision_name) and dataset_text_only:
                     logger.info(
                         f"Found existing revision '{revision_name}' for dataset '{dataset_name}', loading directly"
                     )
-                    dataset_ready = load_dataset(f"jo-mengr/{dataset_name}", revision=revision_name)
+                    dataset_ready = load_dataset(
+                        f"jo-mengr/{dataset_name}", revision=revision_name, cache_dir=cache_dir
+                    )
                     logger.info(f"Successfully loaded preprocessed dataset from revision '{revision_name}'")
                 else:
                     if dataset_text_only:
@@ -740,7 +813,7 @@ def main(cfg: DictConfig):
                             f"Revision '{revision_name}' not found for dataset '{dataset_name}', processing from scratch"
                         )
                     # Load raw dataset and process it
-                    dataset = load_dataset(f"jo-mengr/{dataset_name}")
+                    dataset = load_dataset(f"jo-mengr/{dataset_name}", cache_dir=cache_dir)
                     logger.info(f"Raw dataset loaded - Name: {dataset_name}, Keys: {list(dataset.keys())}")
 
                     dataset_ready = prepare_ds(
@@ -752,6 +825,8 @@ def main(cfg: DictConfig):
                         chosen_method,
                         precomputed_key,
                         getattr(cfg, "force_refresh_cache", False),
+                        gene_special_token=getattr(cfg, "gene_special_token", None),
+                        delimiter=getattr(cfg, "delimiter", " "),
                     )
 
                     # Push processed dataset as new revision if enabled
@@ -822,7 +897,7 @@ def main(cfg: DictConfig):
                 logger.info(f"Bio dataset '{dataset_name}' will be processed as text_only")
 
                 # Load the dataset directly using the provided ID
-                dataset = load_dataset(dataset_id, revision=bio_dataset_config.revision)
+                dataset = load_dataset(dataset_id, revision=bio_dataset_config.revision, cache_dir=cache_dir)
                 logger.info(f"Bio dataset loaded - Keys: {list(dataset.keys())}")
 
                 # Log dataset splits and sizes
