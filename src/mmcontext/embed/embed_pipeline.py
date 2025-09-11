@@ -108,7 +108,7 @@ def process_single_dataset_model(
         use_revisions = getattr(run_cfg, "use_revisions", False)
         revision_loaded = False
 
-        if use_revisions and ds_cfg.format == "hub":
+        if use_revisions and ds_cfg.format == "hub" and text_only:
             # Generate revision name based on preprocessing parameters
             revision_name = generate_revision_name(ds_cfg)
 
@@ -162,10 +162,10 @@ def process_single_dataset_model(
 
         # truncate cell sentences (only if revision wasn't loaded)
         if not revision_loaded and ds_cfg.get("cs_length", None) is not None and main_col == "cell_sentence_2":
-            logger.info(f"Applying cell sentence truncation (cs_length={ds_cfg.cs_length})")
-            raw_ds = truncate_cell_sentences(
-                raw_ds, main_col, ds_cfg.cs_length, filter_strings=ds_cfg.get("gene_filter_strings", None)
-            )
+            cs_length = ds_cfg.cs_length
+            filter_strings = ds_cfg.get("gene_filter_strings", None)
+            logger.info(f"Applying cell sentence truncation (cs_length={cs_length})")
+            raw_ds = truncate_cell_sentences(raw_ds, main_col, cs_length, filter_strings=filter_strings)
 
             # Push processed dataset as new revision if enabled
             if use_revisions and ds_cfg.format == "hub" and revision_name != "processed":
