@@ -703,6 +703,7 @@ def main(cfg: DictConfig):
                     text_model_kwargs = dict(text_model_kwargs)
                 text_model_kwargs = resolve_torch_dtype_strings(text_model_kwargs)
                 logger.info(f"Using text model kwargs: {text_model_kwargs}")
+            use_text_adapter = cfg.adapter.get("use_text_adapter", True)
             enc = MMContextEncoder(
                 text_encoder_name=cfg.text_encoder.name,
                 adapter_hidden_dim=cfg.adapter.hidden_dim,
@@ -713,6 +714,7 @@ def main(cfg: DictConfig):
                 train_lookup=False,
                 joint_adapter_hidden_dim=None,
                 text_model_kwargs=text_model_kwargs,
+                use_text_adapter=use_text_adapter,
             )
             model = SentenceTransformer(modules=[enc])
 

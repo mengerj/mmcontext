@@ -382,6 +382,10 @@ class MMContextEncoder(Module):
         Additional keyword arguments to pass to AutoModel.from_pretrained() when
         loading the text encoder. For example, {"attn_implementation": "flash_attention_2"}
         to enable flash attention. Defaults to None (empty dict).
+    use_text_adapter : bool, optional
+        Whether to create an adapter for the text encoder. If False, the text encoder
+        output dimension must match the adapter_output_dim (if specified) or no adapters
+        should be used at all. Defaults to True.
     """
 
     VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "random"]
@@ -402,6 +406,7 @@ class MMContextEncoder(Module):
         "_joint_adapter_was_trained",
         "max_seq_length",
         "text_model_kwargs",
+        "use_text_adapter",
     ]
 
     def __init__(
@@ -423,6 +428,7 @@ class MMContextEncoder(Module):
         _joint_adapter_was_trained: bool = False,
         max_seq_length: int | None = None,
         text_model_kwargs: dict | None = None,
+        use_text_adapter: bool = True,
     ) -> None:
         super().__init__()
         if registered_data_origin not in self.VALID_DATA_ORIGINS:
@@ -443,6 +449,7 @@ class MMContextEncoder(Module):
         self.pooling_mode = pooling_mode
         self.joint_adapter_hidden_dim = joint_adapter_hidden_dim
         self.text_model_kwargs = text_model_kwargs or {}
+        self.use_text_adapter = use_text_adapter
 
         # Determine if adapters should be used
         self._use_adapters = adapter_hidden_dim is not None or adapter_output_dim is not None
@@ -461,6 +468,24 @@ class MMContextEncoder(Module):
 
         text_hidden_dim = self.text_encoder.config.hidden_size
 
+        # Validate text adapter configuration
+        if not use_text_adapter and self._use_adapters:
+            # If text adapter is disabled but adapters are requested, check dimension compatibility
+            expected_output_dim = adapter_output_dim if adapter_output_dim is not None else text_hidden_dim
+            if text_encoder_name != "one_hot":  # Skip validation for one_hot encoder as it's configurable
+                # We need to get text_hidden_dim first, so this validation will be done after text encoder initialization
+                pass
+
+        # Validate text adapter configuration after getting text_hidden_dim
+        if not use_text_adapter and self._use_adapters:
+            expected_output_dim = adapter_output_dim if adapter_output_dim is not None else text_hidden_dim
+            if text_hidden_dim != expected_output_dim:
+                raise ValueError(
+                    f"Text adapter is disabled but text encoder output dimension ({text_hidden_dim}) "
+                    f"does not match adapter output dimension ({expected_output_dim}). "
+                    f"Either set use_text_adapter=True or set adapter_output_dim={text_hidden_dim}."
+                )
+
         # Note: max_seq_length will be set from processor after processor initialization
 
         # Determine output dimension
@@ -470,7 +495,7 @@ class MMContextEncoder(Module):
             self._output_dim = text_hidden_dim
 
         # Setup text adapter if requested
-        if self._use_adapters:
+        if self._use_adapters and use_text_adapter:
             self.text_adapter = AdapterModule(
                 input_dim=text_hidden_dim,
                 hidden_dim=adapter_hidden_dim,
@@ -861,6 +886,7 @@ class MMContextEncoder(Module):
             "_joint_adapter_was_trained": self._joint_adapter_was_trained,
             "max_seq_length": self.max_seq_length,
             "text_model_kwargs": serializable_kwargs,
+            "use_text_adapter": self.use_text_adapter,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True, **kwargs) -> None:
@@ -900,6 +926,7 @@ class MMContextEncoder(Module):
             joint_adapter_hidden_dim=self.joint_adapter_hidden_dim,
             max_seq_length=self.max_seq_length,
             text_model_kwargs=self.text_model_kwargs,
+            use_text_adapter=self.use_text_adapter,
         )
         # Load the filtered state dict into the temporary model
         temp_model.load_state_dict(state, strict=False)

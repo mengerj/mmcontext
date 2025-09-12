@@ -20,10 +20,9 @@ class AdapterModule(nn.Module):
     Modes
     -----
     1. **Identity** – `hidden_dim in (None, 0)` *and*
-       (`output_dim in (None, 0)` **or** `output_dim == input_dim`)
+       `output_dim == input_dim` *and* `force_identity=True`
        → acts as `nn.Identity`.
-    2. **Linear → BN** – `hidden_dim in (None, 0)`  but
-       `output_dim != input_dim`
+    2. **Linear → BN** – `hidden_dim in (None, 0)`
        → single `Linear + BatchNorm1d`.
     3. **Linear → ReLU → Linear → BN** – default MLP.
 
@@ -37,6 +36,10 @@ class AdapterModule(nn.Module):
     output_dim : int | None, optional
         Size of the final output.  If *None* or *0*, falls back to
         `input_dim`.
+    force_identity : bool, optional
+        If True, forces the use of identity layer when `hidden_dim is None`
+        and `output_dim == input_dim`. If False (default), builds normal
+        layers even when dimensions match.
     """
 
     def __init__(
@@ -44,6 +47,7 @@ class AdapterModule(nn.Module):
         input_dim: int,
         hidden_dim: int | None = 512,
         output_dim: int | None = 2048,
+        force_identity: bool = False,
     ) -> None:
         super().__init__()
 
@@ -54,10 +58,11 @@ class AdapterModule(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
+        self.force_identity = force_identity
 
         # ------- build the sub-network ----------------------------------
-        if hidden_dim is None and output_dim == input_dim:
-            # Pure identity
+        if hidden_dim is None and output_dim == input_dim and force_identity:
+            # Pure identity (only when explicitly forced)
             self.net = nn.Identity()
             self.is_identity = True
         elif hidden_dim is None:
@@ -88,6 +93,7 @@ class AdapterModule(nn.Module):
             "input_dim": self.input_dim,
             "hidden_dim": self.hidden_dim,
             "output_dim": self.output_dim,
+            "force_identity": self.force_identity,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True) -> None:
