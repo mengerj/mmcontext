@@ -423,6 +423,8 @@ def prepare_ds(
     # Determine dataset-specific settings
     layer_axis = getattr(dataset_config, "layer_axis", "obs")
     dataset_text_only = getattr(dataset_config, "text_only", False)
+    adata_cache_dir = getattr(dataset_config, "adata_cache_dir", "cache/from_nxtcloud")
+    logger.info(f"Adata cache directory: {adata_cache_dir}")
 
     # Get dataset-specific cell sentence truncation parameters
     dataset_cs_length = getattr(dataset_config, "cs_length", None)
@@ -498,7 +500,7 @@ def prepare_ds(
         token_df, _ = model[0].get_initial_embeddings(
             dataset,
             layer_key=precomputed_key,
-            download_dir=f"data/from_nxtcloud/{dataset_name}",
+            download_dir=adata_cache_dir,
             axis=layer_axis,
             overwrite=force_refresh_cache,
         )
