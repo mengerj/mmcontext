@@ -34,7 +34,7 @@ delimiter: "|" # Delimiter to use between tokens (default: " ")
 # Training hardware requirements
 force_cuda: false # If true, training will stop if CUDA is not available
 force_refresh_cache: false # If true, re-download datasets even if cached (useful when datasets are updated online)
-cache_dir: null # Optional directory to cache datasets (if null, uses default HuggingFace cache)
+cache_dir: /scratch/local/menger/cache/huggingface # Optional directory to cache datasets (if null, uses default HuggingFace cache)
 push_to_hub: false
 # Omics datasets - represent actual omics data that can be processed as text_only or with numeric embeddings
 # Processing workflow: get_initial_embeddings (if not text_only) → select_columns → resolve_negative_indices (if multiplets) → prefix_ds (prefixing)
