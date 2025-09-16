@@ -351,7 +351,7 @@ class MMContextEncoder(Module):
         Pre-initialized processor. If None, one will be created.
     registered_data_origin : str | None, optional
         Type of omics data representation. Must be one of:
-        ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs"].
+        ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "gs10k"].
         Defaults to "unregistered".
     registered_input_dim : int | None, optional
         Input dimension of registered data. Required when loading a model
@@ -388,7 +388,7 @@ class MMContextEncoder(Module):
         should be used at all. Defaults to True.
     """
 
-    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "random"]
+    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "gs10k", "random"]
 
     # Configuration attributes for SentenceTransformer Module base class
     config_keys = [
