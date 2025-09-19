@@ -52,6 +52,7 @@ def prepare_single_dataset(
     chosen_method: str = None,
     precomputed_key: str = None,
     force_refresh_cache: bool = False,
+    adata_cache_dir: str = "data/from_nxtcloud",
 ) -> "DatasetDict":
     """
     Prepare a single dataset by applying all preprocessing steps
@@ -123,7 +124,7 @@ def prepare_single_dataset(
         token_df, _ = model[0].get_initial_embeddings(
             dataset,
             layer_key=precomputed_key,
-            download_dir=f"data/from_nxtcloud/{dataset_name}",
+            download_dir=f"{adata_cache_dir}/{dataset_name}",
             axis=layer_axis,
             overwrite=force_refresh_cache,
         )
@@ -338,6 +339,16 @@ def main(cfg: DictConfig):
         # -------------------------------------------------------------------------
         # 1. Create the model (MMContextEncoder => SentenceTransformer modules)
         # -------------------------------------------------------------------------
+        # Extract cache_dir from config for dataset loading
+        cache_dir = getattr(cfg, "cache_dir", None)
+        if cache_dir:
+            logger.info(f"Using custom cache directory: {cache_dir}")
+        adata_cache_dir = getattr(cfg, "adata_cache_dir", "data/from_nxtcloud")
+        logger.info(f"Using adata cache directory: {adata_cache_dir}")
+
+        # Whether to force redownload the dataset
+        download_mode = "force_redownload" if getattr(cfg, "force_refresh_cache", False) else "reuse_dataset_if_exists"
+
         chosen_method = cfg.embedding_method
         input_dim_map = cfg.input_dim_map
         if chosen_method is not None and chosen_method not in input_dim_map:
@@ -436,7 +447,12 @@ def main(cfg: DictConfig):
                     logger.info(
                         f"Found existing revision '{revision_name}' for dataset '{dataset_name}', loading directly"
                     )
-                    dataset_ready = load_dataset(f"jo-mengr/{dataset_name}", revision=revision_name)
+                    dataset_ready = load_dataset(
+                        f"jo-mengr/{dataset_name}",
+                        revision=revision_name,
+                        cache_dir=cache_dir,
+                        download_mode=download_mode,
+                    )
                     logger.info(f"Successfully loaded preprocessed dataset from revision '{revision_name}'")
                 else:
                     if dataset_text_only:
@@ -444,7 +460,7 @@ def main(cfg: DictConfig):
                             f"Revision '{revision_name}' not found for dataset '{dataset_name}', processing from scratch"
                         )
                     # Load raw dataset and process it
-                    dataset = load_dataset(f"jo-mengr/{dataset_name}")
+                    dataset = load_dataset(f"jo-mengr/{dataset_name}", cache_dir=cache_dir, download_mode=download_mode)
                     logger.info(f"Raw dataset loaded - Name: {dataset_name}, Keys: {list(dataset.keys())}")
 
                     dataset_ready = prepare_single_dataset(
@@ -456,6 +472,7 @@ def main(cfg: DictConfig):
                         chosen_method,
                         precomputed_key,
                         getattr(cfg, "force_refresh_cache", False),
+                        adata_cache_dir,
                     )
 
                     # Push processed dataset as new revision if enabled
@@ -504,7 +521,9 @@ def main(cfg: DictConfig):
                 logger.info(f"Bio dataset '{dataset_name}' will be processed as text_only")
 
                 # Load the dataset directly using the provided ID
-                dataset = load_dataset(dataset_id, revision=bio_dataset_config.revision)
+                dataset = load_dataset(
+                    dataset_id, revision=bio_dataset_config.revision, cache_dir=cache_dir, download_mode=download_mode
+                )
                 logger.info(f"Bio dataset loaded - Keys: {list(dataset.keys())}")
 
                 # Log dataset splits and sizes
