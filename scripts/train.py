@@ -378,6 +378,7 @@ def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-
 def prepare_ds(
     dataset,
     dataset_config: DictConfig,
+    adata_cache_dir: str,
     dataset_name: str,
     primary_cell_sentence: str,
     model: "SentenceTransformer",
@@ -423,8 +424,6 @@ def prepare_ds(
     # Determine dataset-specific settings
     layer_axis = getattr(dataset_config, "layer_axis", "obs")
     dataset_text_only = getattr(dataset_config, "text_only", False)
-    adata_cache_dir = getattr(dataset_config, "adata_cache_dir", "cache/from_nxtcloud")
-    logger.info(f"Adata cache directory: {adata_cache_dir}")
 
     # Get dataset-specific cell sentence truncation parameters
     dataset_cs_length = getattr(dataset_config, "cs_length", None)
@@ -654,7 +653,8 @@ def main(cfg: DictConfig):
 
     # Validate dataset configurations before proceeding
     validate_dataset_configurations(cfg)
-
+    #whether to force redownload the dataset
+    download_mode = "force_redownload" if getattr(cfg, "force_refresh_cache", False) else "reuse_dataset_if_exists"
     # Check CUDA availability if force_cuda is enabled
     if getattr(cfg, "force_cuda", False):
         if not torch.cuda.is_available():
@@ -679,6 +679,8 @@ def main(cfg: DictConfig):
         cache_dir = getattr(cfg, "cache_dir", None)
         if cache_dir:
             logger.info(f"Using custom cache directory: {cache_dir}")
+        adata_cache_dir = getattr(cfg, "adata_cache_dir", "cache/from_nxtcloud")
+        logger.info(f"Using adata cache directory: {adata_cache_dir}")
 
         chosen_method = cfg.embedding_method
         input_dim_map = cfg.input_dim_map
@@ -808,7 +810,7 @@ def main(cfg: DictConfig):
                         f"Found existing revision '{revision_name}' for dataset '{dataset_name}', loading directly"
                     )
                     dataset_ready = load_dataset(
-                        f"jo-mengr/{dataset_name}", revision=revision_name, cache_dir=cache_dir
+                        f"jo-mengr/{dataset_name}", revision=revision_name, cache_dir=cache_dir, download_mode=download_mode
                     )
                     logger.info(f"Successfully loaded preprocessed dataset from revision '{revision_name}'")
                 else:
@@ -817,12 +819,13 @@ def main(cfg: DictConfig):
                             f"Revision '{revision_name}' not found for dataset '{dataset_name}', processing from scratch"
                         )
                     # Load raw dataset and process it
-                    dataset = load_dataset(f"jo-mengr/{dataset_name}", cache_dir=cache_dir)
+                    dataset = load_dataset(f"jo-mengr/{dataset_name}", cache_dir=cache_dir, download_mode=download_mode)
                     logger.info(f"Raw dataset loaded - Name: {dataset_name}, Keys: {list(dataset.keys())}")
 
                     dataset_ready = prepare_ds(
                         dataset,
                         dataset_config,
+                        adata_cache_dir,
                         dataset_name,
                         primary_cell_sentence,
                         model,
@@ -901,7 +904,7 @@ def main(cfg: DictConfig):
                 logger.info(f"Bio dataset '{dataset_name}' will be processed as text_only")
 
                 # Load the dataset directly using the provided ID
-                dataset = load_dataset(dataset_id, revision=bio_dataset_config.revision, cache_dir=cache_dir)
+                dataset = load_dataset(dataset_id, revision=bio_dataset_config.revision, cache_dir=cache_dir, download_mode=download_mode)
                 logger.info(f"Bio dataset loaded - Keys: {list(dataset.keys())}")
 
                 # Log dataset splits and sizes
@@ -917,8 +920,9 @@ def main(cfg: DictConfig):
                     train_datasets[dataset_name] = dataset_ready["train"]
                     logger.info(f"Added bio dataset '{dataset_name}' to training set")
                     # add a random sample of 1000 samples to the validation set
+                    val_size = 1000 if len(dataset_ready["train"]) > 1000 else len(dataset_ready["train"])
                     val_datasets[dataset_name] = dataset_ready["train"].select(
-                        range(1000)
+                        range(val_size)
                     )  # add the training data also as evaluation just to check if these bio datasets are considered
                     dataset_type = getattr(bio_dataset_config, "type", "multiplets")
                     evaluator = get_evaluator(
