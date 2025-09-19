@@ -85,7 +85,7 @@ def load_generic_dataset(
         if max_rows is not None:
             # Use streaming to load only the requested number of rows
             ds_iter = load_dataset(
-                str(source), split=split or "test", streaming=True, cache_dir=cache_dir, revision=revision
+                str(source), split=split or "test", streaming=True, cache_dir=cache_dir, revision=revision, download_mode="force_redownload"
             )
             # Convert iterator to list with the requested number of items
             subset_list = list(islice(ds_iter, max_rows))
