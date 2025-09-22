@@ -673,7 +673,7 @@ def main(cfg: DictConfig):
         print("unique_model_name", unique_model_name)
         model.save(model_dir)
         if cfg.get("push_to_hub", True):
-            model.push_to_hub(f"jo-mengr/{unique_model_name}")
+            model.push_to_hub(f"jo-mengr/{unique_model_name}", private=True)
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
 
     except Exception as e:
