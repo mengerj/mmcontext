@@ -106,6 +106,7 @@ def prepare_model_and_embed(
     pin_memory: bool = torch.cuda.is_available(),
     axis: Literal["var", "obs"] = "obs",
     text_only: bool = False,
+    overwrite: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Path] | None]:
     """
     Create embeddings using a Sentence-Transformer model, with some model-specific preparation.
@@ -139,7 +140,8 @@ def prepare_model_and_embed(
     text_only : bool, default ``False``
         If ``True``, all input will be treated as text. If "False", the dataset has to contain
         a column share_link, which points to a zarr store that can be used to get initial embeddings for each token.
-
+    overwrite : bool, default ``True``
+        If ``True``, the initial embeddings will be re-downloaded even if they already exist.
     Returns
     -------
     tuple[DataFrame, dict[str, Path] | None]
@@ -170,7 +172,7 @@ def prepare_model_and_embed(
         # If the dataset is available, download get the token_df, even if the models doesnt use it. Just so the data is downloaded and the adata subset can be created downstream
         logger.info("Extracting numeric intital embeddings from dataset via it's share_links …")
         token_df, path_map = MMEnc.get_initial_embeddings(
-            data, layer_key=layer_key, axis=axis, download_dir=adata_download_dir
+            data, layer_key=layer_key, axis=axis, download_dir=adata_download_dir, overwrite=overwrite
         )  # type: ignore[arg-type]
     else:
         logger.info("""While the model supports initial embeddings, the dataset does not provide them.
