@@ -845,7 +845,200 @@ def compute_cosine_similarity(sample_embeddings, query_embeddings, device="cpu")
     sim = sim_t.cpu().numpy()
     return sim
 
+from __future__ import annotations
 
+import inspect
+import logging
+from typing import Any, Dict, Optional
+
+import torch
+from torch import nn
+from sentence_transformers import losses
+
+try:
+    import wandb  # optional; wrapper no-ops if not available or not initialized
+except Exception:  # pragma: no cover
+    wandb = None
+
+try:
+    from torch.utils.tensorboard import SummaryWriter  # optional
+except Exception:  # pragma: no cover
+    SummaryWriter = None
+
+
+class PerDatasetLossLogger(nn.Module):
+    """
+    Wrap a Sentence-Transformers loss to log per-dataset training loss.
+
+    Parameters
+    ----------
+    inner_loss : nn.Module
+        The actual loss instance (e.g., MultipleNegativesRankingLoss).
+    dataset_name : str
+        Dataset identifier used in log keys, e.g. 'cellxgene' or 'geo'.
+    log_backend : {'wandb', 'tensorboard', 'both', 'none'}, optional
+        Where to send logs. Defaults to 'wandb' if Weights & Biases is available
+        and initialized; otherwise 'none'.
+    tb_writer : SummaryWriter, optional
+        TensorBoard writer if using 'tensorboard' or 'both'.
+    log_prefix : str, optional
+        Prefix for the scalar key, default is 'train/loss'.
+    """
+
+    def __init__(
+        self,
+        inner_loss: nn.Module,
+        dataset_name: str,
+        log_backend: str = "auto",
+        tb_writer: Optional["SummaryWriter"] = None,
+        log_prefix: str = "train/loss",
+    ) -> None:
+        super().__init__()
+        self.inner = inner_loss
+        self.dataset_name = dataset_name
+        self.tb_writer = tb_writer
+        self.log_prefix = log_prefix
+        self._step = 0
+
+        if log_backend == "auto":
+            if wandb is not None and getattr(wandb, "run", None) is not None:
+                self.log_backend = "wandb"
+            else:
+                self.log_backend = "none"
+        else:
+            self.log_backend = log_backend
+
+    def forward(self, features: Dict[str, Any], labels: Optional[torch.Tensor] = None) -> torch.Tensor:
+        loss: torch.Tensor = self.inner(features, labels)
+        self._step += 1
+
+        key = f"{self.log_prefix}/{self.dataset_name}"
+        val = float(loss.detach().item())
+
+        # Lightweight, optional logging
+        logging.info("%s: %.6f", key, val)
+        if self.log_backend in ("tensorboard", "both") and self.tb_writer is not None:
+            self.tb_writer.add_scalar(key, val, self._step)
+        if self.log_backend in ("wandb", "both") and (wandb is not None and getattr(wandb, "run", None) is not None):
+            # Let W&B manage the step; keeping commit=False makes multiple logs per step play nice
+            wandb.log({key: val}, commit=False)
+
+        return loss
+
+
+def _instantiate_loss(loss_cls: type, model: nn.Module, **kwargs: Any) -> nn.Module:
+    """
+    Instantiate a Sentence-Transformers loss class with best-effort argument matching.
+
+    Many ST loss constructors accept `model` (e.g., MultipleNegativesRankingLoss),
+    while some custom ones might not. This helper inspects the signature and only
+    passes supported args.
+    """
+    sig = inspect.signature(loss_cls.__init__)
+    accepted = set(sig.parameters.keys())
+    ctor_kwargs = {}
+    if "model" in accepted:
+        ctor_kwargs["model"] = model
+    for k, v in kwargs.items():
+        if k in accepted:
+            ctor_kwargs[k] = v
+    return loss_cls(**ctor_kwargs)  # type: ignore[misc]
+
+
+def get_loss(
+    *,
+    model: nn.Module,
+    dataset_type: str,
+    loss_name: Optional[str] = None,
+    dataset_name: Optional[str] = None,
+    log_backend: str = "auto",
+    tb_writer: Optional["SummaryWriter"] = None,
+    log_prefix: str = "train/loss",
+    **loss_kwargs: Any,
+) -> nn.Module:
+    """
+    Return a wrapped Sentence-Transformers loss with per-dataset logging.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The Sentence-Transformers model (or compatible) used by the loss.
+    dataset_type : {'pairs', 'multiplets'}
+        The dataset structure; used to validate/choose defaults.
+    loss_name : str, optional
+        Name of the loss in `sentence_transformers.losses` (e.g., 'MultipleNegativesRankingLoss').
+        If None, a sensible default is chosen based on `dataset_type`.
+    dataset_name : str, optional
+        Name used to tag logs (recommended: match the key in your `train_dataset` dict).
+    log_backend : {'auto', 'wandb', 'tensorboard', 'both', 'none'}, default 'auto'
+        Where to emit per-dataset training loss. 'auto' uses W&B if available, else none.
+    tb_writer : SummaryWriter, optional
+        TensorBoard writer when using 'tensorboard' or 'both'.
+    log_prefix : str, default 'train/loss'
+        Scalar key prefix. Final key will be f"{log_prefix}/{dataset_name}".
+    **loss_kwargs
+        Extra keyword arguments forwarded to the underlying loss constructor
+        (e.g., `scale=20.0`, `similarity_fct=...`).
+
+    Returns
+    -------
+    nn.Module
+        A loss module ready for `SentenceTransformerTrainer(..., loss={dataset_name: loss})`
+        or the classic `fit(train_objectives=[(dl, loss), ...])` API.
+
+    Notes
+    -----
+    - This function validates `loss_name` against simple presets by `dataset_type`
+      and wraps the instantiated loss in `PerDatasetLossLogger` so that each forward
+      call emits a scalar to your chosen backend.
+    - Works seamlessly with W&B's Transformers callback: your custom scalars appear
+      in the same run without interfering with trainer-reported metrics.
+    """
+    pairs_losses = {"ContrastiveLoss", "OnlineContrastiveLoss"}
+    multiplets_losses = {
+        "MultipleNegativesRankingLoss",
+        "CachedMultipleNegativesRankingLoss",
+        "CachedGISTEmbedLoss",
+    }
+
+    if dataset_type not in {"pairs", "multiplets"}:
+        raise ValueError(f"Unknown dataset_type '{dataset_type}'. Expected 'pairs' or 'multiplets'.")
+
+    if dataset_type == "pairs":
+        default = "ContrastiveLoss"
+        allowed = pairs_losses
+    else:
+        default = "MultipleNegativesRankingLoss"
+        allowed = multiplets_losses
+
+    if loss_name is None:
+        loss_name = default
+    elif loss_name not in allowed:
+        raise ValueError(
+            f"Loss '{loss_name}' is not supported for {dataset_type} dataset. "
+            f"Choose from {sorted(allowed)}."
+        )
+
+    try:
+        LossClass = getattr(losses, loss_name)
+    except AttributeError as e:
+        raise ValueError(f"Loss class '{loss_name}' not found in sentence_transformers.losses") from e
+
+    # Instantiate the underlying loss, passing `model` only if the constructor expects it
+    inner = _instantiate_loss(LossClass, model=model, **loss_kwargs)
+
+    # If no dataset_name provided, fall back to the loss name
+    ds_name = dataset_name or loss_name
+
+    return PerDatasetLossLogger(
+        inner_loss=inner,
+        dataset_name=ds_name,
+        log_backend=log_backend,
+        tb_writer=tb_writer,
+        log_prefix=log_prefix,
+    )
+    
+'''
 def get_loss(dataset_type: str, loss_name: str = None):
     """
     Return a suitable loss object based on the provided loss name and dataset type.
@@ -892,7 +1085,7 @@ def get_loss(dataset_type: str, loss_name: str = None):
         raise f"Loss class '{loss_name}' not found in sentence_transformers.losses" from e
     # Instantiate the loss class with the given model
     return LossClass
-
+'''
 
 def get_evaluator(
     dataset_type: str, dataset, evaluator_name: str | None = None, batch_size: int = 32, current_eval_name: str = None
