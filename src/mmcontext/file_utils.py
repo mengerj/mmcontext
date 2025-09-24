@@ -392,7 +392,7 @@ def download_and_extract_links(
     *,
     temp_dir: str | Path | None = None,
     overwrite: bool = False,
-    extract: bool = True,  # NEW – choose A (False) or B (True)
+    extract: bool = True,
 ) -> dict[str, Path]:
     """
     Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either

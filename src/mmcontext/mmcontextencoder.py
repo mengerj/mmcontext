@@ -41,13 +41,14 @@ from safetensors.torch import save_model as save_safetensors_model
 from sentence_transformers.models import Module, Pooling
 from transformers import AutoModel, AutoTokenizer
 
-from mmcontext.file_utils import (
+from .adapters import AdapterModule
+
+# Import local dependencies using relative imports (works with package structure)
+from .file_utils import (
     build_embedding_df,
     collect_unique_links,
     download_and_extract_links,
 )
-
-from .adapters import AdapterModule
 from .omicsencoder import MiniOmicsModel
 from .onehot import OneHotTextEncoder
 

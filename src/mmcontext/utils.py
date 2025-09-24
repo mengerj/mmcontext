@@ -1,8 +1,12 @@
+from __future__ import annotations
+
+import inspect
 import logging
 import os
 import re
 from collections.abc import Iterable
 from datetime import datetime
+from typing import Any, Optional
 
 import anndata
 import numpy as np
@@ -12,7 +16,18 @@ import scipy.sparse as sp
 import torch
 from omegaconf import DictConfig
 from sentence_transformers import evaluation, losses
+from torch import nn
 from tqdm import tqdm
+
+try:
+    import wandb  # optional; wrapper no-ops if not available or not initialized
+except Exception:  # pragma: no cover
+    wandb = None
+
+try:
+    from torch.utils.tensorboard import SummaryWriter  # optional
+except Exception:  # pragma: no cover
+    SummaryWriter = None
 
 logger = logging.getLogger(__name__)
 
@@ -845,26 +860,6 @@ def compute_cosine_similarity(sample_embeddings, query_embeddings, device="cpu")
     sim = sim_t.cpu().numpy()
     return sim
 
-from __future__ import annotations
-
-import inspect
-import logging
-from typing import Any, Dict, Optional
-
-import torch
-from torch import nn
-from sentence_transformers import losses
-
-try:
-    import wandb  # optional; wrapper no-ops if not available or not initialized
-except Exception:  # pragma: no cover
-    wandb = None
-
-try:
-    from torch.utils.tensorboard import SummaryWriter  # optional
-except Exception:  # pragma: no cover
-    SummaryWriter = None
-
 
 class PerDatasetLossLogger(nn.Module):
     """
@@ -890,7 +885,7 @@ class PerDatasetLossLogger(nn.Module):
         inner_loss: nn.Module,
         dataset_name: str,
         log_backend: str = "auto",
-        tb_writer: Optional["SummaryWriter"] = None,
+        tb_writer: SummaryWriter | None = None,
         log_prefix: str = "train/loss",
     ) -> None:
         super().__init__()
@@ -908,7 +903,8 @@ class PerDatasetLossLogger(nn.Module):
         else:
             self.log_backend = log_backend
 
-    def forward(self, features: Dict[str, Any], labels: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, features: dict[str, Any], labels: torch.Tensor | None = None) -> torch.Tensor:
+        """Forward pass for the PerDatasetLossLogger."""
         loss: torch.Tensor = self.inner(features, labels)
         self._step += 1
 
@@ -949,10 +945,10 @@ def get_loss(
     *,
     model: nn.Module,
     dataset_type: str,
-    loss_name: Optional[str] = None,
-    dataset_name: Optional[str] = None,
+    loss_name: str | None = None,
+    dataset_name: str | None = None,
     log_backend: str = "auto",
-    tb_writer: Optional["SummaryWriter"] = None,
+    tb_writer: SummaryWriter | None = None,
     log_prefix: str = "train/loss",
     **loss_kwargs: Any,
 ) -> nn.Module:
@@ -1015,8 +1011,7 @@ def get_loss(
         loss_name = default
     elif loss_name not in allowed:
         raise ValueError(
-            f"Loss '{loss_name}' is not supported for {dataset_type} dataset. "
-            f"Choose from {sorted(allowed)}."
+            f"Loss '{loss_name}' is not supported for {dataset_type} dataset. Choose from {sorted(allowed)}."
         )
 
     try:
@@ -1037,7 +1032,8 @@ def get_loss(
         tb_writer=tb_writer,
         log_prefix=log_prefix,
     )
-    
+
+
 '''
 def get_loss(dataset_type: str, loss_name: str = None):
     """
@@ -1086,6 +1082,7 @@ def get_loss(dataset_type: str, loss_name: str = None):
     # Instantiate the loss class with the given model
     return LossClass
 '''
+
 
 def get_evaluator(
     dataset_type: str, dataset, evaluator_name: str | None = None, batch_size: int = 32, current_eval_name: str = None

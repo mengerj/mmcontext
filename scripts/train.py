@@ -20,7 +20,7 @@ from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
-from mmcontext.models.mmcontextencoder import MMContextEncoder
+from mmcontext.mmcontextencoder import MMContextEncoder
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
 from mmcontext.utils import (  # , load_test_adata_from_hf_dataset
@@ -653,7 +653,7 @@ def main(cfg: DictConfig):
 
     # Validate dataset configurations before proceeding
     validate_dataset_configurations(cfg)
-    #whether to force redownload the dataset
+    # whether to force redownload the dataset
     download_mode = "force_redownload" if getattr(cfg, "force_refresh_cache", False) else "reuse_dataset_if_exists"
     # Check CUDA availability if force_cuda is enabled
     if getattr(cfg, "force_cuda", False):
@@ -810,7 +810,10 @@ def main(cfg: DictConfig):
                         f"Found existing revision '{revision_name}' for dataset '{dataset_name}', loading directly"
                     )
                     dataset_ready = load_dataset(
-                        f"jo-mengr/{dataset_name}", revision=revision_name, cache_dir=cache_dir, download_mode=download_mode
+                        f"jo-mengr/{dataset_name}",
+                        revision=revision_name,
+                        cache_dir=cache_dir,
+                        download_mode=download_mode,
                     )
                     logger.info(f"Successfully loaded preprocessed dataset from revision '{revision_name}'")
                 else:
@@ -821,11 +824,12 @@ def main(cfg: DictConfig):
                     # Load raw dataset and process it
                     dataset = load_dataset(f"jo-mengr/{dataset_name}", cache_dir=cache_dir, download_mode=download_mode)
                     logger.info(f"Raw dataset loaded - Name: {dataset_name}, Keys: {list(dataset.keys())}")
-
+                    # build a dataset specific cache directory
+                    dataset_cache_dir = f"{adata_cache_dir}/{dataset_name}"
                     dataset_ready = prepare_ds(
                         dataset,
                         dataset_config,
-                        adata_cache_dir,
+                        dataset_cache_dir,
                         dataset_name,
                         primary_cell_sentence,
                         model,
@@ -876,7 +880,9 @@ def main(cfg: DictConfig):
                 val_datasets[train_name] = dataset_ready["val"]
 
                 # Create loss function for this dataset type
-                losses[train_name] = get_loss(model=model,dataset_type=dataset_type,dataset_name=train_name,log_backend="auto")
+                losses[train_name] = get_loss(
+                    model=model, dataset_type=dataset_type, dataset_name=train_name, log_backend="wandb"
+                )
 
                 evaluator = get_evaluator(
                     dataset_type=dataset_type,
@@ -904,7 +910,9 @@ def main(cfg: DictConfig):
                 logger.info(f"Bio dataset '{dataset_name}' will be processed as text_only")
 
                 # Load the dataset directly using the provided ID
-                dataset = load_dataset(dataset_id, revision=bio_dataset_config.revision, cache_dir=cache_dir, download_mode=download_mode)
+                dataset = load_dataset(
+                    dataset_id, revision=bio_dataset_config.revision, cache_dir=cache_dir, download_mode=download_mode
+                )
                 logger.info(f"Bio dataset loaded - Keys: {list(dataset.keys())}")
 
                 # Log dataset splits and sizes
@@ -1069,7 +1077,7 @@ def main(cfg: DictConfig):
         print("unique_model_name", unique_model_name)
         model.save(model_dir)
         if cfg.get("push_to_hub", True):
-            model.push_to_hub(f"jo-mengr/{unique_model_name}",private=True)
+            model.push_to_hub(f"jo-mengr/{unique_model_name}", private=True)
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
     except Exception as e:
         logger.exception(e)
