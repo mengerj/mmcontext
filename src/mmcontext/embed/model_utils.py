@@ -13,7 +13,7 @@ from sentence_transformers import SentenceTransformer
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from mmcontext.models.mmcontextencoder import MMContextEncoder as MMEnc
+from mmcontext.mmcontextencoder import MMContextEncoder as MMEnc
 
 logger = logging.getLogger(__name__)
 
