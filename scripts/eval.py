@@ -7,7 +7,7 @@ from omegaconf import DictConfig
 
 from mmcontext.eval.eval_pipeline import run_eval_suite, run_scib_evaluation
 
-# from mmcontext.file_utils import copy_resolved_config
+# from mmcontext.utils import copy_resolved_config
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)

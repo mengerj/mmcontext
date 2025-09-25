@@ -19,7 +19,7 @@ from omegaconf import DictConfig
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mmcontext.embed.embed_pipeline import process_single_dataset_model
-from mmcontext.file_utils import copy_resolved_config
+from mmcontext.utils import copy_resolved_config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

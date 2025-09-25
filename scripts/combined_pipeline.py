@@ -9,7 +9,7 @@ from omegaconf import DictConfig
 from mmcontext.embed.embed_pipeline import process_single_dataset_model as embed_single
 from mmcontext.eval.eval_pipeline import process_single_dataset_model as eval_single
 from mmcontext.eval.eval_pipeline import run_scib_evaluation
-from mmcontext.file_utils import copy_resolved_config
+from mmcontext.utils import copy_resolved_config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
