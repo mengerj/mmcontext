@@ -408,6 +408,8 @@ class MMContextEncoder(Module):
         "max_seq_length",
         "text_model_kwargs",
         "use_text_adapter",
+        "current_vocab_size",
+        "tokenizer_added_tokens",
     ]
 
     def __init__(
@@ -430,6 +432,8 @@ class MMContextEncoder(Module):
         max_seq_length: int | None = None,
         text_model_kwargs: dict | None = None,
         use_text_adapter: bool = True,
+        current_vocab_size: int | None = None,
+        tokenizer_added_tokens: list | str | None = None,
     ) -> None:
         super().__init__()
         if registered_data_origin not in self.VALID_DATA_ORIGINS:
@@ -870,6 +874,27 @@ class MMContextEncoder(Module):
             else:
                 serializable_kwargs[key] = value
 
+        # Check if tokenizer was resized and store vocab size info
+        current_vocab_size = None
+        tokenizer_added_tokens = None
+        if hasattr(self, 'processor') and hasattr(self.processor, 'text_tok') and self.processor.text_tok is not None:
+            current_vocab_size = len(self.processor.text_tok)
+            # Get added tokens if any
+            try:
+                added_tokens = self.processor.text_tok.get_added_vocab()
+                if added_tokens:
+                    tokenizer_added_tokens = list(added_tokens.keys())
+            except Exception:
+                # Fallback: just store the vocab size difference
+                try:
+                    from transformers import AutoConfig
+                    config = AutoConfig.from_pretrained(self.text_encoder_name)
+                    original_vocab_size = config.vocab_size
+                    if current_vocab_size > original_vocab_size:
+                        tokenizer_added_tokens = f"<{current_vocab_size - original_vocab_size}_added_tokens>"
+                except Exception:
+                    pass
+
         return {
             "text_encoder_name": self.text_encoder_name
             if isinstance(self.text_encoder_name, str)
@@ -888,6 +913,8 @@ class MMContextEncoder(Module):
             "max_seq_length": self.max_seq_length,
             "text_model_kwargs": serializable_kwargs,
             "use_text_adapter": self.use_text_adapter,
+            "current_vocab_size": current_vocab_size,
+            "tokenizer_added_tokens": tokenizer_added_tokens,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True, **kwargs) -> None:
@@ -914,6 +941,25 @@ class MMContextEncoder(Module):
             # Remove omics embeddings but keep adapter weights
             state = {k: v for k, v in state.items() if not k.startswith("omics_encoder.embeddings")}
 
+        # Check if tokenizer has been resized (has additional tokens beyond original vocab)
+        current_vocab_size = None
+        original_vocab_size = None
+        tokenizer_was_resized = False
+        
+        if hasattr(self, 'processor') and hasattr(self.processor, 'text_tok') and self.processor.text_tok is not None:
+            current_vocab_size = len(self.processor.text_tok)
+            # Get original vocab size from the pretrained model config
+            try:
+                from transformers import AutoConfig
+                config = AutoConfig.from_pretrained(self.text_encoder_name)
+                original_vocab_size = config.vocab_size
+                tokenizer_was_resized = current_vocab_size > original_vocab_size
+                
+                if tokenizer_was_resized:
+                    logger.info(f"Detected resized tokenizer: {original_vocab_size} -> {current_vocab_size} tokens")
+            except Exception as e:
+                logger.warning(f"Could not determine original vocab size: {e}")
+
         # Create a temporary model with the filtered state dict for saving
         temp_model = MMContextEncoder(
             text_encoder_name=self.text_encoder_name,
@@ -929,6 +975,17 @@ class MMContextEncoder(Module):
             text_model_kwargs=self.text_model_kwargs,
             use_text_adapter=self.use_text_adapter,
         )
+        
+        # If tokenizer was resized, we need to resize the temp model's embeddings too
+        if tokenizer_was_resized and current_vocab_size is not None:
+            logger.info(f"Resizing temporary model embeddings to match current vocab size: {current_vocab_size}")
+            temp_model.text_encoder.resize_token_embeddings(current_vocab_size)
+            
+            # Also update the processor's tokenizer to match
+            if hasattr(temp_model, 'processor') and hasattr(temp_model.processor, 'text_tok') and temp_model.processor.text_tok is not None:
+                # Copy the tokenizer state from the original model
+                temp_model.processor.text_tok = self.processor.text_tok
+
         # Load the filtered state dict into the temporary model
         temp_model.load_state_dict(state, strict=False)
 
@@ -1032,8 +1089,34 @@ class MMContextEncoder(Module):
         if "text_model_kwargs" in cfg:
             cfg["text_model_kwargs"] = cls._deserialize_text_model_kwargs(cfg["text_model_kwargs"])
 
+        # Extract tokenizer information from config
+        current_vocab_size = cfg.pop("current_vocab_size", None)
+        tokenizer_added_tokens = cfg.pop("tokenizer_added_tokens", None)
+
         # Create model from config without omics embedding
         model = cls(**cfg)
+
+        # Handle tokenizer resizing if needed
+        if current_vocab_size is not None and hasattr(model, 'processor') and hasattr(model.processor, 'text_tok') and model.processor.text_tok is not None:
+            original_vocab_size = len(model.processor.text_tok)
+            if current_vocab_size > original_vocab_size:
+                logger.info(f"Restoring tokenizer size from {original_vocab_size} to {current_vocab_size}")
+                
+                # Add tokens if we have the token list
+                if tokenizer_added_tokens and isinstance(tokenizer_added_tokens, list):
+                    logger.info(f"Adding saved tokens: {tokenizer_added_tokens}")
+                    num_added = model.processor.text_tok.add_tokens(tokenizer_added_tokens)
+                    logger.info(f"Added {num_added} tokens to tokenizer")
+                else:
+                    # Fallback: add placeholder tokens to match the size
+                    tokens_to_add = current_vocab_size - original_vocab_size
+                    placeholder_tokens = [f"<PLACEHOLDER_{i}>" for i in range(tokens_to_add)]
+                    logger.warning(f"Adding {tokens_to_add} placeholder tokens to match saved vocab size")
+                    model.processor.text_tok.add_tokens(placeholder_tokens)
+                
+                # Resize model embeddings to match
+                model.text_encoder.resize_token_embeddings(len(model.processor.text_tok))
+                logger.info(f"Resized model embeddings to {len(model.processor.text_tok)} tokens")
 
         # Load torch weights
         cls.load_torch_weights(
