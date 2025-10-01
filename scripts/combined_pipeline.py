@@ -6,10 +6,11 @@ from typing import Any
 import hydra
 from omegaconf import DictConfig
 
+from mmcontext.embed.cellwhisperer_utils import process_cellwhisperer_dataset_model as cellwhisperer_single
 from mmcontext.embed.embed_pipeline import process_single_dataset_model as embed_single
 from mmcontext.eval.eval_pipeline import process_single_dataset_model as eval_single
 from mmcontext.eval.eval_pipeline import run_scib_evaluation
-from mmcontext.file_utils import copy_resolved_config
+from mmcontext.utils import copy_resolved_config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -88,6 +89,69 @@ def process_combined_dataset_model(
                 return dataset_name, model_name_for_path, False, f"Embedding failed: {embed_error}", 0
         else:
             logger.info(f"✓ Embedding completed for {dataset_name}/{model_name_for_path}")
+
+        # ═══════════════════════════════════════════════════════════════
+        # STEP 1.5: CELLWHISPERER PROCESSING (if enabled)
+        # ═══════════════════════════════════════════════════════════════
+        if cfg.settings.get("run_cellwhisperer", False):
+            logger.info(f"Step 1.5/2: Running CellWhisperer for {dataset_name}")
+
+            # Create CellWhisperer model config
+            from omegaconf import DictConfig
+
+            cellwhisperer_model_cfg = DictConfig({"name": "cellwhisperer", "source": "cellwhisperer"})
+
+            modules_dir = Path(
+                cfg.settings.get("cellwhisperer_modules_dir", cfg.settings.computation_root + "/../modules")
+            )
+
+            cw_dataset_name, cw_model_name, cw_success, cw_error = cellwhisperer_single(
+                ds_cfg=ds_cfg,
+                model_cfg=cellwhisperer_model_cfg,
+                run_cfg=cfg.embed,
+                output_root=cfg.settings.computation_root,
+                output_format=cfg.settings.output_format,
+                adata_cache=cfg.settings.adata_cache,
+                modules_dir=modules_dir,
+                hf_cache=cfg.settings.hf_cache,
+            )
+
+            if not cw_success:
+                if cw_error == "skipped_existing":
+                    logger.info(f"CellWhisperer embeddings already exist for {dataset_name}")
+                else:
+                    logger.warning(f"CellWhisperer failed for {dataset_name}: {cw_error}")
+                    # Don't fail the entire pipeline if CellWhisperer fails
+            else:
+                logger.info(f"✓ CellWhisperer completed for {dataset_name}")
+
+                # Also run evaluation for CellWhisperer
+                logger.info(f"Running evaluation for CellWhisperer: {dataset_name}")
+                try:
+                    _cw_eval_results = eval_single(
+                        ds_cfg=ds_cfg,
+                        model_cfg=cellwhisperer_model_cfg,
+                        eval_cfg=cfg.eval,
+                        output_root=cfg.settings.computation_root,
+                    )
+
+                    # Move CellWhisperer evaluation results to final directory
+                    cw_computation_eval_dir = (
+                        Path(cfg.settings.computation_root) / dataset_name / "cellwhisperer" / "eval"
+                    )
+                    cw_final_eval_dir = Path(cfg.settings.final_root) / dataset_name / "cellwhisperer" / "eval"
+
+                    if cw_computation_eval_dir.exists():
+                        logger.info(f"Moving CellWhisperer evaluation results to {cw_final_eval_dir}")
+                        cw_final_eval_dir.parent.mkdir(parents=True, exist_ok=True)
+                        if cw_final_eval_dir.exists():
+                            shutil.rmtree(cw_final_eval_dir)
+                        shutil.move(str(cw_computation_eval_dir), str(cw_final_eval_dir))
+                        logger.info("✓ Moved CellWhisperer evaluation results")
+
+                except Exception as e:
+                    logger.warning(f"CellWhisperer evaluation failed for {dataset_name}: {e}")
+                    # Continue with main pipeline even if CellWhisperer evaluation fails
 
         # ═══════════════════════════════════════════════════════════════
         # STEP 2: EVALUATION

@@ -31,6 +31,7 @@ from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
+from mmcontext.hub_utils import get_model_info_from_config, upload_model_to_hub
 from mmcontext.models.mmcontextencoder import MMContextEncoder
 from mmcontext.utils import (
     get_evaluator,
@@ -672,8 +673,37 @@ def main(cfg: DictConfig):
         os.makedirs(model_dir, exist_ok=True)
         print("unique_model_name", unique_model_name)
         model.save(model_dir)
+
         if cfg.get("push_to_hub", True):
-            model.push_to_hub(f"jo-mengr/{unique_model_name}", private=True)
+            # Prepare training details
+            training_details = f"""- **Text Encoder**: {cfg.text_encoder.name}
+- **Embedding Method**: {cfg.embedding_method}
+- **Output Dimension**: {cfg.adapter.output_dim}
+- **Training Datasets**: {len(cfg.datasets)} datasets
+- **Batch Size**: {cfg.training.per_device_train_batch_size}
+- **Learning Rate**: {cfg.training.learning_rate}
+- **Training Steps**: {cfg.training.max_steps if cfg.training.get("max_steps") else "Epoch-based"}"""
+
+            # Check if tutorial notebook exists
+            tutorial_notebook_path = Path("templates/usage_tutorial.ipynb")
+            notebook_path = tutorial_notebook_path if tutorial_notebook_path.exists() else None
+
+            # Upload with custom model card
+            repo_url = upload_model_to_hub(
+                model=model,
+                repo_id=f"jo-mengr/{unique_model_name}",
+                model_name=unique_model_name.replace("-", " ").title(),
+                text_encoder=cfg.text_encoder.name,
+                embedding_method=cfg.embedding_method,
+                output_dim=cfg.adapter.output_dim,
+                training_details=training_details,
+                tutorial_notebook="usage_tutorial.ipynb" if notebook_path else None,
+                notebook_path=notebook_path,
+                private=True,
+                commit_message=f"Upload trained {unique_model_name} model",
+            )
+            logger.info(f"Model uploaded to Hub: {repo_url}")
+
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
 
     except Exception as e:

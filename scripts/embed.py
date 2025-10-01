@@ -5,7 +5,7 @@ import hydra
 from omegaconf import DictConfig
 
 from mmcontext.embed.embed_pipeline import embed_pipeline
-from mmcontext.file_utils import copy_resolved_config
+from mmcontext.utils import copy_resolved_config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

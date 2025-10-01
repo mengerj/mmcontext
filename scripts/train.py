@@ -20,6 +20,7 @@ from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
+from mmcontext.hub_utils import upload_model_to_hub
 from mmcontext.mmcontextencoder import MMContextEncoder
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
@@ -1076,8 +1077,44 @@ def main(cfg: DictConfig):
         os.makedirs(model_dir, exist_ok=True)
         print("unique_model_name", unique_model_name)
         model.save(model_dir)
+
         if cfg.get("push_to_hub", True):
-            model.push_to_hub(f"jo-mengr/{unique_model_name}", private=True)
+            # Prepare training details from configuration
+            training_details = f"""- **Text Encoder**: {cfg.text_encoder.name}
+- **Embedding Method**: {cfg.embedding_method if cfg.embedding_method else "Text-only"}
+- **Output Dimension**: {cfg.adapter.output_dim}
+- **Training Datasets**: {len(text_only_datasets) + len(numeric_datasets)} datasets
+- **Text-only Datasets**: {len(text_only_datasets)} ({", ".join(text_only_datasets) if text_only_datasets else "None"})
+- **Numeric Datasets**: {len(numeric_datasets)} ({", ".join(numeric_datasets) if numeric_datasets else "None"})
+- **Batch Size**: {cfg.trainer.per_device_train_batch_size}
+- **Learning Rate**: {cfg.trainer.learning_rate}
+- **Training Epochs**: {cfg.trainer.num_train_epochs}"""
+
+            # Add cs_length information if available
+            if text_only_cs_lengths:
+                unique_cs_lengths = list(set(text_only_cs_lengths))
+                training_details += f"\n- **Cell Sentence Lengths**: {unique_cs_lengths}"
+
+            # Check if tutorial notebook exists
+            tutorial_notebook_path = Path("templates/usage_tutorial.ipynb")
+            notebook_path = tutorial_notebook_path if tutorial_notebook_path.exists() else None
+
+            # Upload with custom model card
+            repo_url = upload_model_to_hub(
+                model=model,
+                repo_id=f"jo-mengr/{unique_model_name}",
+                model_name=unique_model_name.replace("-", " ").title(),
+                text_encoder=cfg.text_encoder.name,
+                embedding_method=cfg.embedding_method if cfg.embedding_method else "text_only",
+                output_dim=cfg.adapter.output_dim,
+                training_details=training_details,
+                tutorial_notebook="usage_tutorial.ipynb" if notebook_path else None,
+                notebook_path=notebook_path,
+                private=True,
+                commit_message=f"Upload trained {unique_model_name} model",
+            )
+            logger.info(f"Model uploaded to Hub: {repo_url}")
+
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
     except Exception as e:
         logger.exception(e)
