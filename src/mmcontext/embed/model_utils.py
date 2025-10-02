@@ -87,7 +87,7 @@ def load_st_model(model_id: str | Path) -> SentenceTransformer:
         logger.warning(f"CUDA not available in worker process {os.getpid()}, using CPU")
 
     # Load model and explicitly move to device
-    model = SentenceTransformer(model_id, device=device)
+    model = SentenceTransformer(model_id, device=device, trust_remote_code=True)
     logger.info(f"Model loaded on device: {model.device}")
 
     return model
@@ -142,6 +142,7 @@ def prepare_model_and_embed(
         a column share_link, which points to a zarr store that can be used to get initial embeddings for each token.
     overwrite : bool, default ``True``
         If ``True``, the initial embeddings will be re-downloaded even if they already exist.
+
     Returns
     -------
     tuple[DataFrame, dict[str, Path] | None]
