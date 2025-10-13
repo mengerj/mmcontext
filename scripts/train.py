@@ -882,7 +882,11 @@ def main(cfg: DictConfig):
 
                 # Create loss function for this dataset type
                 losses[train_name] = get_loss(
-                    model=model, dataset_type=dataset_type, dataset_name=train_name, log_backend="wandb"
+                    model=model,
+                    dataset_type=dataset_type,
+                    dataset_name=train_name,
+                    log_backend="wandb",
+                    logging_steps=cfg.trainer.logging_steps,
                 )
 
                 evaluator = get_evaluator(
@@ -946,7 +950,12 @@ def main(cfg: DictConfig):
 
                 # Create loss function for this dataset type
                 losses[dataset_name] = get_loss(
-                    model=model, dataset_type=dataset_type, dataset_name=dataset_name, log_backend="wandb")
+                    model=model,
+                    dataset_type=dataset_type,
+                    dataset_name=dataset_name,
+                    log_backend="wandb",
+                    logging_steps=cfg.trainer.logging_steps,
+                )
 
                 # Note: No evaluators created for bio datasets
                 logger.info(f"Finished processing bio dataset: {dataset_name}\n")

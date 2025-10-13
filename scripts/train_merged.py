@@ -574,7 +574,13 @@ def main(cfg: DictConfig):
             default_dataset_type = getattr(cfg.omics_datasets[0], "type", "multiplets")
 
         # Create single loss function for the merged dataset
-        loss = get_loss(dataset_type=default_dataset_type)
+        loss = get_loss(
+            model=model,
+            dataset_type=default_dataset_type,
+            dataset_name="merged",
+            log_backend="wandb",
+            logging_steps=cfg.trainer.logging_steps,
+        )
 
         # Create evaluator for validation split if it exists
         evaluator = None

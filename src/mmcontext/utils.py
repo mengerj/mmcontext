@@ -881,6 +881,8 @@ class PerDatasetLossLogger(nn.Module):
         TensorBoard writer if using 'tensorboard' or 'both'.
     log_prefix : str, optional
         Prefix for the scalar key, default is 'train/loss'.
+    logging_steps : int, optional
+        Log every N steps. Default is 1 (log every step).
     """
 
     def __init__(
@@ -890,12 +892,14 @@ class PerDatasetLossLogger(nn.Module):
         log_backend: str = "auto",
         tb_writer: SummaryWriter | None = None,
         log_prefix: str = "train/loss",
+        logging_steps: int = 1,
     ) -> None:
         super().__init__()
         self.inner = inner_loss
         self.dataset_name = dataset_name
         self.tb_writer = tb_writer
         self.log_prefix = log_prefix
+        self.logging_steps = logging_steps
         self._step = 0
 
         if log_backend == "auto":
@@ -911,16 +915,20 @@ class PerDatasetLossLogger(nn.Module):
         loss: torch.Tensor = self.inner(features, labels)
         self._step += 1
 
-        key = f"{self.log_prefix}/{self.dataset_name}"
-        val = float(loss.detach().item())
+        # Only log if we're at a logging step
+        if self._step % self.logging_steps == 0:
+            key = f"{self.log_prefix}/{self.dataset_name}"
+            val = float(loss.detach().item())
 
-        # Lightweight, optional logging
-        logging.info("%s: %.6f", key, val)
-        if self.log_backend in ("tensorboard", "both") and self.tb_writer is not None:
-            self.tb_writer.add_scalar(key, val, self._step)
-        if self.log_backend in ("wandb", "both") and (wandb is not None and getattr(wandb, "run", None) is not None):
-            # Let W&B manage the step; keeping commit=False makes multiple logs per step play nice
-            wandb.log({key: val}, commit=False)
+            # Lightweight, optional logging
+            logging.info("%s: %.6f", key, val)
+            if self.log_backend in ("tensorboard", "both") and self.tb_writer is not None:
+                self.tb_writer.add_scalar(key, val, self._step)
+            if self.log_backend in ("wandb", "both") and (
+                wandb is not None and getattr(wandb, "run", None) is not None
+            ):
+                # Let W&B manage the step; keeping commit=False makes multiple logs per step play nice
+                wandb.log({key: val}, commit=False)
 
         return loss
 
@@ -953,6 +961,7 @@ def get_loss(
     log_backend: str = "auto",
     tb_writer: SummaryWriter | None = None,
     log_prefix: str = "train/loss",
+    logging_steps: int = 1,
     **loss_kwargs: Any,
 ) -> nn.Module:
     """
@@ -975,6 +984,8 @@ def get_loss(
         TensorBoard writer when using 'tensorboard' or 'both'.
     log_prefix : str, default 'train/loss'
         Scalar key prefix. Final key will be f"{log_prefix}/{dataset_name}".
+    logging_steps : int, default 1
+        Log every N steps. Useful to control logging frequency and reduce log bloat.
     **loss_kwargs
         Extra keyword arguments forwarded to the underlying loss constructor
         (e.g., `scale=20.0`, `similarity_fct=...`).
@@ -1034,6 +1045,7 @@ def get_loss(
         log_backend=log_backend,
         tb_writer=tb_writer,
         log_prefix=log_prefix,
+        logging_steps=logging_steps,
     )
 
 
@@ -1157,16 +1169,30 @@ def get_evaluator(
                 f"Choose from {multiplets_evaluators}"
             )
 
-        required_keys = {"anchor", "positive", "negative_1"}  # Updated to match TripletEvaluator
-        if not required_keys.issubset(dataset.column_names):
-            raise ValueError(f"Dataset for 'multiplets' evaluator must contain keys: {required_keys}")
+        # Check for required keys with flexible negative column name
+        required_base_keys = {"anchor", "positive"}
+        if not required_base_keys.issubset(dataset.column_names):
+            raise ValueError(f"Dataset for 'multiplets' evaluator must contain keys: {required_base_keys}")
+
+        # Determine which negative column to use (prefer "negative" if both exist)
+        negative_col = None
+        if "negative" in dataset.column_names:
+            negative_col = "negative"
+        elif "negative_1" in dataset.column_names:
+            negative_col = "negative_1"
+        else:
+            raise ValueError(
+                f"Dataset for 'multiplets' evaluator must contain either 'negative' or 'negative_1' column. "
+                f"Available columns: {dataset.column_names}"
+            )
+
         try:
             EvaluatorClass = getattr(evaluation, evaluator_name)
 
             evaluator_obj = EvaluatorClass(
                 anchors=dataset["anchor"],
                 positives=dataset["positive"],
-                negatives=dataset["negative_1"],
+                negatives=dataset[negative_col],
                 name=current_eval_name,
             )
         except AttributeError as e:
