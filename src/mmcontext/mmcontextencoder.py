@@ -389,7 +389,7 @@ class MMContextEncoder(Module):
         should be used at all. Defaults to True.
     """
 
-    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "gs10k", "random"]
+    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "geneformer-v1", "gs", "gs10k", "random"]
 
     # Configuration attributes for SentenceTransformer Module base class
     config_keys = [
