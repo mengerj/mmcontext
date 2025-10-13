@@ -249,7 +249,7 @@ def create_cellwhisperer_embeddings_venv(
             cmd,
             capture_output=True,
             text=True,
-            timeout=600,  # 10 minute timeout
+            timeout=259200,  # 3 day timeout
         )
 
         logger.info(f"CellWhisperer script return code: {result.returncode}")
@@ -393,7 +393,7 @@ def process_cellwhisperer_dataset_model(
                 temp_adata_path,
                 modules_dir,
                 Path(cache_dir) if cache_dir else Path.cwd(),
-                batch_size=8,
+                batch_size=run_cfg.batch_size,
                 annotation_keys=annotation_keys,
             )
 
