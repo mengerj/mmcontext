@@ -945,7 +945,8 @@ def main(cfg: DictConfig):
                     logger.warning(f"Bio dataset '{dataset_name}' has no 'train' split, skipping")
 
                 # Create loss function for this dataset type
-                losses[dataset_name] = get_loss(dataset_type=dataset_type)
+                losses[dataset_name] = get_loss(
+                    model=model, dataset_type=dataset_type, dataset_name=dataset_name, log_backend="wandb")
 
                 # Note: No evaluators created for bio datasets
                 logger.info(f"Finished processing bio dataset: {dataset_name}\n")
