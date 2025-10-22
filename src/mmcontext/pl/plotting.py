@@ -27,8 +27,8 @@ def plot_query_scores_with_labels_umap(
     queries: list[str],
     labels: list[str],
     label_key: str,
-    embedding_key: str = "X_umap",
     emb_key: str = "mmcontext_emb",
+    embedding_key: str = "X_umap",
     save_plot: bool = True,
     save_dir: str | None = None,
     nametag: str | None = None,
@@ -67,11 +67,11 @@ def plot_query_scores_with_labels_umap(
         List of label names, one per query (same length as queries)
     label_key : str
         Key in adata.obs containing the label information
-    embedding_key : str, optional
-        Key in adata.obsm containing UMAP coordinates. If not present, UMAP will be computed.
-        Defaults to "X_umap"
     emb_key : str, optional
         Key in adata.obsm containing embeddings for UMAP computation. Defaults to "mmcontext_emb"
+    embedding_key : str, optional
+        Key in adata.obsm for caching computed UMAP coordinates. Existing coordinates
+        will be deleted and recomputed. Defaults to "X_umap"
     save_plot : bool, optional
         Whether to save plots. Defaults to True
     save_dir : str, optional
@@ -162,18 +162,20 @@ def plot_query_scores_with_labels_umap(
 
     logger.info(f"Validation passed. Processing {len(queries)} queries with corresponding labels")
 
-    # Prepare UMAP embedding
-    if embedding_key not in adata.obsm:
-        logger.info(f"Computing UMAP embedding using {emb_key}")
-        if emb_key not in adata.obsm:
-            raise ValueError(f"Embedding key '{emb_key}' not found in adata.obsm")
+    # Delete existing UMAP coordinates to ensure fresh computation
+    if embedding_key in adata.obsm:
+        logger.info(f"Deleting existing UMAP coordinates at '{embedding_key}'")
+        del adata.obsm[embedding_key]
 
-        # Compute UMAP
-        reducer = umap.UMAP(n_neighbors=umap_n_neighbors, min_dist=umap_min_dist, random_state=umap_random_state)
-        umap_embedding = reducer.fit_transform(adata.obsm[emb_key])
-        adata.obsm[embedding_key] = umap_embedding
+    # Compute UMAP embedding from the chosen embedding key
+    logger.info(f"Computing UMAP embedding using {emb_key}")
+    if emb_key not in adata.obsm:
+        raise ValueError(f"Embedding key '{emb_key}' not found in adata.obsm")
 
-    umap_coords = adata.obsm[embedding_key]
+    # Compute and cache UMAP
+    reducer = umap.UMAP(n_neighbors=umap_n_neighbors, min_dist=umap_min_dist, random_state=umap_random_state)
+    umap_coords = reducer.fit_transform(adata.obsm[emb_key])
+    adata.obsm[embedding_key] = umap_coords
 
     # Set up saving directory
     if save_plot and save_dir:
@@ -333,7 +335,7 @@ def plot_query_scores_with_labels_umap(
                 markerfacecolor=(0.7, 0.7, 0.7, 0.6),
                 markeredgecolor="black",
                 markeredgewidth=1,
-                markersize=16,
+                markersize=12,
                 label=f"Target: {label}",
                 linestyle="None",
             ),
@@ -344,7 +346,7 @@ def plot_query_scores_with_labels_umap(
                 color="w",
                 markerfacecolor=(0.7, 0.7, 0.7, 0.6),
                 markeredgecolor="none",
-                markersize=16,
+                markersize=12,
                 label="Other cells",
                 linestyle="None",
             ),
@@ -514,8 +516,15 @@ def plot_umap(
 
         # Prepare figure for plotting
         plt.figure(figsize=figsize)
-        if "cell_type_colors" in adata.uns:
-            del adata.uns["cell_type_colors"]
+
+        # Clean up any existing color palettes that might cause conflicts
+        # Clean up color palettes for the specific color_key(s) being used
+        if color_key is not None:
+            keys_to_clean = color_key if isinstance(color_key, list) else [color_key]
+            for key in keys_to_clean:
+                color_palette_key = f"{key}_colors"
+                if color_palette_key in adata.uns:
+                    del adata.uns[color_palette_key]
 
         # Apply font properties globally
         plt.rc("font", size=font_size, weight=font_weight, style=font_style)
