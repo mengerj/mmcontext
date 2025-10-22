@@ -13,7 +13,15 @@ class EvalResult(dict):
     """Just a `dict[str, float]` with pretty `__repr__`."""
 
     def __repr__(self):
-        return "\n".join(f"{k}: {v:0.4f}" for k, v in self.items())
+        lines = []
+        for k, v in self.items():
+            if isinstance(v, int | np.integer):
+                lines.append(f"{k}: {v}")
+            elif isinstance(v, float | np.floating):
+                lines.append(f"{k}: {v:0.4f}")
+            else:
+                lines.append(f"{k}: {v}")
+        return "\n".join(lines)
 
 
 class BaseEvaluator(ABC):
