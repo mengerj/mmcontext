@@ -1,0 +1,9 @@
+- source: jo-mengr/mmcontext-pubmedbert-pca-cxg_100k_dim2048
+  name: pca_cxg_100k_dim2048
+  text_only: false
+  layer_key: X_pca
+
+- source: jo-mengr/mmcontext-pubmedbert-pca-cxg_100k_dim2048-v2
+  name: pca_cxg_100k_dim2048_v2
+  text_only: false
+  layer_key: X_pca
