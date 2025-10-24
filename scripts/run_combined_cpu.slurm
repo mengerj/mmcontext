@@ -4,13 +4,15 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=72:00:00         # Max job time (3 days for combined pipeline)
-#SBATCH --array=1-2%1           # Array job: 1-2 with max 1 concurrent job (adjust %N for more parallel jobs)
+#SBATCH --array=1-3%3           # Array job
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_1" "model_list_2")  # Add more model configs here as needed
+MODEL_CONFIGS=("model_list_omics_enc_dim2048_1" "model_list_omics_enc_dim2048_2" "model_list_omics_enc_dim2048_3" "model_list_omics_enc_dim2048_4" "model_list_omics_enc_dim2048_5")  # Add more model configs here as needed
+run_cellwhisperer=false
+final_root="/scratch/global/menger/mmcontext_out/omics_enc_dim2048"
 
 # Validate array task ID
 if [[ ${SLURM_ARRAY_TASK_ID} -gt ${#MODEL_CONFIGS[@]} ]]; then
@@ -83,6 +85,8 @@ python3 scripts/combined_pipeline.py \
     --config-path=../conf \
     --config-name=combined_conf \
     models=${MODEL_CONFIG} \
+    settings.run_cellwhisperer=${run_cellwhisperer} \
+    settings.final_root=${final_root} \
     ++hydra.run.dir="$BASE_OUT"
     # Add additional overrides as needed:
     # settings.enable_parallel=true
