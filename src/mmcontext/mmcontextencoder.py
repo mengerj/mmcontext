@@ -30,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 import torch
@@ -389,7 +390,17 @@ class MMContextEncoder(Module):
         should be used at all. Defaults to True.
     """
 
-    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "geneformer-v1", "gs", "gs10k", "random"]
+    VALID_DATA_ORIGINS = [
+        "unregistered",
+        "pca",
+        "hvg",
+        "scvi_fm",
+        "geneformer",
+        "geneformer-v1",
+        "gs",
+        "gs10k",
+        "random",
+    ]
 
     # Configuration attributes for SentenceTransformer Module base class
     config_keys = [
@@ -877,7 +888,7 @@ class MMContextEncoder(Module):
         # Check if tokenizer was resized and store vocab size info
         current_vocab_size = None
         tokenizer_added_tokens = None
-        if hasattr(self, 'processor') and hasattr(self.processor, 'text_tok') and self.processor.text_tok is not None:
+        if hasattr(self, "processor") and hasattr(self.processor, "text_tok") and self.processor.text_tok is not None:
             current_vocab_size = len(self.processor.text_tok)
             # Get added tokens if any
             try:
@@ -888,6 +899,7 @@ class MMContextEncoder(Module):
                 # Fallback: just store the vocab size difference
                 try:
                     from transformers import AutoConfig
+
                     config = AutoConfig.from_pretrained(self.text_encoder_name)
                     original_vocab_size = config.vocab_size
                     if current_vocab_size > original_vocab_size:
@@ -945,16 +957,17 @@ class MMContextEncoder(Module):
         current_vocab_size = None
         original_vocab_size = None
         tokenizer_was_resized = False
-        
-        if hasattr(self, 'processor') and hasattr(self.processor, 'text_tok') and self.processor.text_tok is not None:
+
+        if hasattr(self, "processor") and hasattr(self.processor, "text_tok") and self.processor.text_tok is not None:
             current_vocab_size = len(self.processor.text_tok)
             # Get original vocab size from the pretrained model config
             try:
                 from transformers import AutoConfig
+
                 config = AutoConfig.from_pretrained(self.text_encoder_name)
                 original_vocab_size = config.vocab_size
                 tokenizer_was_resized = current_vocab_size > original_vocab_size
-                
+
                 if tokenizer_was_resized:
                     logger.info(f"Detected resized tokenizer: {original_vocab_size} -> {current_vocab_size} tokens")
             except Exception as e:
@@ -975,14 +988,18 @@ class MMContextEncoder(Module):
             text_model_kwargs=self.text_model_kwargs,
             use_text_adapter=self.use_text_adapter,
         )
-        
+
         # If tokenizer was resized, we need to resize the temp model's embeddings too
         if tokenizer_was_resized and current_vocab_size is not None:
             logger.info(f"Resizing temporary model embeddings to match current vocab size: {current_vocab_size}")
             temp_model.text_encoder.resize_token_embeddings(current_vocab_size)
-            
+
             # Also update the processor's tokenizer to match
-            if hasattr(temp_model, 'processor') and hasattr(temp_model.processor, 'text_tok') and temp_model.processor.text_tok is not None:
+            if (
+                hasattr(temp_model, "processor")
+                and hasattr(temp_model.processor, "text_tok")
+                and temp_model.processor.text_tok is not None
+            ):
                 # Copy the tokenizer state from the original model
                 temp_model.processor.text_tok = self.processor.text_tok
 
@@ -1097,11 +1114,16 @@ class MMContextEncoder(Module):
         model = cls(**cfg)
 
         # Handle tokenizer resizing if needed
-        if current_vocab_size is not None and hasattr(model, 'processor') and hasattr(model.processor, 'text_tok') and model.processor.text_tok is not None:
+        if (
+            current_vocab_size is not None
+            and hasattr(model, "processor")
+            and hasattr(model.processor, "text_tok")
+            and model.processor.text_tok is not None
+        ):
             original_vocab_size = len(model.processor.text_tok)
             if current_vocab_size > original_vocab_size:
                 logger.info(f"Restoring tokenizer size from {original_vocab_size} to {current_vocab_size}")
-                
+
                 # Add tokens if we have the token list
                 if tokenizer_added_tokens and isinstance(tokenizer_added_tokens, list):
                     logger.info(f"Adding saved tokens: {tokenizer_added_tokens}")
@@ -1113,7 +1135,7 @@ class MMContextEncoder(Module):
                     placeholder_tokens = [f"<PLACEHOLDER_{i}>" for i in range(tokens_to_add)]
                     logger.warning(f"Adding {tokens_to_add} placeholder tokens to match saved vocab size")
                     model.processor.text_tok.add_tokens(placeholder_tokens)
-                
+
                 # Resize model embeddings to match
                 model.text_encoder.resize_token_embeddings(len(model.processor.text_tok))
                 logger.info(f"Resized model embeddings to {len(model.processor.text_tok)} tokens")
@@ -1358,7 +1380,7 @@ class MMContextEncoder(Module):
     # public helper -----------------------------------------------------
     # ------------------------------------------------------------------
     @staticmethod
-    def get_initial_embeddings(
+    def get_initial_embeddings_from_adata_link(
         hf_dataset: DatasetDict | HFDataset,
         *,
         layer_key: str | None = None,
@@ -1366,7 +1388,7 @@ class MMContextEncoder(Module):
         download_dir: str | Path = "../../data/downloaded_chunks",
         extract_zip: bool = True,
         overwrite: bool = False,
-        link_column: str = "share_link",
+        link_column: str = "adata_link",
     ) -> tuple[pd.DataFrame, dict[str, Path]]:
         """
         Download all embedding chunks referenced in *hf_dataset* and return in a format suitable for registration.
@@ -1422,7 +1444,9 @@ class MMContextEncoder(Module):
         )
         # if the layer key is none, this means that only the download step was needed. The model will be used as text only without initial embeddings.
         if layer_key is None:
-            logger.info("No layer key provided, get_initial_embeddings() is returning empty DataFrame and path map.")
+            logger.info(
+                "No layer key provided, get_initial_embeddings_from_adata_link() is returning empty DataFrame and path map."
+            )
             return None, path_map
 
         # --------------------------------------------------------------
@@ -1433,7 +1457,7 @@ class MMContextEncoder(Module):
         split_frames: list[pd.DataFrame] = []
         for split_name, ds in hf_dataset.items():
             # translate split-specific links → local paths
-            local_map = {lk: path_map[lk] for lk in ds["share_link"]}
+            local_map = {lk: path_map[lk] for lk in ds[link_column]}
             df = build_embedding_df(
                 local_map,
                 layer_key=layer_key,
@@ -1446,6 +1470,83 @@ class MMContextEncoder(Module):
         logger.info("Combined embedding DataFrame shape: %s", full_df.shape)
         print("Use the returned DataFrame to register the embeddings with `register_initial_embeddings()`.")
         return full_df, path_map
+
+    @staticmethod
+    def create_token_dataframe_from_obsm(
+        adata: ad.AnnData,
+        *,
+        obsm_key: str,
+        token_col: str = "token",
+        embedding_col: str = "embedding",
+    ) -> pd.DataFrame:
+        """
+        Create a token DataFrame from embeddings stored in adata.obsm.
+
+        This method extracts embeddings from the specified obsm_key and returns a DataFrame
+        mapping cell IDs to their embeddings, formatted for use with the
+        register_initial_embeddings() method.
+
+        Parameters
+        ----------
+        adata : anndata.AnnData
+            Input AnnData object with embeddings stored in adata.obsm.
+        obsm_key : str
+            Key in adata.obsm containing the embeddings to extract.
+        token_col : str, optional
+            Name of the column containing cell/sample IDs. Defaults to "token".
+        embedding_col : str, optional
+            Name of the column containing embedding vectors. Defaults to "embedding".
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with columns:
+            - token_col: Cell/sample IDs from adata.obs.index
+            - embedding_col: Embedding vectors from adata.obsm[obsm_key]
+
+        Raises
+        ------
+        KeyError
+            If the specified obsm_key is not found in adata.obsm.
+
+        Examples
+        --------
+        >>> import anndata as ad
+        >>> from mmcontext import MMContextEncoder
+        >>> # Load your AnnData object with embeddings
+        >>> adata = ad.read_h5ad("your_data.h5ad")
+        >>> # Create token DataFrame from any obsm key
+        >>> token_df = MMContextEncoder.create_token_dataframe_from_obsm(adata, obsm_key="X_pca")
+        >>> # Register with your model
+        >>> model = MMContextEncoder("bert-base-uncased")
+        >>> model.register_initial_embeddings(token_df, data_origin="pca")
+
+        >>> # Or use with gs10k embeddings
+        >>> MMContextEncoder.add_gs10k_embeddings_to_adata(adata)
+        >>> token_df = MMContextEncoder.create_token_dataframe_from_obsm(adata, obsm_key="gs10k")
+        >>> model.register_initial_embeddings(token_df, data_origin="gs10k")
+        """
+        import anndata as ad
+
+        if obsm_key not in adata.obsm:
+            raise KeyError(f"Key '{obsm_key}' not found in adata.obsm. Available keys: {list(adata.obsm.keys())}")
+
+        # Extract embeddings from obsm
+        embedding_matrix = adata.obsm[obsm_key]
+
+        # Create DataFrame mapping cell IDs to their embeddings
+        token_df = pd.DataFrame(
+            {
+                token_col: adata.obs.index.tolist(),
+                embedding_col: [embedding_matrix[i] for i in range(embedding_matrix.shape[0])],
+            }
+        )
+
+        logger.info(f"Created token DataFrame from adata.obsm['{obsm_key}'] with shape: {token_df.shape}")
+        logger.info(f"Each embedding has dimension: {embedding_matrix.shape[1]}")
+        logger.info("Use the returned DataFrame to register the embeddings with `register_initial_embeddings()`.")
+
+        return token_df
 
     def prefix_ds(
         self,

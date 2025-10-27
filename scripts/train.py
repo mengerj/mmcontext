@@ -495,9 +495,9 @@ def prepare_ds(
         logger.info(f"Non-text_only dataset '{dataset_name}' - skipping cell sentence truncation")
 
     # Step 1: Handle embedding registration FIRST (needs access to raw dataset with all columns)
-    if not dataset_text_only and hasattr(model[0], "get_initial_embeddings"):
+    if not dataset_text_only and hasattr(model[0], "get_initial_embeddings_from_adata_link"):
         logger.info(f"Loading numeric embeddings for dataset '{dataset_name}' (before column selection)")
-        token_df, _ = model[0].get_initial_embeddings(
+        token_df, _ = model[0].get_initial_embeddings_from_adata_link(
             dataset,
             layer_key=precomputed_key,
             download_dir=adata_cache_dir,
@@ -505,13 +505,13 @@ def prepare_ds(
             overwrite=force_refresh_cache,
         )
         model[0].register_initial_embeddings(token_df, data_origin=chosen_method)
-    elif not dataset_text_only and not hasattr(model[0], "get_initial_embeddings"):
+    elif not dataset_text_only and not hasattr(model[0], "get_initial_embeddings_from_adata_link"):
         # If embedding_method is null, force text_only mode
         logger.error(
-            f"Dataset '{dataset_name}' has no get_initial_embeddings method. Can't process numeric embeddings."
+            f"Dataset '{dataset_name}' has no get_initial_embeddings_from_adata_link method. Can't process numeric embeddings."
         )
         raise ValueError(
-            f"Dataset '{dataset_name}' has no get_initial_embeddings method. Can't process numeric embeddings."
+            f"Dataset '{dataset_name}' has no get_initial_embeddings_from_adata_link method. Can't process numeric embeddings."
         )
     elif dataset_text_only:
         # In text_only mode, we'll use cell sentences directly
