@@ -13,9 +13,12 @@ import umap
 from scipy.stats import mannwhitneyu
 from sklearn.metrics import auc, confusion_matrix, roc_curve
 
+from .base import BaseEvaluator, EvalResult
+from .registry import register
+
 logger = logging.getLogger(__name__)
 
-
+'''
 class LabelSimilarityResult:
     """
     Simple result container for label similarity evaluation.
@@ -63,6 +66,7 @@ class LabelSimilarityResult:
             else:
                 lines.append(f"{k}: {v}")
         return "\n".join(lines)
+'''
 
 
 def _cosine_matrix(emb1: np.ndarray, emb2: np.ndarray) -> np.ndarray:
@@ -87,7 +91,8 @@ def _safe_tight_layout() -> None:
         pass
 
 
-class LabelSimilarity:
+@register
+class LabelSimilarity(BaseEvaluator):
     """
     Label Similarity Evaluator for Cell-Type Classification.
 
@@ -155,6 +160,10 @@ class LabelSimilarity:
         - Number of labels evaluated
     """
 
+    name = "LabelSimilarity"
+    requires_pair = True
+    produces_plot = True
+
     def __init__(
         self,
         auto_filter_labels: bool = False,
@@ -176,6 +185,7 @@ class LabelSimilarity:
         skip_plotting: bool = False,
         save_labels: bool = True,
         output_sample_size: int = 100,
+        **kw,
     ):
         """
         Initialize LabelSimilarity evaluator.
@@ -826,7 +836,8 @@ class LabelSimilarity:
         label_key: str,
         out_dir: Path | str | None = None,
         skip_plotting: bool = None,
-    ) -> LabelSimilarityResult:
+        **kw,
+    ) -> EvalResult:
         """
         Compute similarity scores and ROC metrics for each unique label.
 
@@ -853,7 +864,7 @@ class LabelSimilarity:
 
         Returns
         -------
-        LabelSimilarityResult
+        EvalResult
             Dictionary-like object containing evaluation metrics:
             - Per-label AUC scores: {label_name}/auc
             - Per-label accuracy: {label_name}/accuracy
@@ -950,7 +961,7 @@ class LabelSimilarity:
                 eval_dir, true_labels, predicted_labels, similarity_matrix, query_labels, label_key
             )
 
-        return LabelSimilarityResult(**out)
+        return EvalResult(**out)
 
     def plot(
         self,
@@ -980,6 +991,7 @@ class LabelSimilarity:
         text_dot_edge_color: str = None,
         text_dot_alpha: float = None,
         umap_method: str = None,
+        **kw,
     ) -> None:
         """
         Generate comprehensive visualizations for label similarity evaluation.
@@ -1042,6 +1054,8 @@ class LabelSimilarity:
             Transparency for text annotation dots
         umap_method : str, optional
             UMAP computation method ("combined", "separate")
+        **eval_cfg: Any
+            Additional evaluation configuration parameters
         """
         # Override class attribute if parameter is provided
         if skip_plotting is not None:

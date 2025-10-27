@@ -35,11 +35,13 @@ class BaseEvaluator(ABC):
     @abstractmethod
     def compute(
         self,
-        emb1: np.ndarray,
+        omics_embeddings: np.ndarray,
         *,
-        emb2: np.ndarray | None = None,
-        labels: np.ndarray | None = None,
-        adata: ad.AnnData | None = None,
+        label_embeddings: np.ndarray | None = None,
+        query_labels: np.ndarray | None = None,
+        true_labels: np.ndarray | None = None,
+        label_key: str,
+        out_dir: Path = None,
         **kw,
     ) -> EvalResult:
         """Return *deterministic* scalar metrics."""
@@ -47,12 +49,13 @@ class BaseEvaluator(ABC):
     @abstractmethod
     def plot(  # optional
         self,
-        emb1: np.ndarray,
+        omics_embeddings: np.ndarray,
         out_dir: Path,
         *,
-        emb2: np.ndarray | None = None,
-        labels: np.ndarray | None = None,
-        adata: ad.AnnData | None = None,
+        label_embeddings: np.ndarray | None = None,
+        query_labels: np.ndarray | None = None,
+        true_labels: np.ndarray | None = None,
+        label_key: str,
         **kw,
     ) -> None:
         """Plot the results."""
