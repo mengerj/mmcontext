@@ -336,7 +336,7 @@ ZARR_MAGIC = b"{"  # first byte of .zmetadata  (fallback)
 def collect_unique_links(
     ds_dict: Dataset | DatasetDict,
     split: str | None = None,
-    link_column: str = "share_link",
+    link_column: str = "adata_link",
 ) -> tuple[list[str], "pd.DataFrame"]:
     """
     Collect all unique share links from a DatasetDict.

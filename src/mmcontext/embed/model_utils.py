@@ -166,14 +166,20 @@ def prepare_model_and_embed(
     ###########################################################
     impl = st_model[0] if len(st_model) > 0 else st_model
     has_numeric = (
-        "share_link" in data.column_names
-    )  # otherwise we cannot download the initial embeddings and register them with the model
+        "share_link" or "adata_link"
+    ) in data.column_names  # otherwise we cannot download the initial embeddings and register them with the model
     path_map = None
     if data is not None and has_numeric:
+        link_column = "share_link" if "share_link" in data.column_names else "adata_link"
         # If the dataset is available, download get the token_df, even if the models doesnt use it. Just so the data is downloaded and the adata subset can be created downstream
         logger.info("Extracting numeric intital embeddings from dataset via it's share_links …")
-        token_df, path_map = MMEnc.get_initial_embeddings(
-            data, layer_key=layer_key, axis=axis, download_dir=adata_download_dir, overwrite=overwrite
+        token_df, path_map = MMEnc.get_initial_embeddings_from_adata_link(
+            data,
+            layer_key=layer_key,
+            axis=axis,
+            download_dir=adata_download_dir,
+            overwrite=overwrite,
+            link_column=link_column,
         )  # type: ignore[arg-type]
     else:
         logger.info("""While the model supports initial embeddings, the dataset does not provide them.

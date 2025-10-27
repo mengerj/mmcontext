@@ -151,7 +151,7 @@ def process_single_dataset_model(
                 cache_dir=cache_dir,
             )
 
-        numeric_data_available = "share_link" in raw_ds.column_names
+        numeric_data_available = "share_link" or "adata_link" in raw_ds.column_names
 
         # Load model
         st_model = load_st_model(model_id)

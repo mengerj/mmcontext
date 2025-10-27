@@ -359,10 +359,10 @@ def process_cellwhisperer_dataset_model(
         )
 
         # Check if numeric data is available
-        numeric_data_available = "share_link" in raw_ds.column_names
+        numeric_data_available = "share_link" or "adata_link" in raw_ds.column_names
 
         if not numeric_data_available:
-            logger.warning("CellWhisperer requires numeric data (share_link), but none found")
+            logger.warning("CellWhisperer requires numeric data (share_link or adata_link), but none found")
             return dataset_name, model_name, False, "No numeric data available for CellWhisperer"
 
         # Get sample IDs and collect AnnData subset

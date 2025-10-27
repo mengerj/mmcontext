@@ -256,7 +256,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
             logger.info(f"  Skipping label {label_spec.name} - not found in adata.obs")
             continue  # skip silently
         logger.info(f"  Processing label: {label_spec.name} ({label_spec.kind})")
-        y = adata.obs[label_spec.name].to_numpy()
+        y = adata.obs[label_spec.name].unique().tolist()
         if (label_spec.kind, label_spec.name) not in label_emb_cache:
             prefix = "bio_label_embeddings" if label_spec.kind == LabelKind.BIO else "batch_label_embeddings"
             path = emb_dir / f"{prefix}_{label_spec.name}.parquet"
@@ -298,20 +298,13 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
             try:
                 EvClass = get_evaluator(ev_name)
                 ev = EvClass()
-
-                if ev.requires_pair and E2 is None:
-                    logger.info(f"      Skipping {ev_name} - requires pair but E2 is None")
-                    continue
-
                 result = ev.compute(
-                    E1,
-                    emb2=E2,
-                    labels=y,
-                    adata=adata,
-                    label_kind=label_spec.kind,  # evaluators may ignore
-                    label_key=label_spec.name,  # evaluators may ignore
-                    out_dir=emb_dir,  # Pass output directory for caching
-                    label_to_index=label_to_index,  # Pass label mapping for new format
+                    omics_embeddings=E1,
+                    label_embeddings=E2,
+                    query_labels=y,
+                    true_labels=adata.obs[label_spec.name],
+                    label_key=label_spec.name,
+                    out_dir=emb_dir,
                     **eval_cfg,
                 )
 
@@ -327,7 +320,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                             "value": val,
                         }
                     )
-                logger.info(f"      ✓ {ev_name} completed, {len(result)} metrics")
+                logger.info(f"      ✓ {ev_name} completed")
 
                 if ev.produces_plot:
                     logger.info(f"      Generating plots for {ev_name}")
@@ -338,15 +331,13 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                     plot_dir.mkdir(parents=True, exist_ok=True)
 
                     ev.plot(
-                        E1,
+                        omics_embeddings=E1,
                         out_dir=plot_dir,
-                        emb2=E2,
-                        labels=y,  # ground-truth for *this* label column
-                        adata=adata,
-                        label_kind=label_spec.kind,  # "bio"  or  "batch"
-                        label_key=label_spec.name,  # column name (e.g. "celltype")
-                        label_to_index=label_to_index,  # Pass label mapping for new format
-                        **eval_cfg,  # forward any extra Hydra knobs
+                        label_embeddings=E2,
+                        query_labels=y,
+                        true_labels=adata.obs[label_spec.name],
+                        label_key=label_spec.name,
+                        **eval_cfg,
                     )
                     logger.info(f"      ✓ Plots saved to {plot_dir}")
             except Exception as e:
