@@ -3,6 +3,8 @@ src/mmcontext/__pycache__/
 *.pyc
 tests/__pycache__/
 
+#custom cache
+cache/*
 # Pre-commit cache
 .cache/
 .pre-commit/
@@ -93,3 +95,9 @@ build/
 models_trained/
 exploratory/notebooks/models
 exploratory/notebooks/eval
+exploratory/notebooks/LabelSimilarity/
+poster_models/
+
+# modules
+modules/CellWhisperer/
+modules/cellwhisperer_venv/
