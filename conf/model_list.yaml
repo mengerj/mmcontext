@@ -1,7 +1,59 @@
 defaults: []
 models:
-  - source: "NeuML/bioclinical-modernbert-base-embeddings"
-    name: modernbert
+  - source: jo-mengr/mmcontext-pubmedbert-gs-100k_adapter
+    name: gs_100k_adapter
+    text_only: false
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-100k_adapter
+    name: geneformer_100k_adapter
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-pubmedbert-100k-v6
+    name: text_only_100k_no_bio
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-gs-adapter
+    name: gs_adapter
+    text_only: false
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-adapter
+    name: geneformer_adapter
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-pubmedbert-no_bio
+    name: text_only_no_bio
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed-all-direct
+    name: gs_mixed_all_direct
+    text_only: false
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed-all-direct
+    name: gs_mixed_all_direct_text
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed-all-direct
+    name: geneformer_mixed_all_direct
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed-all-direct
+    name: geneformer_mixed_all_direct_text
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed_from_adapter
+    name: gs_mixed_from_adapter
+    text_only: false
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed_from_adapter
+    name: gs_mixed_from_adapter_text
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed_from_adapter
+    name: geneformer_mixed_from_adapter
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed_from_adapter
+    name: geneformer_mixed_from_adapter_text
     text_only: true
   - source: "Qwen/Qwen3-Embedding-0.6B"
     name: qwen3_06b

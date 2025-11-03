@@ -101,3 +101,4 @@ poster_models/
 # modules
 modules/CellWhisperer/
 modules/cellwhisperer_venv/
+cache/
