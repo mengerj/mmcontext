@@ -27,6 +27,13 @@ eval:
   figsize: [12, 12] # Figure size for plots
   dpi: 600 # DPI for saved plots
   point_size: 100 # Size of points in scatter plots (null uses default)
+  text_plot_enlargement_factor: 2.0 # Factor to enlarge figure size for plots with text annotations (1.5 = 50% larger)
+  legend_layout: "horizontal" # Legend layout: "horizontal" or "vertical"
+  legend_point_size: 12 # Size of points in legends
+  text_dot_fill_color: "label" # Fill color of dots for text annotations ("red", "blue", "none", "label", etc.)
+  text_dot_edge_color: "label" # Edge color of dots for text annotations ("white", "black", "none", "label", etc.)
+  text_dot_alpha: 0.5 # Transparency of dots for text annotations (0.0 = fully transparent, 1.0 = fully opaque)
+  umap_method: "combined" # UMAP computation method: "combined" (original) or "separate" (new method)
 
   # Font and text styling
   font_size: 20 # General font size
