@@ -133,6 +133,12 @@ def create_embeddings(adata, model, transcriptome_processor, batch_size):
     from tqdm import tqdm
 
     logger.info(f"Creating embeddings for {adata.n_obs} cells...")
+    # set adata.X to adata.layers["counts"] for cellwhisperer
+    if "counts" in adata.layers:
+        adata.X = adata.layers["counts"]
+    else:
+        logger.error("counts layer not found in adata.layers, cellwhisperer requires raw counts")
+        raise ValueError("counts layer not found in adata.layers")
 
     # Use CellWhisperer's adata_to_embeds function to get real embeddings
     embeddings_tensor = adata_to_embeds(adata, model, transcriptome_processor, batch_size)
@@ -150,7 +156,7 @@ def create_embeddings(adata, model, transcriptome_processor, batch_size):
     embeddings_df = pd.DataFrame({"sample_idx": sample_indices, "embedding": embeddings_list})
 
     logger.info(f"✓ Created {len(embeddings_df)} embeddings with dimension {len(embeddings_list[0])}")
-    return embeddings_df
+    return embeddings_df, embeddings_tensor
 
 
 def create_label_embeddings(labels, model, tokenizer, batch_size):
@@ -188,7 +194,7 @@ def create_label_embeddings(labels, model, tokenizer, batch_size):
 
 
 def process_similarity_scores(
-    adata, annotation_keys, model, tokenizer, transcriptome_processor, logit_scale, batch_size
+    adata, embeddings_tensor, annotation_keys, model, tokenizer, transcriptome_processor, logit_scale, batch_size
 ):
     """Process similarity scores for annotation keys."""
     from cellwhisperer.utils.inference import score_transcriptomes_vs_texts
@@ -214,7 +220,7 @@ def process_similarity_scores(
             # Compute similarity scores
             logger.info("Computing transcriptome vs text similarity scores...")
             scores, grouping_keys = score_transcriptomes_vs_texts(
-                transcriptome_input=adata,
+                transcriptome_input=embeddings_tensor,
                 text_list_or_text_embeds=cell_type_labels,
                 logit_scale=logit_scale,
                 model=model,
@@ -301,11 +307,17 @@ def run_cellwhisperer_processing(
         logger.info(f"Using batch size: {final_batch_size}")
 
         # Create embeddings
-        embeddings_df = create_embeddings(adata, model, transcriptome_processor, final_batch_size)
-
+        embeddings_df, embeddings_tensor = create_embeddings(adata, model, transcriptome_processor, final_batch_size)
         # Process similarity scores
         similarity_results = process_similarity_scores(
-            adata, annotation_keys or [], model, tokenizer, transcriptome_processor, logit_scale, final_batch_size
+            adata,
+            embeddings_tensor,
+            annotation_keys or [],
+            model,
+            tokenizer,
+            transcriptome_processor,
+            logit_scale,
+            final_batch_size,
         )
 
         # Generate label embeddings for evaluation

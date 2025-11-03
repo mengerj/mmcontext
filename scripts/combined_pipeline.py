@@ -133,6 +133,7 @@ def process_combined_dataset_model(
                         model_cfg=cellwhisperer_model_cfg,
                         eval_cfg=cfg.eval,
                         output_root=cfg.settings.computation_root,
+                        modules_dir=modules_dir,
                     )
 
                     # Move CellWhisperer evaluation results to final directory
@@ -159,11 +160,19 @@ def process_combined_dataset_model(
         logger.info(f"Step 2/2: Running evaluation for {dataset_name}/{model_name_for_path}")
 
         # Run evaluation using computation directory as source
+        # Get modules_dir from settings if available (for CellWhisperer logit_scale extraction)
+        modules_dir = (
+            Path(cfg.settings.get("cellwhisperer_modules_dir", cfg.settings.computation_root + "/../modules"))
+            if cfg.settings.get("cellwhisperer_modules_dir")
+            else None
+        )
+
         eval_results = eval_single(
             ds_cfg=ds_cfg,
             model_cfg=model_cfg,
             eval_cfg=cfg.eval,
             output_root=cfg.settings.computation_root,  # Read embeddings from computation directory
+            modules_dir=modules_dir,
         )
 
         # ═══════════════════════════════════════════════════════════════

@@ -23,6 +23,70 @@ for m in pkgutil.walk_packages(ev_pkg.__path__, prefix=ev_pkg.__name__ + "."):
 logger = logging.getLogger(__name__)
 
 
+def _extract_cellwhisperer_logit_scale(modules_dir: Path, hf_cache: str = None) -> float | None:
+    """
+    Extract logit_scale from CellWhisperer model.
+
+    Parameters
+    ----------
+    modules_dir : Path
+        Directory containing CellWhisperer installation
+    hf_cache : str, optional
+        HuggingFace cache directory
+
+    Returns
+    -------
+    float or None
+        Extracted logit_scale value, or None if extraction fails
+    """
+    try:
+        # Import CellWhisperer utilities
+        import sys
+
+        cellwhisperer_path = modules_dir / "CellWhisperer"
+        if cellwhisperer_path.exists():
+            sys.path.insert(0, str(cellwhisperer_path))
+
+        from cellwhisperer.utils.model_io import load_cellwhisperer_model
+
+        # Determine checkpoint path
+        # Checkpoint is typically in cache_dir/cellwhisperer_emb/, where cache_dir is parent of modules_dir
+        if modules_dir.name == "modules":
+            cache_dir = modules_dir.parent
+        else:
+            # If modules_dir doesn't end with "modules", assume it's the cache root
+            cache_dir = modules_dir
+
+        # Try both possible checkpoint names
+        ckpt_path = cache_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt"
+        if not ckpt_path.exists():
+            ckpt_path = cache_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt"
+
+        # Also try in modules_dir itself
+        if not ckpt_path.exists():
+            ckpt_path = modules_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt"
+        if not ckpt_path.exists():
+            ckpt_path = modules_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt"
+
+        if not ckpt_path.exists():
+            logger.warning(f"CellWhisperer checkpoint not found at {ckpt_path}, cannot extract logit_scale")
+            return None
+
+        # Load model to extract logit_scale
+        logger.info(f"Loading CellWhisperer model to extract logit_scale from {ckpt_path}")
+        pl_model, _, _ = load_cellwhisperer_model(ckpt_path, eval=True, cache=False)
+
+        # Extract logit_scale
+        logit_scale = float(pl_model.model.discriminator.temperature.exp().item())
+        logger.info(f"✓ Extracted CellWhisperer logit_scale: {logit_scale}")
+
+        return logit_scale
+
+    except Exception as e:
+        logger.warning(f"Failed to extract CellWhisperer logit_scale: {e}")
+        return None
+
+
 def run_scib_evaluation(cfg) -> None:
     """
     Run ScIB evaluation separately for all dataset/model combinations.
@@ -166,7 +230,9 @@ def run_scib_evaluation(cfg) -> None:
     print(f"Success rate: {successful / len(tasks) * 100:.1f}%")
 
 
-def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str, Any], output_root: str) -> list[dict]:
+def process_single_dataset_model(
+    ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str, Any], output_root: str, modules_dir: Path | None = None
+) -> list[dict]:
     """
     Process a single dataset/model combination for standard evaluators only.
 
@@ -177,6 +243,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         model_cfg: Model configuration
         eval_cfg: Evaluation configuration
         output_root: Output root directory
+        modules_dir: Path to modules directory (for CellWhisperer logit_scale extraction)
 
     Returns
     -------
@@ -221,7 +288,16 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
     # ── Handle plot-only mode ───────────────────────────────────────
     if plot_only:
         return process_plot_only_mode(
-            ds_cfg, model_cfg, eval_cfg, emb_dir, label_specs, dataset_name, model_id, model_name, skip_missing_cache
+            ds_cfg,
+            model_cfg,
+            eval_cfg,
+            emb_dir,
+            label_specs,
+            dataset_name,
+            model_id,
+            model_name,
+            skip_missing_cache,
+            modules_dir,
         )
 
     # ── load shared artefacts *once* per model ───────────────────────
@@ -243,6 +319,48 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
     except Exception as e:
         logger.error(f"✗ Error loading data for {dataset_name}/{model_name}: {e}")
         raise
+
+    # ──── Handle CellWhisperer vs other models ────────────────────
+    # Check if we're dealing with a CellWhisperer model
+    is_cellwhisperer = (
+        model_id == "cellwhisperer"
+        or model_name.lower() == "cellwhisperer"
+        or str(model_cfg.get("source", "")).lower() == "cellwhisperer"
+    )
+
+    # Make a copy of eval_cfg to modify
+    eval_cfg = eval_cfg.copy()
+
+    # Set parameters based on model type
+    if is_cellwhisperer:
+        # For CellWhisperer: use dot similarity + softmax + logit_scale
+        logger.info("Detected CellWhisperer model - using dot similarity + softmax normalization")
+        eval_cfg["similarity"] = "dot"
+        eval_cfg["score_norm_method"] = "softmax"
+
+        # Get logit_scale from eval_cfg, or extract it if None
+        logit_scale = eval_cfg.get("logit_scale")
+        if logit_scale is None:
+            if modules_dir is not None and modules_dir.exists():
+                extracted_scale = _extract_cellwhisperer_logit_scale(modules_dir)
+                if extracted_scale is not None:
+                    logit_scale = extracted_scale
+                    logger.info(f"Using extracted CellWhisperer logit_scale: {logit_scale}")
+                    eval_cfg["logit_scale"] = logit_scale
+                else:
+                    logger.warning("Could not extract CellWhisperer logit_scale, using default (1.0)")
+                    eval_cfg["logit_scale"] = 1.0
+            else:
+                logger.warning(
+                    f"modules_dir not provided or doesn't exist: {modules_dir}, using default logit_scale (1.0)"
+                )
+                eval_cfg["logit_scale"] = 1.0
+    else:
+        # For all other models: use cosine similarity + no normalization + no logit_scale
+        logger.info("Detected standard model - using cosine similarity + no normalization")
+        eval_cfg["similarity"] = "cosine"
+        eval_cfg["score_norm_method"] = None
+        eval_cfg["logit_scale"] = None  # Will default to 1.0 in LabelSimilarity.__init__
 
     # ──── Run standard evaluators ────────────────────
     evaluators = eval_cfg.get("suite", [])
@@ -297,7 +415,25 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
             logger.info(f"    Running evaluator: {ev_name}")
             try:
                 EvClass = get_evaluator(ev_name)
-                ev = EvClass()
+
+                # Extract LabelSimilarity-specific parameters for constructor
+                # These are constructor parameters, not method parameters
+                evaluator_kwargs = {}
+                if ev_name == "LabelSimilarity":
+                    if "similarity" in eval_cfg:
+                        evaluator_kwargs["similarity"] = eval_cfg["similarity"]
+                    if "logit_scale" in eval_cfg:
+                        evaluator_kwargs["logit_scale"] = eval_cfg["logit_scale"]
+                    if "score_norm_method" in eval_cfg:
+                        evaluator_kwargs["score_norm_method"] = eval_cfg["score_norm_method"]
+
+                ev = EvClass(**evaluator_kwargs)
+
+                # Remove constructor parameters from eval_cfg before passing to compute/plot
+                method_eval_cfg = {
+                    k: v for k, v in eval_cfg.items() if k not in ["similarity", "logit_scale", "score_norm_method"]
+                }
+
                 result = ev.compute(
                     omics_embeddings=E1,
                     label_embeddings=E2,
@@ -305,7 +441,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                     true_labels=adata.obs[label_spec.name],
                     label_key=label_spec.name,
                     out_dir=emb_dir,
-                    **eval_cfg,
+                    **method_eval_cfg,
                 )
 
                 for key, val in result.items():
@@ -337,7 +473,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                         query_labels=y,
                         true_labels=adata.obs[label_spec.name],
                         label_key=label_spec.name,
-                        **eval_cfg,
+                        **method_eval_cfg,
                     )
                     logger.info(f"      ✓ Plots saved to {plot_dir}")
             except Exception as e:
@@ -366,6 +502,7 @@ def process_plot_only_mode(
     model_id: str,
     model_name: str,
     skip_missing_cache: bool,
+    modules_dir: Path | None = None,
 ) -> list[dict]:
     """
     Process a single dataset/model combination in plot-only mode.
@@ -453,7 +590,7 @@ def _process_single_worker(args):
     Worker function for parallel processing of standard evaluators.
 
     Args:
-        args: Tuple of (ds_cfg, model_cfg, eval_cfg, output_root)
+        args: Tuple of (ds_cfg, model_cfg, eval_cfg, output_root, modules_dir)
 
     Returns
     -------
@@ -464,7 +601,12 @@ def _process_single_worker(args):
     import time
     import traceback
 
-    ds_cfg, model_cfg, eval_cfg, output_root = args
+    if len(args) == 5:
+        ds_cfg, model_cfg, eval_cfg, output_root, modules_dir = args
+    else:
+        # Backwards compatibility
+        ds_cfg, model_cfg, eval_cfg, output_root = args
+        modules_dir = None
     dataset_name = ds_cfg.name
     model_id = model_cfg.source
     model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
@@ -486,7 +628,7 @@ def _process_single_worker(args):
     start_time = time.time()
 
     try:
-        results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root)
+        results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root, modules_dir)
 
         # Check if this was skipped (empty results + skip flag enabled)
         was_skipped = False
@@ -533,10 +675,11 @@ def run_eval_suite(cfg) -> None:
         print("\n=== Running Full Evaluation Suite ===")
 
     # Create list of all dataset/model combinations
+    modules_dir = Path(cfg.eval.get("modules_dir", "")) if cfg.eval.get("modules_dir") else None
     tasks = []
     for ds_cfg in cfg.datasets:
         for model_cfg in cfg.models:
-            tasks.append((ds_cfg, model_cfg, cfg.eval, cfg.output.root))
+            tasks.append((ds_cfg, model_cfg, cfg.eval, cfg.output.root, modules_dir))
 
     print(f"Total dataset/model combinations to process: {len(tasks)}")
 
@@ -556,7 +699,12 @@ def run_eval_suite(cfg) -> None:
         failed = 0
         skipped = 0
 
-        for i, (ds_cfg, model_cfg, eval_cfg, output_root) in enumerate(tasks):
+        for i, task in enumerate(tasks):
+            if len(task) == 5:
+                ds_cfg, model_cfg, eval_cfg, output_root, modules_dir = task
+            else:
+                ds_cfg, model_cfg, eval_cfg, output_root = task
+                modules_dir = None
             dataset_name = ds_cfg.name
             model_id = model_cfg.source
             model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
@@ -569,7 +717,7 @@ def run_eval_suite(cfg) -> None:
                 f"\n=== [{i + 1}/{len(tasks)}] Processing dataset: {dataset_name}, model: {model_id} (name: {model_name}) ==="
             )
             try:
-                results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root)
+                results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root, modules_dir)
                 task_time = time.time() - task_start
 
                 if len(results) == 0 and eval_cfg.get("skip_if_eval_exists", False):
@@ -621,7 +769,11 @@ def run_eval_suite(cfg) -> None:
             # Submit all tasks
             future_to_task = {}
             for i, task in enumerate(tasks):
-                ds_cfg, model_cfg, eval_cfg, output_root = task
+                if len(task) == 5:
+                    ds_cfg, model_cfg, eval_cfg, output_root, modules_dir = task
+                else:
+                    ds_cfg, model_cfg, eval_cfg, output_root = task
+                    modules_dir = None
                 dataset_name = ds_cfg.name
                 model_id = model_cfg.source
                 model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
