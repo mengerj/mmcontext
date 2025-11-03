@@ -1,0 +1,86 @@
+# conf/combined_conf.yaml
+# Combined configuration for embedding + evaluation pipeline
+defaults:
+  - datasets: dataset_list_1.yaml
+  - models: model_list_omics_enc_dim2048_4.yaml
+  - _self_
+
+# All pipeline and output settings
+settings:
+  # Parallelization settings
+  enable_parallel: false # Enable parallel processing of dataset/model combinations
+  max_workers: 4 # Maximum number of parallel workers (null = auto-detect CPU count)
+  task_timeout: 7200 # Maximum time (seconds) per dataset/model combination
+
+  # Processing mode
+  skip_existing_embeddings: false # Skip embedding if files already exist
+  skip_existing_evaluations: false # Skip evaluation if eval directory already exists
+
+  # CellWhisperer integration
+  run_cellwhisperer: true # Enable CellWhisperer model processing alongside other models
+  cellwhisperer_modules_dir: /Users/mengerj/repos/mmcontext/modules # Directory where CellWhisperer will be installed
+  # Output paths
+  computation_root: /Users/mengerj/repos/mmcontext/out/test_combined_pipeline # Fast/local storage for embeddings (will be cleaned up)
+  final_root: /Users/mengerj/repos/mmcontext/out/test_combined_pipeline_out # Long-term storage for evaluation results
+  adata_cache: /Users/mengerj/repos/mmcontext/data/from_nxtcloud # AnnData cache directory
+  hf_cache: /Users/mengerj/repos/mmcontext/data/huggingface # HuggingFace cache directory
+  output_format: parquet # csv | parquet
+
+  # SLURM settings
+  store_slurm_id: true # if true add SLURM_JOB_ID to metadata
+
+# Embedding-specific settings
+embed:
+  seed: 42
+  n_rows: 1_000 # rows per dataset split
+  batch_size: 128
+  num_workers: 2
+  overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
+
+# Evaluation-specific settings
+eval:
+  suite: ["LabelSimilarity"] # Standard evaluators + scib (handled separately)
+  n_top_genes: 5000 # For scib
+
+  # LabelSimilarity evaluator settings
+  # Note: These are automatically set based on model type:
+  #   - CellWhisperer: dot similarity + softmax + auto-extracted logit_scale
+  #   - All other models: cosine similarity + no normalization + logit_scale=1.0
+  # The values below are ignored (kept for backwards compatibility)
+  similarity: "cosine" # Ignored - auto-set based on model type
+  score_norm_method: None # Ignored - auto-set based on model type
+  logit_scale: null # Ignored for standard models, auto-extracted for CellWhisperer
+
+  # Evaluation mode settings
+  skip_plotting: true # If true, skip plotting
+  plot_only: false # If true, skip computation and only regenerate plots from cached data
+  skip_missing_cache: false # If true, skip datasets/models without cache when plot_only=true
+
+  # ScIB specific settings
+  skip_scib_on_error: true # Skip ScIB evaluation if it encounters errors instead of failing entire task
+
+  # Plot configuration parameters
+  save_format: "png" # Format for plots: "pdf", "png", "svg", etc.
+  figsize: [12, 12] # Figure size for plots
+  dpi: 600 # DPI for saved plots
+  point_size: 100 # Size of points in scatter plots (null uses default)
+
+  # Font and text styling
+  font_size: 20 # General font size
+  font_style: "normal" # Font style: "normal", "italic", "oblique"
+  font_weight: "normal" # Font weight: "normal", "bold", "light", "heavy"
+
+  # Legend styling
+  legend_fontsize: 24 # Font size for legends
+
+  # Axis styling
+  axis_label_size: 18 # Size of axis labels
+  axis_tick_size: 18 # Size of axis tick labels
+
+  # Additional plot parameters
+  frameon: false # Whether to show frame around plots
+
+# Hydra settings
+hydra:
+  run:
+    dir: ${hydra:runtime.cwd}/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -1,43 +1,57 @@
 defaults: []
 models:
-  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-pca-sample_cs
-    name: pca
+  - source: jo-mengr/mmcontext-pubmedbert-gs-100k_adapter
+    name: gs_100k_adapter
     text_only: false
-    layer_key: X_pca
-  #  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-pca-sample_cs
-  #    text_only: false
-  #    layer_key: X_pca
-
-  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-hvg-sample_cs
-    name: hvg
-    text_only: false
-    layer_key: X_hvg
-  #  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-hvg-sample_cs
-  #    text_only: false
-  #    layer_key: X_hvg
-
-  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-geneformer-sample_cs
-    name: geneformer
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-100k_adapter
+    name: geneformer_100k_adapter
     text_only: false
     layer_key: X_geneformer
-  #  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-geneformer-sample_cs
-  #    text_only: false
-  #    layer_key: X_geneformer
-
-  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-2048-scvi_fm-sample_cs
-    name: scvi_fm
-    text_only: false
-    layer_key: X_scvi_fm
-  #  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-2048-scvi_fm-sample_cs
-  #    text_only: false
-  #    layer_key: X_scvi_fm
-
-  - source: NeuML/pubmedbert-base-embeddings
-    name: pubmedbert
+  - source: jo-mengr/mmcontext-pubmedbert-100k-v6
+    name: text_only_100k_no_bio
     text_only: true
 
-  #  - source: jo-mengr/mmcontext-cg_100k-cell_type-pubmedbert-None-text_only_50-feat_cs
-  #    text_only: true
-  - source: jo-mengr/mmcontext-cg_100k-natural_language_annotation-pubmedbert-None-text_only_50-feat_cs
-    name: pubmedbert_tuned
+  - source: jo-mengr/mmcontext-pubmedbert-gs-adapter
+    name: gs_adapter
+    text_only: false
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-adapter
+    name: geneformer_adapter
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-pubmedbert-no_bio
+    name: text_only_no_bio
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed-all-direct
+    name: gs_mixed_all_direct
+    text_only: false
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed-all-direct
+    name: gs_mixed_all_direct_text
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed-all-direct
+    name: geneformer_mixed_all_direct
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed-all-direct
+    name: geneformer_mixed_all_direct_text
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed_from_adapter
+    name: gs_mixed_from_adapter
+    text_only: false
+    layer_key: X_gs
+  - source: jo-mengr/mmcontext-pubmedbert-gs-mixed_from_adapter
+    name: gs_mixed_from_adapter_text
+    text_only: true
+
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed_from_adapter
+    name: geneformer_mixed_from_adapter
+    text_only: false
+    layer_key: X_geneformer
+  - source: jo-mengr/mmcontext-pubmedbert-geneformer-mixed_from_adapter
+    name: geneformer_mixed_from_adapter_text
     text_only: true

@@ -9,6 +9,9 @@ run:
   num_workers: 4
   overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
 
+  # Dataset revision settings
+  use_revisions: true # if true, use/create dataset revisions for preprocessing; if false, always preprocess
+
   # Parallelization settings
   enable_parallel: true # Enable parallel processing of dataset/model combinations
   max_workers: null # Maximum number of parallel workers (null = auto-detect CPU count)
