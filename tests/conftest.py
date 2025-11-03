@@ -13,7 +13,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.models.auto import configuration_auto, modeling_auto
 
-from mmcontext.models.mmcontextencoder import MMContextEncoder, MMContextProcessor
+from mmcontext.mmcontextencoder import MMContextEncoder, MMContextProcessor
 
 # -----------------------------------------------------------------------------
 # Logging
@@ -41,6 +41,10 @@ class _TokStub:
     def __init__(self, vocab_size: int = 30_522, max_length: int = 8):
         self.vocab_size = vocab_size
         self.max_length = max_length
+
+    def __len__(self) -> int:
+        """Return the vocabulary size, matching HuggingFace tokenizer behavior."""
+        return self.vocab_size
 
     # ------------------------------------------------------------------
     # Encode / batch‑encode

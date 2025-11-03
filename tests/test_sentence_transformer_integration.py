@@ -17,7 +17,7 @@ from sentence_transformers import (
 )
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 
-from mmcontext.models.mmcontextencoder import MMContextEncoder, MMContextProcessor
+from mmcontext.mmcontextencoder import MMContextEncoder, MMContextProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ def test_training_text_only(st_text_encoder, dummy_dataset, tmp_path):
         learning_rate=1e-4,
         eval_steps=1,
         save_total_limit=1,
-        no_cuda=True,  # Ensure we don't use CUDA for this test
+        use_cpu=True,  # Ensure we don't use CUDA for this test
     )
 
     # Set up loss function
@@ -277,7 +277,7 @@ def test_training_bimodal(st_bimodal_encoder, dummy_dataset_with_split, tmp_path
         learning_rate=1e-4,
         eval_steps=1,
         save_total_limit=1,
-        no_cuda=True,  # Ensure we don't use CUDA for this test
+        use_cpu=True,  # Ensure we don't use CUDA for this test
     )
 
     # Create classifier loss
