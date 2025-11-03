@@ -108,11 +108,17 @@ def collect_all_metrics(cfg: DictConfig) -> pd.DataFrame:
 
         for model_cfg in cfg.models:
             model_id = model_cfg.source
-            model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
+            # Use displayed_name if available, otherwise fallback to name, then source
+            model_display_name = model_cfg.get("displayed_name", None)
+            if model_display_name is None:
+                model_display_name = model_cfg.get("name", model_cfg.source)
+
+            # Get the name for directory path construction (use 'name' or 'source', not displayed_name)
+            model_name_for_path = model_cfg.get("name", model_cfg.source)
             text_only = model_cfg.get("text_only", False)
 
-            # Use model name for directory path construction
-            model_dir_name = model_name
+            # Use model name (not displayed_name) for directory path construction
+            model_dir_name = model_name_for_path
             if text_only:
                 model_dir_name = model_dir_name + "_text_only"
                 model_id = model_id + "_text_only"  # Keep for backward compatibility in results
@@ -124,15 +130,17 @@ def collect_all_metrics(cfg: DictConfig) -> pd.DataFrame:
                 print(f"Warning: Model directory not found: {model_dir}")
                 continue
 
-            print(f"Processing: {dataset_name} / {model_id} (name: {model_name})")
+            print(
+                f"Processing: {dataset_name} / {model_id} (displayed_name: {model_display_name}, path_name: {model_name_for_path})"
+            )
 
             # Load regular metrics
             regular_metrics_file = model_dir / "eval" / "metrics.csv"
             regular_df = load_metrics_file(regular_metrics_file)
 
-            # Process regular metrics
+            # Process regular metrics (use displayed_name for model_name column)
             regular_results = process_regular_metrics(
-                regular_df, dataset_name, model_id, model_name, cfg.collect_metrics.regular_metrics
+                regular_df, dataset_name, model_id, model_display_name, cfg.collect_metrics.regular_metrics
             )
             all_results.extend(regular_results)
 
@@ -140,12 +148,12 @@ def collect_all_metrics(cfg: DictConfig) -> pd.DataFrame:
             scib_metrics_file = model_dir / "eval" / "scib_metrics.csv"
             scib_df = load_metrics_file(scib_metrics_file)
 
-            # Process scib metrics
+            # Process scib metrics (use displayed_name for model_name column)
             scib_results = process_scib_metrics(
                 scib_df,
                 dataset_name,
                 model_id,
-                model_name,
+                model_display_name,
                 cfg.collect_metrics.scib_metrics,
                 cfg.collect_metrics.scib_types_as_models,
                 cfg.collect_metrics.model_embedding_type,

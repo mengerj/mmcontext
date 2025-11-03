@@ -1,39 +1,79 @@
 # conf/collect_metrics_conf.yaml
 defaults:
-  - dataset_list
-  - model_list
+  - datasets: dataset_list
+  - models: model_list_cellwhisp_comp.yaml
 
 collect_metrics:
   # Directory containing evaluation results
-  eval_root: "${hydra:runtime.cwd}/out/embeddings"
+  eval_root: "${hydra:runtime.cwd}/out/0210_combined_results/combined_results_2"
 
   # Output directory for collected metrics
-  output_dir: "${hydra:runtime.cwd}/out/collected_metrics"
+  output_dir: "${hydra:runtime.cwd}/out/cellwhisp_collected_metrics_old"
+
+  model_order:
+    - "geneformer-v1"
+    - "geneformer" # First model
+    - "scvi" # Second model
+    - "pca" # Third model
+    - "gs10k" #
+    - "pubmedbert"
+    - "qwen"
+    - "all"
 
   # Visualization settings
-  plot_format: "png" # Options: "png", "pdf", "svg"
+  plot_format: "svg" # Options: "png", "pdf", "svg"
 
   # Plot appearance settings
   vertical_plots: true # Use vertical orientation (model names on y-axis)
-  font_size: 50 # Font size for labels and titles
-  fig_width: 20 # Figure width per subplot
-  fig_height: 20 # Figure height per subplot
+  font_size: 28 # Font size for labels and titles
+  tick_label_size: 28 # Font size for tick labels (x-axis and y-axis)
+  fig_width: 6 # Figure width per subplot
+  fig_height: 8 # Figure height per subplot
+  axis_padding: 0.05 # Padding around data as fraction of data range (0.05 = 5%)
 
   # ScIB type handling
   scib_types_as_models:
-    ["raw", "embedding_X_geneformer", "embedding_X_hvg", "embedding_X_pca"]
+    #["raw", "embedding_X_geneformer", "embedding_X_hvg", "embedding_X_pca"]
   # Which type corresponds to the actual model embedding (will be merged with regular metrics)
   model_embedding_type: "embedding_X_embed"
 
   # Metrics to include from regular evaluations
+  # all are needed to be collected
   regular_metrics:
     - "LabelSimilarity/mean_auc"
     - "LabelSimilarity/accuracy_over_random"
+    - "LabelSimilarity/random_baseline_accuracy"
+    - "LabelSimilarity/accuracy"
     # Add more as needed
+
+  # Accuracy metrics that should be plotted with baseline overlay
+  accuracy_metrics:
+    - "LabelSimilarity/accuracy"
+    # Add more accuracy metrics as needed
+
+  # Baseline accuracy metric name (will be overlaid as dotted lines on accuracy plots)
+  baseline_accuracy_metric: "LabelSimilarity/random_baseline_accuracy"
+
+  # Model repetition handling
+  group_repetitions: true # Group models with same base name (removing _v1, _v2, etc.) and calculate statistics
+  show_error_bars: true # Show error bars (standard error of mean) when repetitions are grouped
+  # Note: Model display names are now controlled by the displayed_name parameter in model config files
+
+  # Baseline line appearance
+  baseline_line_width: 3 # Width of baseline lines within bars
+  baseline_line_alpha: 0.9 # Transparency of baseline lines (0.0 = transparent, 1.0 = opaque)
+
+  # Axis label spacing
+  label_pad: 1 # Padding between axis labels ("Model", "Accuracy") and axis (in points)
+  tick_label_pad: 30 # Padding between tick labels (model names) and tick marks (in points)
+
+  # Y-axis max values (set to None to auto-scale)
+  y_axis_max: 1.0 # Fixed y-axis max for all plots (set to 1.0 for accuracy metrics in 0-1 range)
+  accuracy_over_random_y_max: 50.0 # Fixed y-axis max for accuracy_over_random plots (separate because this metric has higher values)
 
   # Metrics to include from scib evaluations
   scib_metrics:
-    - "scib/Overall_Score"
+    # - "scib/Overall_Score"
     #- "scib/Bio_Conservation_Score"
     #- "scib/Batch_Integration_Score"
     # Add more as needed
