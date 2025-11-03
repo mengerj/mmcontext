@@ -93,3 +93,7 @@ build/
 models_trained/
 exploratory/notebooks/models
 exploratory/notebooks/eval
+exploratory/notebooks/LabelSimilarity/
+modules/
+poster_models/
+cache/
