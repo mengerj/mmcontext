@@ -33,6 +33,7 @@ def load_test_adata_from_hf_dataset(
     *,
     layer_key: str | None = None,
     axis: str = "obs",
+    link_column: str = "adata_link",
 ) -> tuple[ad.AnnData, Path]:
     """
     Download the unique AnnData chunk referenced in *test_split* and load it.
@@ -61,7 +62,7 @@ def load_test_adata_from_hf_dataset(
         If the split references multiple different files.
     """
     # 1) ensure there is exactly ONE unique link
-    links, _ = collect_unique_links({"test": test_split}, split="test")
+    links, _ = collect_unique_links({"test": test_split}, split="test", link_column=link_column)
     # pick the first one
     link = links[0]
     logger.info("Picked share-link %s (out of %d)", link, len(links))
