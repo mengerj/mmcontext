@@ -2,17 +2,22 @@
 defaults: []
 
 datasets:
-  - name: tabula_sapiens_10k
-    source: jo-mengr/tabula_sapiens_10k_single_no_caption_cs50
+  - name: human_immune_health_atlas
+    source: jo-mengr/human_immune_health_atlas_50k_single_no_caption
+    cs_length: 64
+    gene_filter_strings: ["RPS", "RPL", "MT"]
     split: test
     format: hub
     index_col: sample_idx
     bio_label_list:
       - cell_ontology_class
     batch_label_list:
-      - donor
-  - name: pancreas_hub
-    source: jo-mengr/human_pancreas_single_no_caption # hub repo
+      - batch_id
+
+  - name: tabula_sapiens
+    source: jo-mengr/tabula_sapiens_50k_single_no_caption
+    cs_length: 64
+    gene_filter_strings: ["RPS", "RPL", "MT"]
     split: test
     format: hub # hub | hf_disk | csv
     index_col: sample_idx
@@ -26,27 +31,30 @@ datasets:
     format: hub # hub | hf_disk | csv
     index_col: sample_idx
     bio_label_list:
-      - cell_type
+      - cell_ontology_class
     batch_label_list:
-      - dataset_title
-      - assay
-  - name: human_disease_single_no_caption_cs50
-    source: jo-mengr/human_disease_single_no_caption_cs50
+      - donor
+
+  - name: human_pancreas
+    source: jo-mengr/human_pancreas_single_no_caption
+    cs_length: 64
+    gene_filter_strings: ["RPS", "RPL", "MT"]
     split: test
-    format: hub
+    format: hub # hub | hf_disk | csv
+    index_col: sample_idx
+    bio_label_list:
+      - celltype
+    batch_label_list:
+      - tech
+
+  - name: human_disease
+    source: jo-mengr/human_disease_single_no_caption
+    cs_length: 64
+    gene_filter_strings: ["RPS", "RPL", "MT"]
+    split: test
+    format: hub # hub | hf_disk | csv
     index_col: sample_idx
     bio_label_list:
       - Disease
     batch_label_list:
       - "sra_study_acc"
-  - name: human_immune_health_atlas
-    source: jo-mengr/human_immune_health_atlas_20k_single_no_caption_cs50
-    split: test
-    format: hub
-    index_col: sample_idx
-    bio_label_list:
-      - AIFI_L1
-      - AIFI_L2
-      - AIFI_L3
-    batch_label_list:
-      - batch_id
