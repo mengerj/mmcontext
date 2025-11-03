@@ -2,8 +2,7 @@
 #SBATCH --job-name=train
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1            # Request amount of GPUs
-#SBATCH --mem=64G               # Request 64GB of host RAM, not GPU VRAM!
-#SBATCH --time=04:00:00         # Max job time of 4 hours
+#SBATCH --time=6:00:00         # Max job time of 4 hours
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0) Define a unified RUN_ID: real job ID under SLURM, or a timestamp locally
@@ -29,94 +28,77 @@ exec 2>"$BASE_OUT"/train.err
 # 2) Configuration Variables - Customize these as needed
 # ─────────────────────────────────────────────────────────────────────────────
 
-# General training parameters
-EMBEDDING_METHOD="scvi_fm"
-TEXT_ONLY="false"
-GENE_BASED_CELL_SENTENCE="false"
-TRAINER_FP16="true"
+# Project root path (adjust if running from different location)
+#PROJECT_ROOT="."
 
-# Dataset configuration
-# You can define multiple datasets - each one will be added to the list
-# Format: "name,type,caption,cs_len" (cs_len can be "null" or a number)
-DATASETS=(
-    "cellxgene_pseudo_bulk_100k,multiplets,cell_type,50"
-)
+# Configuration file path (relative to PROJECT_ROOT)
+# Override this by setting CONFIG_FILE environment variable before running
+CONFIG_FILE="/home/menger/git/mmcontext/conf/training/basebert_numeric.yaml"
+#extend adata cache dir with run_id
+ADATA_CACHE_DIR="/scratch/local/menger/data/from_nxtcloud/${RUN_ID}"
+CACHE_DIR="/scratch/local/menger/cache/huggingface/${RUN_ID}"
+# Optional command-line overrides
+# These can be set as environment variables to override config file values
+MODEL=null
+EMBEDDING_METHOD=gs
+TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
-# Adapter dimensions
-ADAPTER_HIDDEN_DIM="128"    # Can be "null" or a number like 1024
-ADAPTER_OUTPUT_DIM="64"    # Usually 2048, 1024, etc.
-
-# Learning rate and other trainer params
-LEARNING_RATE="2e-4"        # Changed from 0.05 to avoid NaN issues
-BATCH_SIZE="128"
-EVAL_BATCH_SIZE="128"
-NUM_EPOCHS="4"
-WARMUP_RATIO="0.1"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3) Build Hydra Override Strings
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Function to build datasets override string
-build_datasets_override() {
-    local datasets_str="datasets=["
-    local first=true
-
-    for dataset in "${DATASETS[@]}"; do
-        IFS=',' read -r name type caption cs_len <<< "$dataset"
-
-        if [ "$first" = true ]; then
-            first=false
-        else
-            datasets_str="${datasets_str},"
-        fi
-
-        datasets_str="${datasets_str}{name:${name},type:${type},caption:${caption}"
-
-        if [ "$cs_len" != "null" ]; then
-            datasets_str="${datasets_str},cs_len:${cs_len}"
-        fi
-
-        datasets_str="${datasets_str}}"
-    done
-
-    datasets_str="${datasets_str}]"
-    echo "$datasets_str"
-}
-
-DATASETS_OVERRIDE=$(build_datasets_override)
+# Validate that config file exists
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Error: Configuration file not found at $CONFIG_FILE"
+    exit 1
+fi
+echo "Using configuration file: $CONFIG_FILE"
+if [[ -n "$EMBEDDING_METHOD" ]]; then
+    echo "Overriding embedding_method: $EMBEDDING_METHOD"
+fi
+if [[ -n "$TEXT_ENCODER_NAME" ]]; then
+    echo "Overriding text_encoder.name: $TEXT_ENCODER_NAME"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4) Activate environment and run training
+# 3) Activate environment and run training
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "Starting training job with RUN_ID: $RUN_ID"
 echo "Output directory: $BASE_OUT"
+echo "Configuration file: $CONFIG_FILE"
+echo "Adata cache directory: $ADATA_CACHE_DIR"
+echo "Cache directory: $CACHE_DIR"
 source .venv/bin/activate
 echo "venv activated"
 
-echo "Running training script with parameters:"
-echo "  embedding_method: $EMBEDDING_METHOD"
-echo "  text_only: $TEXT_ONLY"
-echo "  gene_based_cell_sentence: $GENE_BASED_CELL_SENTENCE"
-echo "  datasets: ${DATASETS_OVERRIDE}"
-echo "  adapter.hidden_dim: $ADAPTER_HIDDEN_DIM"
-echo "  adapter.output_dim: $ADAPTER_OUTPUT_DIM"
-echo "  learning_rate: $LEARNING_RATE"
-echo "  batch_size: $BATCH_SIZE"
-echo "  trainer.fp16: $TRAINER_FP16"
+#echo "installing flash-attn"
+#uv pip install ninja packaging wheel setuptools
+#uv pip install flash-attn==2.8.1 --no-build-isolation
+#echo "flash-attn installed"
 
-python3 scripts/train.py \
-    embedding_method="$EMBEDDING_METHOD" \
-    text_only="$TEXT_ONLY" \
-    gene_based_cell_sentence="$GENE_BASED_CELL_SENTENCE" \
-    "$DATASETS_OVERRIDE" \
-    adapter.hidden_dim="$ADAPTER_HIDDEN_DIM" \
-    adapter.output_dim="$ADAPTER_OUTPUT_DIM" \
-    trainer.learning_rate="$LEARNING_RATE" \
-    trainer.per_device_train_batch_size="$BATCH_SIZE" \
-    trainer.per_device_eval_batch_size="$EVAL_BATCH_SIZE" \
-    trainer.num_train_epochs="$NUM_EPOCHS" \
-    trainer.warmup_ratio="$WARMUP_RATIO" \
-    trainer.fp16="$TRAINER_FP16" \
-    hydra.run.dir="$BASE_OUT"
+#python scripts/cuda_available.py
+
+echo "Running training script with configuration from: $CONFIG_FILE"
+
+# Change to project root directory to ensure relative paths work correctly
+#cd "$PROJECT_ROOT"
+
+# Build the command with optional overrides
+TRAIN_CMD="python3 scripts/train.py --config-path=\"$(dirname "$CONFIG_FILE")\" --config-name=\"$(basename "$CONFIG_FILE" .yaml)\" hydra.run.dir=\"$BASE_OUT\" ++adata_cache_dir=\"$ADATA_CACHE_DIR\" ++cache_dir=\"$CACHE_DIR\""
+
+# Add optional overrides if provided
+if [[ -n "$EMBEDDING_METHOD" ]]; then
+    TRAIN_CMD="$TRAIN_CMD embedding_method=\"$EMBEDDING_METHOD\""
+fi
+if [[ -n "$TEXT_ENCODER_NAME" ]]; then
+    TRAIN_CMD="$TRAIN_CMD text_encoder.name=\"$TEXT_ENCODER_NAME\""
+fi
+if [[ -n "$MODEL" ]]; then
+    TRAIN_CMD="$TRAIN_CMD model=\"$MODEL\""
+fi
+
+echo "Executing: $TRAIN_CMD"
+eval $TRAIN_CMD
+
+# clean up scratch local
+echo "Cleaning up scratch local"
+rm -rf /scratch/local/menger/data/from_nxtcloud/${RUN_ID}
+rm -rf /scratch/local/menger/cache/huggingface/${RUN_ID}
+echo "Cleaned up data/from_nxtcloud and cache/huggingface"

@@ -1,0 +1,159 @@
+# conf/config.yaml
+
+# The embedding_dim_map is used to derive embedding_dim based on embedding_method.
+# You can override embedding_method from the command line:
+#   python train.py embedding_method=hvg
+#
+# Or you can override any other parameter by specifying its full path, e.g.:
+#   python train.py dataset.basename=my_awesome_dataset
+
+# Model identification
+model: #if huggingface repo is provided, this model will be loaded and fine-tuned directly
+tag: cxg_10k_basic_mixed # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
+
+# Here are some defaults:
+embedding_method: gs #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
+
+input_dim_map:
+  hvg: 512
+  pca: 50
+  scvi_fm: 50
+  geneformer: 512
+  gs: 3936
+
+# Cell sentence configuration moved to dataset-specific parameters (cs_length and cs_col)
+# Global cs_length and cs_col removed - now specified per dataset
+
+# Gene processing configuration
+gene_special_token: null # Optional special token to add in front of each gene (e.g., "[GENE]")
+delimiter: " " # Delimiter to use between tokens (default: " ")
+# Example usage:
+# gene_special_token: "[GENE]"  # This will add [GENE] in front of each gene name
+# delimiter: "|"                # This will use | as delimiter instead of space
+
+# Training hardware requirements
+force_cuda: false # If true, training will stop if CUDA is not available
+force_refresh_cache: false # If true, re-download datasets even if cached (useful when datasets are updated online)
+cache_dir: /scratch/local/menger/cache/huggingface # Optional directory to cache datasets (if null, uses default HuggingFace cache)
+push_to_hub: false
+# Omics datasets - represent actual omics data that can be processed as text_only or with numeric embeddings
+# Processing workflow: get_initial_embeddings (if not text_only) → select_columns → resolve_negative_indices (if multiplets) → prefix_ds (prefixing)
+# - index_column: Name of the index column (automatically included in keep_columns, removed after resolving indices)
+# - keep_columns: List of columns to select from the raw dataset (applied after embedding loading)
+# - prefix_columns: List of columns to add processor prefix to (only for non-text_only datasets)
+# - layer_axis: "obs" for cell-based embeddings, "var" for gene-based embeddings (only matters for non-text_only datasets)
+# - cs_length: Number of tokens/words to keep from cell sentences (only for text_only datasets, optional)
+# - cs_col: Column name containing cell sentences to truncate (only for text_only datasets, optional)
+# - Renaming: primary column → "anchor", positive → stays "positive", negatives → remove "_idx" suffix
+# - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
+# - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
+omics_datasets:
+  #  - name: "cellxgene_pseudo_bulk_100k"
+  #    type: "multiplets"
+  #    caption: "natural_language_annotation"
+  #    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+  #    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
+  #   index_column: sample_idx
+  #    keep_columns: [
+  #        "cell_sentence_1",
+  #        "positive",
+  #        "negative_1_idx",
+  #        "negative_2_idx",
+  #      ] # Columns to select from raw dataset
+  # cs_length and cs_col not needed for non-text_only datasets
+  - name: "cellxgene_pseudo_bulk_10k"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+    text_only: false # Text-only dataset with truncation
+    layer_axis: "obs" #needed to use gene names and not sample ids
+    index_column: sample_idx
+    keep_columns:
+      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
+  - name: "cellxgene_pseudo_bulk_10k"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+    text_only: true # Text-only dataset with truncation
+    layer_axis: "var" #needed to use gene names and not sample ids
+    gene_filter_strings: ["RPS", "RPL", "MT"]
+    cs_length: 64 # Truncate cell sentences to 50 tokens
+    cs_col: "cell_sentence_2" # Column to truncate
+    index_column: sample_idx
+    keep_columns:
+      ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
+  # - name: "geo_70k"
+  #   type: "multiplets"
+  #   caption: "natural_language_annotation"
+  #   text_only: false  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+  #   layer_axis: "obs"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+  #   gene_filter_strings: ["RPS", "RPL", "MT"]
+  #   cs_length: 64 # Truncate cell sentences to 50 tokens
+  #   cs_col: "cell_sentence_1" # Column to truncate
+  #   index_column: sample_idx
+#    keep_columns:
+#      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
+
+# Bio datasets - biological background knowledge datasets (always processed as text-only)
+# - These do NOT have enc.prefix_ds applied (different data format)
+# - These do NOT get cell sentence truncation
+# - Use keep_columns to specify which columns to retain from the raw dataset
+bio_datasets:
+#  - id: "jo-mengr/descriptions_genes"
+#    name: "gene_description"
+#    type: "multiplets"
+#    revision: "hard_negatives"
+#  - id: "jo-mengr/descriptions_cell_types"
+#    name: "cell_type_description"
+#    type: "multiplets"
+#    revision: "hard_negatives"
+
+#test_datasets:
+#  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"
+#    type: "single"
+# Add more test datasets as needed
+
+text_encoder:
+  name: "NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings"
+  freeze_text_encoder: False
+  unfreeze_last_n_layers: 0
+#  model_kwargs:
+#    attn_implementation: "flash_attention_2"
+#    torch_dtype: "torch.float16"
+# Optional: Additional kwargs to pass to AutoModel.from_pretrained()
+# model_kwargs:
+#   attn_implementation: "flash_attention_2"
+#   torch_dtype: "auto"
+
+#loss: "MultipleNegativesRankingLoss"
+#loss: "ContrastiveLoss"
+#evaluator: "TripletEvaluator" # If not provided, the default evaluator is used
+
+adapter: #each output of both models parts is passed through a separate adapter
+  omics_input_dim: #this will be overwritten by the embedding_dim_map
+  hidden_dim: null
+  output_dim: 768
+  use_text_adapter: true # Whether to create an adapter for the text encoder. If false, text encoder output dimension must match adapter_output_dim
+
+joint_adapter: #if desired, the outputs of both models parts are passed through a joint adapter after the seperate adapters.
+  hidden_dim: 0 # null or 0=skip joint adapter, >0=MLP with hidden layer
+  unfreeze_epoch: 1 # Epoch at which to enable the joint adapter
+
+trainer:
+  unfreeze_epoch: 2 #will unfreeze the whole text encoder
+  output_dir: "../../models/trained"
+  num_train_epochs: 2
+  per_device_train_batch_size: 64
+  per_device_eval_batch_size: 64
+  learning_rate: 2e-5
+  warmup_ratio: 0.1
+  fp16: false
+  bf16: false
+  eval_strategy: "steps"
+  eval_steps: 60
+  save_strategy: "steps"
+  save_steps: 2000
+  save_total_limit: 2
+  logging_steps: 40
+  logging_first_step: True
+  dataloader_num_workers: 0
+  max_grad_norm: 1.0
+  gradient_checkpointing: false

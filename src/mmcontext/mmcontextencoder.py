@@ -30,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 import torch
@@ -38,17 +39,17 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict
 from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
-from sentence_transformers.models import Pooling
-from sentence_transformers.models.Module import Module
+from sentence_transformers.models import Module, Pooling
 from transformers import AutoModel, AutoTokenizer
 
-from mmcontext.file_utils import (
+from .adapters import AdapterModule
+
+# Import local dependencies using relative imports (works with package structure)
+from .file_utils import (
     build_embedding_df,
     collect_unique_links,
     download_and_extract_links,
 )
-
-from .adapters import AdapterModule
 from .omicsencoder import MiniOmicsModel
 from .onehot import OneHotTextEncoder
 
@@ -79,6 +80,9 @@ class MMContextProcessor:
     prefix : str, optional
         Tag that distinguishes omics IDs from text (default: ``"sample_idx:"``).
         Only used if omics_lookup is provided.
+    max_seq_length : int, optional
+        Maximum sequence length for text tokenization. If None, will be extracted
+        from the tokenizer's configuration. Used for truncation during tokenization.
 
     Examples
     --------
@@ -103,13 +107,19 @@ class MMContextProcessor:
         omics_lookup: dict[str, int] = None,
         *,
         prefix: str = _PREFIX,
+        max_seq_length: int | None = None,
     ) -> None:
+        self.text_encoder_name = text_encoder_name
         if text_encoder_name == "one_hot":
             self.text_tok = None  # no HF tokenizer
             self._sentence2id: dict[str, int] = {}
             self._next_id = 1  # 0 is reserved for padding
+            # Set max_seq_length for one-hot encoder
+            self.max_seq_length = max_seq_length if max_seq_length is not None else 512
         else:
             self.text_tok = AutoTokenizer.from_pretrained(text_encoder_name)
+            # Extract max_seq_length from tokenizer config or use provided value
+            self._set_max_seq_length(max_seq_length)
         self.lookup = omics_lookup
         self.prefix = prefix
         self._text_only = omics_lookup is None
@@ -130,6 +140,33 @@ class MMContextProcessor:
         if prefix is not None:
             self.prefix = prefix
         self._text_only = False
+
+    def _set_max_seq_length(self, max_seq_length: int | None = None):
+        """Extract and set max_seq_length from tokenizer configuration or use provided value."""
+        if max_seq_length is not None:
+            # Use explicitly provided value
+            self.max_seq_length = max_seq_length
+            return
+
+        # Try to get from tokenizer config
+        try:
+            from transformers import AutoConfig
+
+            config = AutoConfig.from_pretrained(self.text_encoder_name)
+            if hasattr(config, "max_position_embeddings"):
+                self.max_seq_length = config.max_position_embeddings
+            elif hasattr(config, "max_seq_length"):
+                self.max_seq_length = config.max_seq_length
+            elif hasattr(config, "n_positions"):
+                self.max_seq_length = config.n_positions
+            elif hasattr(config, "max_sequence_length"):
+                self.max_seq_length = config.max_sequence_length
+            else:
+                # Fallback to a reasonable default
+                self.max_seq_length = 512
+        except Exception:
+            # Fallback if config loading fails
+            self.max_seq_length = 512
 
     # --------------------------------------------------------------------- #
     # public helpers
@@ -198,7 +235,9 @@ class MMContextProcessor:
                     "attention_mask": torch.ones_like(ids),
                 }
             else:
-                tok_out = self.text_tok(texts, padding=padding, return_tensors="pt", **tok_kwargs)
+                tok_out = self.text_tok(
+                    texts, padding=padding, return_tensors="pt", truncation=True, max_length=self.max_seq_length
+                )  # ** tok_kwargs, removed due to issues with "document" type being passed, as of ST version 5.
             # tok["attention_mask"] = tok["attention_mask"].bool()
             tok_out["omics_text_info"] = torch.ones(len(texts), dtype=torch.int8)
             return tok_out
@@ -244,7 +283,9 @@ class MMContextProcessor:
                     "attention_mask": torch.ones_like(ids),
                 }
             else:
-                tok_out = self.text_tok(text_vals, padding=padding, return_tensors="pt", **tok_kwargs)
+                tok_out = self.text_tok(
+                    text_vals, padding=padding, return_tensors="pt", truncation=True, max_length=self.max_seq_length
+                )  # ** tok_kwargs, removed due to issues with "document" type being passed, as of ST version 5.
             for k, v in tok_out.items():  # v shape: (n_text, L)
                 full = [torch.zeros_like(v[0])] * len(texts)
                 for src, dst in enumerate(text_pos):
@@ -312,7 +353,7 @@ class MMContextEncoder(Module):
         Pre-initialized processor. If None, one will be created.
     registered_data_origin : str | None, optional
         Type of omics data representation. Must be one of:
-        ["unregistered", "pca", "hvg", "scvi_fm", "geneformer"].
+        ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "gs", "gs10k"].
         Defaults to "unregistered".
     registered_input_dim : int | None, optional
         Input dimension of registered data. Required when loading a model
@@ -326,9 +367,40 @@ class MMContextEncoder(Module):
     pooling_mode : str, optional
         Pooling strategy to use. Defaults to "mean". Options: "mean", "cls", "max", etc.
         See SentenceTransformers Pooling documentation for all options.
+    joint_adapter_hidden_dim : int | None, optional
+        Hidden dimension for the joint adapter that processes sentence embeddings.
+        If None or 0, no joint adapter is used. If >0, uses a two-layer MLP with the
+        specified hidden dimension. The joint adapter starts frozen and can be
+        enabled/unfrozen at a specified epoch during training. Defaults to None.
+
+        Note: Setting hidden_dim=0 would create an identity module (since input_dim
+        equals output_dim), which has no effect, so it's treated the same as None.
+    max_seq_length : int | None, optional
+        Maximum sequence length for tokenization. If None, will be extracted from
+        the text encoder's configuration (e.g., max_position_embeddings). If the
+        text encoder doesn't have this information, defaults to 512. This property
+        is important for SentenceTransformers compatibility.
+    text_model_kwargs : dict | None, optional
+        Additional keyword arguments to pass to AutoModel.from_pretrained() when
+        loading the text encoder. For example, {"attn_implementation": "flash_attention_2"}
+        to enable flash attention. Defaults to None (empty dict).
+    use_text_adapter : bool, optional
+        Whether to create an adapter for the text encoder. If False, the text encoder
+        output dimension must match the adapter_output_dim (if specified) or no adapters
+        should be used at all. Defaults to True.
     """
 
-    VALID_DATA_ORIGINS = ["unregistered", "pca", "hvg", "scvi_fm", "geneformer", "random"]
+    VALID_DATA_ORIGINS = [
+        "unregistered",
+        "pca",
+        "hvg",
+        "scvi_fm",
+        "geneformer",
+        "geneformer-v1",
+        "gs",
+        "gs10k",
+        "random",
+    ]
 
     # Configuration attributes for SentenceTransformer Module base class
     config_keys = [
@@ -342,6 +414,13 @@ class MMContextEncoder(Module):
         "output_token_embeddings",
         "train_lookup",
         "pooling_mode",
+        "joint_adapter_hidden_dim",
+        "_joint_adapter_was_trained",
+        "max_seq_length",
+        "text_model_kwargs",
+        "use_text_adapter",
+        "current_vocab_size",
+        "tokenizer_added_tokens",
     ]
 
     def __init__(
@@ -359,6 +438,13 @@ class MMContextEncoder(Module):
         output_token_embeddings: bool = False,
         train_lookup: bool = False,
         pooling_mode: str = "mean",
+        joint_adapter_hidden_dim: int | None = None,
+        _joint_adapter_was_trained: bool = False,
+        max_seq_length: int | None = None,
+        text_model_kwargs: dict | None = None,
+        use_text_adapter: bool = True,
+        current_vocab_size: int | None = None,
+        tokenizer_added_tokens: list | str | None = None,
     ) -> None:
         super().__init__()
         if registered_data_origin not in self.VALID_DATA_ORIGINS:
@@ -377,6 +463,9 @@ class MMContextEncoder(Module):
         self.output_token_embeddings = output_token_embeddings
         self.train_lookup = train_lookup
         self.pooling_mode = pooling_mode
+        self.joint_adapter_hidden_dim = joint_adapter_hidden_dim
+        self.text_model_kwargs = text_model_kwargs or {}
+        self.use_text_adapter = use_text_adapter
 
         # Determine if adapters should be used
         self._use_adapters = adapter_hidden_dim is not None or adapter_output_dim is not None
@@ -391,9 +480,29 @@ class MMContextEncoder(Module):
                 num_sentences=1_000_000, embed_dim=embed_dim, trainable=not freeze_text_encoder
             )
         else:
-            self.text_encoder = AutoModel.from_pretrained(text_encoder_name)
+            self.text_encoder = AutoModel.from_pretrained(text_encoder_name, **self.text_model_kwargs)
 
         text_hidden_dim = self.text_encoder.config.hidden_size
+
+        # Validate text adapter configuration
+        if not use_text_adapter and self._use_adapters:
+            # If text adapter is disabled but adapters are requested, check dimension compatibility
+            expected_output_dim = adapter_output_dim if adapter_output_dim is not None else text_hidden_dim
+            if text_encoder_name != "one_hot":  # Skip validation for one_hot encoder as it's configurable
+                # We need to get text_hidden_dim first, so this validation will be done after text encoder initialization
+                pass
+
+        # Validate text adapter configuration after getting text_hidden_dim
+        if not use_text_adapter and self._use_adapters:
+            expected_output_dim = adapter_output_dim if adapter_output_dim is not None else text_hidden_dim
+            if text_hidden_dim != expected_output_dim:
+                raise ValueError(
+                    f"Text adapter is disabled but text encoder output dimension ({text_hidden_dim}) "
+                    f"does not match adapter output dimension ({expected_output_dim}). "
+                    f"Either set use_text_adapter=True or set adapter_output_dim={text_hidden_dim}."
+                )
+
+        # Note: max_seq_length will be set from processor after processor initialization
 
         # Determine output dimension
         if self._use_adapters:
@@ -402,7 +511,7 @@ class MMContextEncoder(Module):
             self._output_dim = text_hidden_dim
 
         # Setup text adapter if requested
-        if self._use_adapters:
+        if self._use_adapters and use_text_adapter:
             self.text_adapter = AdapterModule(
                 input_dim=text_hidden_dim,
                 hidden_dim=adapter_hidden_dim,
@@ -417,6 +526,24 @@ class MMContextEncoder(Module):
             word_embedding_dimension=self._output_dim,
             pooling_mode=pooling_mode,
         )
+
+        # ------------------------------------------------ joint adapter
+        # Create joint adapter if requested
+        # None or 0 = skip joint adapter altogether (0 would create identity module, so no effect)
+        # >0 = use joint adapter with MLP (hidden layer of specified size)
+        if joint_adapter_hidden_dim is not None and joint_adapter_hidden_dim > 0:
+            self.joint_adapter = AdapterModule(
+                input_dim=self._output_dim,
+                hidden_dim=joint_adapter_hidden_dim,
+                output_dim=self._output_dim,
+            )
+            # Start with frozen parameters
+            for param in self.joint_adapter.parameters():
+                param.requires_grad = False
+            self._joint_adapter_enabled = False
+        else:
+            self.joint_adapter = None
+            self._joint_adapter_enabled = False
 
         # ------------------------------------------------ omics tower
         if omics_embedding is not None:
@@ -448,10 +575,16 @@ class MMContextEncoder(Module):
             processor = MMContextProcessor(
                 text_encoder_name=text_encoder_name if isinstance(text_encoder_name, str) else "prajjwal1/bert-tiny",
                 omics_lookup=omics_lookup,
+                max_seq_length=max_seq_length,
             )
 
         self.processor = processor
+        # Set max_seq_length from processor
+        self.max_seq_length = self.processor.max_seq_length
         self._manage_text_encoder_freezing()
+
+        # Track if joint adapter was trained (used for proper loading)
+        self._joint_adapter_was_trained = _joint_adapter_was_trained
 
     def _init_omics(self, matrix: np.ndarray):
         """Initialize the omics tower given an embedding matrix."""
@@ -504,12 +637,18 @@ class MMContextEncoder(Module):
                 param.requires_grad = False
 
             if self.unfreeze_last_n_layers > 0:
+                # For ModernBERT models
+                if hasattr(self.text_encoder, "layers"):
+                    layers = self.text_encoder.layers[-self.unfreeze_last_n_layers :]
+                    logger.info(f"Unfreezing last {self.unfreeze_last_n_layers} layers of ModernBERT model")
                 # For BERT-like models
-                if hasattr(self.text_encoder, "encoder") and hasattr(self.text_encoder.encoder, "layer"):
+                elif hasattr(self.text_encoder, "encoder") and hasattr(self.text_encoder.encoder, "layer"):
                     layers = self.text_encoder.encoder.layer[-self.unfreeze_last_n_layers :]
+                    logger.info(f"Unfreezing last {self.unfreeze_last_n_layers} layers of BERT-like model")
                 # For RoBERTa-like models
                 elif hasattr(self.text_encoder, "roberta") and hasattr(self.text_encoder.roberta, "encoder"):
                     layers = self.text_encoder.roberta.encoder.layer[-self.unfreeze_last_n_layers :]
+                    logger.info(f"Unfreezing last {self.unfreeze_last_n_layers} layers of RoBERTa-like model")
                 else:
                     logger.warning(
                         f"Unsupported architecture for {self.text_encoder_name}. Cannot unfreeze last {self.unfreeze_last_n_layers} layers."
@@ -519,6 +658,10 @@ class MMContextEncoder(Module):
                 for layer in layers:
                     for param in layer.parameters():
                         param.requires_grad = True
+
+                logger.info(
+                    f"Successfully unfroze {len(layers)} layers with {sum(p.numel() for layer in layers for p in layer.parameters() if p.requires_grad)} trainable parameters"
+                )
 
     # ---------------------------------------------------------------------
     def tokenize(
@@ -615,15 +758,15 @@ class MMContextEncoder(Module):
         # text branch
         # ------------------------------------------------------------------ #
         if text_mask.any():
-            token_type_slice = (
-                features["token_type_ids"][text_mask]  # use the mask
-                if "token_type_ids" in features and features["token_type_ids"] is not None
-                else None  # otherwise skip arg
-            )
+            # token_type_slice = (
+            #    features["token_type_ids"][text_mask]  # use the mask
+            #     if "token_type_ids" in features and features["token_type_ids"] is not None
+            #     else None  # otherwise skip arg
+            # )
             txt_out = self.text_encoder(
                 input_ids=features["input_ids"][text_mask],
                 attention_mask=features["attention_mask"][text_mask],
-                token_type_ids=token_type_slice,
+                # token_type_ids=token_type_slice,
             )
 
             # Get token embeddings and apply adapter if present
@@ -681,6 +824,12 @@ class MMContextEncoder(Module):
         sentence_embeddings = pooled_features["sentence_embedding"]
 
         # ------------------------------------------------------------------ #
+        # Apply joint adapter if enabled
+        # ------------------------------------------------------------------ #
+        if self.joint_adapter is not None and self._joint_adapter_enabled:
+            sentence_embeddings = self.joint_adapter(sentence_embeddings)
+
+        # ------------------------------------------------------------------ #
         # pack up & return
         # ------------------------------------------------------------------ #
         if return_tensor:
@@ -726,6 +875,38 @@ class MMContextEncoder(Module):
         dict
             A config with essential hyperparameters.
         """
+        # Convert text_model_kwargs to JSON-serializable format
+        serializable_kwargs = {}
+        for key, value in self.text_model_kwargs.items():
+            # Check if this is a torch dtype by checking the type string
+            if str(type(value)).startswith("<class 'torch.") and "dtype" in str(type(value)):
+                # Handle torch dtypes by converting to string
+                serializable_kwargs[key] = str(value)
+            else:
+                serializable_kwargs[key] = value
+
+        # Check if tokenizer was resized and store vocab size info
+        current_vocab_size = None
+        tokenizer_added_tokens = None
+        if hasattr(self, "processor") and hasattr(self.processor, "text_tok") and self.processor.text_tok is not None:
+            current_vocab_size = len(self.processor.text_tok)
+            # Get added tokens if any
+            try:
+                added_tokens = self.processor.text_tok.get_added_vocab()
+                if added_tokens:
+                    tokenizer_added_tokens = list(added_tokens.keys())
+            except Exception:
+                # Fallback: just store the vocab size difference
+                try:
+                    from transformers import AutoConfig
+
+                    config = AutoConfig.from_pretrained(self.text_encoder_name)
+                    original_vocab_size = config.vocab_size
+                    if current_vocab_size > original_vocab_size:
+                        tokenizer_added_tokens = f"<{current_vocab_size - original_vocab_size}_added_tokens>"
+                except Exception:
+                    pass
+
         return {
             "text_encoder_name": self.text_encoder_name
             if isinstance(self.text_encoder_name, str)
@@ -739,7 +920,13 @@ class MMContextEncoder(Module):
             "output_token_embeddings": self.output_token_embeddings,
             "train_lookup": self.train_lookup,
             "pooling_mode": self.pooling_mode,
-            "model_type": "bert",
+            "joint_adapter_hidden_dim": self.joint_adapter_hidden_dim,
+            "_joint_adapter_was_trained": self._joint_adapter_was_trained,
+            "max_seq_length": self.max_seq_length,
+            "text_model_kwargs": serializable_kwargs,
+            "use_text_adapter": self.use_text_adapter,
+            "current_vocab_size": current_vocab_size,
+            "tokenizer_added_tokens": tokenizer_added_tokens,
         }
 
     def save(self, output_path: str, safe_serialization: bool = True, **kwargs) -> None:
@@ -755,14 +942,36 @@ class MMContextEncoder(Module):
         """
         os.makedirs(output_path, exist_ok=True)
 
-        # Save config using base class method
-        self.save_config(output_path)
+        # Save config using our custom serialization method
+        config_path = os.path.join(output_path, "config.json")
+        with open(config_path, "w") as f:
+            json.dump(self._get_config_dict(), f, indent=4)
 
         # Get state dict and filter omics embeddings
         state = self.state_dict()
         if self._has_omics:
             # Remove omics embeddings but keep adapter weights
             state = {k: v for k, v in state.items() if not k.startswith("omics_encoder.embeddings")}
+
+        # Check if tokenizer has been resized (has additional tokens beyond original vocab)
+        current_vocab_size = None
+        original_vocab_size = None
+        tokenizer_was_resized = False
+
+        if hasattr(self, "processor") and hasattr(self.processor, "text_tok") and self.processor.text_tok is not None:
+            current_vocab_size = len(self.processor.text_tok)
+            # Get original vocab size from the pretrained model config
+            try:
+                from transformers import AutoConfig
+
+                config = AutoConfig.from_pretrained(self.text_encoder_name)
+                original_vocab_size = config.vocab_size
+                tokenizer_was_resized = current_vocab_size > original_vocab_size
+
+                if tokenizer_was_resized:
+                    logger.info(f"Detected resized tokenizer: {original_vocab_size} -> {current_vocab_size} tokens")
+            except Exception as e:
+                logger.warning(f"Could not determine original vocab size: {e}")
 
         # Create a temporary model with the filtered state dict for saving
         temp_model = MMContextEncoder(
@@ -774,12 +983,77 @@ class MMContextEncoder(Module):
             output_token_embeddings=self.output_token_embeddings,
             train_lookup=self.train_lookup,
             pooling_mode=self.pooling_mode,
+            joint_adapter_hidden_dim=self.joint_adapter_hidden_dim,
+            max_seq_length=self.max_seq_length,
+            text_model_kwargs=self.text_model_kwargs,
+            use_text_adapter=self.use_text_adapter,
         )
+
+        # If tokenizer was resized, we need to resize the temp model's embeddings too
+        if tokenizer_was_resized and current_vocab_size is not None:
+            logger.info(f"Resizing temporary model embeddings to match current vocab size: {current_vocab_size}")
+            temp_model.text_encoder.resize_token_embeddings(current_vocab_size)
+
+            # Also update the processor's tokenizer to match
+            if (
+                hasattr(temp_model, "processor")
+                and hasattr(temp_model.processor, "text_tok")
+                and temp_model.processor.text_tok is not None
+            ):
+                # Copy the tokenizer state from the original model
+                temp_model.processor.text_tok = self.processor.text_tok
+
         # Load the filtered state dict into the temporary model
         temp_model.load_state_dict(state, strict=False)
 
         # Save torch weights using base class method
         temp_model.save_torch_weights(output_path, safe_serialization=safe_serialization)
+
+    @classmethod
+    def _deserialize_text_model_kwargs(cls, kwargs_dict: dict) -> dict:
+        """
+        Deserialize text_model_kwargs from JSON-serializable format.
+
+        Parameters
+        ----------
+        kwargs_dict : dict
+            Dictionary with potentially serialized values
+
+        Returns
+        -------
+        dict
+            Dictionary with deserialized values
+        """
+        import torch
+
+        deserialized = {}
+        for key, value in kwargs_dict.items():
+            if isinstance(value, str):
+                # Try to convert string representations back to torch dtypes
+                if value == "torch.float32":
+                    deserialized[key] = torch.float32
+                elif value == "torch.float16":
+                    deserialized[key] = torch.float16
+                elif value == "torch.bfloat16":
+                    deserialized[key] = torch.bfloat16
+                elif value == "torch.int8":
+                    deserialized[key] = torch.int8
+                elif value == "torch.int16":
+                    deserialized[key] = torch.int16
+                elif value == "torch.int32":
+                    deserialized[key] = torch.int32
+                elif value == "torch.int64":
+                    deserialized[key] = torch.int64
+                elif value == "auto":
+                    # Special case for "auto" which is commonly used
+                    deserialized[key] = "auto"
+                else:
+                    # Keep as string if not a recognized torch dtype
+                    deserialized[key] = value
+            else:
+                deserialized[key] = value
+
+        return deserialized
 
     @classmethod
     def load(
@@ -828,8 +1102,43 @@ class MMContextEncoder(Module):
             local_files_only=local_files_only,
         )
 
+        # Deserialize text_model_kwargs if present
+        if "text_model_kwargs" in cfg:
+            cfg["text_model_kwargs"] = cls._deserialize_text_model_kwargs(cfg["text_model_kwargs"])
+
+        # Extract tokenizer information from config
+        current_vocab_size = cfg.pop("current_vocab_size", None)
+        tokenizer_added_tokens = cfg.pop("tokenizer_added_tokens", None)
+
         # Create model from config without omics embedding
         model = cls(**cfg)
+
+        # Handle tokenizer resizing if needed
+        if (
+            current_vocab_size is not None
+            and hasattr(model, "processor")
+            and hasattr(model.processor, "text_tok")
+            and model.processor.text_tok is not None
+        ):
+            original_vocab_size = len(model.processor.text_tok)
+            if current_vocab_size > original_vocab_size:
+                logger.info(f"Restoring tokenizer size from {original_vocab_size} to {current_vocab_size}")
+
+                # Add tokens if we have the token list
+                if tokenizer_added_tokens and isinstance(tokenizer_added_tokens, list):
+                    logger.info(f"Adding saved tokens: {tokenizer_added_tokens}")
+                    num_added = model.processor.text_tok.add_tokens(tokenizer_added_tokens)
+                    logger.info(f"Added {num_added} tokens to tokenizer")
+                else:
+                    # Fallback: add placeholder tokens to match the size
+                    tokens_to_add = current_vocab_size - original_vocab_size
+                    placeholder_tokens = [f"<PLACEHOLDER_{i}>" for i in range(tokens_to_add)]
+                    logger.warning(f"Adding {tokens_to_add} placeholder tokens to match saved vocab size")
+                    model.processor.text_tok.add_tokens(placeholder_tokens)
+
+                # Resize model embeddings to match
+                model.text_encoder.resize_token_embeddings(len(model.processor.text_tok))
+                logger.info(f"Resized model embeddings to {len(model.processor.text_tok)} tokens")
 
         # Load torch weights
         cls.load_torch_weights(
@@ -847,6 +1156,14 @@ class MMContextEncoder(Module):
                 f"Loaded encoder was registered for '{model._registered_data_origin}' data. "
                 "Call register_initial_embeddings() with compatible data before using it."
             )
+
+        # Enable joint adapter if it was trained in the saved model
+        if hasattr(model, "_joint_adapter_was_trained") and model._joint_adapter_was_trained:
+            if model.joint_adapter is not None:
+                model._joint_adapter_enabled = True
+                for param in model.joint_adapter.parameters():
+                    param.requires_grad = True
+                logger.info("Joint adapter enabled for loaded model (was previously trained)")
 
         return model
 
@@ -1063,7 +1380,7 @@ class MMContextEncoder(Module):
     # public helper -----------------------------------------------------
     # ------------------------------------------------------------------
     @staticmethod
-    def get_initial_embeddings(
+    def get_initial_embeddings_from_adata_link(
         hf_dataset: DatasetDict | HFDataset,
         *,
         layer_key: str | None = None,
@@ -1071,7 +1388,7 @@ class MMContextEncoder(Module):
         download_dir: str | Path = "../../data/downloaded_chunks",
         extract_zip: bool = True,
         overwrite: bool = False,
-        link_column: str = "share_link",
+        link_column: str = "adata_link",
     ) -> tuple[pd.DataFrame, dict[str, Path]]:
         """
         Download all embedding chunks referenced in *hf_dataset* and return in a format suitable for registration.
@@ -1127,7 +1444,9 @@ class MMContextEncoder(Module):
         )
         # if the layer key is none, this means that only the download step was needed. The model will be used as text only without initial embeddings.
         if layer_key is None:
-            logger.info("No layer key provided, get_initial_embeddings() is returning empty DataFrame and path map.")
+            logger.info(
+                "No layer key provided, get_initial_embeddings_from_adata_link() is returning empty DataFrame and path map."
+            )
             return None, path_map
 
         # --------------------------------------------------------------
@@ -1138,7 +1457,7 @@ class MMContextEncoder(Module):
         split_frames: list[pd.DataFrame] = []
         for split_name, ds in hf_dataset.items():
             # translate split-specific links → local paths
-            local_map = {lk: path_map[lk] for lk in ds["share_link"]}
+            local_map = {lk: path_map[lk] for lk in ds[link_column]}
             df = build_embedding_df(
                 local_map,
                 layer_key=layer_key,
@@ -1152,173 +1471,134 @@ class MMContextEncoder(Module):
         print("Use the returned DataFrame to register the embeddings with `register_initial_embeddings()`.")
         return full_df, path_map
 
-    def prepare_ds(
+    @staticmethod
+    def create_token_dataframe_from_obsm(
+        adata: ad.AnnData,
+        *,
+        obsm_key: str,
+        token_col: str = "token",
+        embedding_col: str = "embedding",
+    ) -> pd.DataFrame:
+        """
+        Create a token DataFrame from embeddings stored in adata.obsm.
+
+        This method extracts embeddings from the specified obsm_key and returns a DataFrame
+        mapping cell IDs to their embeddings, formatted for use with the
+        register_initial_embeddings() method.
+
+        Parameters
+        ----------
+        adata : anndata.AnnData
+            Input AnnData object with embeddings stored in adata.obsm.
+        obsm_key : str
+            Key in adata.obsm containing the embeddings to extract.
+        token_col : str, optional
+            Name of the column containing cell/sample IDs. Defaults to "token".
+        embedding_col : str, optional
+            Name of the column containing embedding vectors. Defaults to "embedding".
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with columns:
+            - token_col: Cell/sample IDs from adata.obs.index
+            - embedding_col: Embedding vectors from adata.obsm[obsm_key]
+
+        Raises
+        ------
+        KeyError
+            If the specified obsm_key is not found in adata.obsm.
+
+        Examples
+        --------
+        >>> import anndata as ad
+        >>> from mmcontext import MMContextEncoder
+        >>> # Load your AnnData object with embeddings
+        >>> adata = ad.read_h5ad("your_data.h5ad")
+        >>> # Create token DataFrame from any obsm key
+        >>> token_df = MMContextEncoder.create_token_dataframe_from_obsm(adata, obsm_key="X_pca")
+        >>> # Register with your model
+        >>> model = MMContextEncoder("bert-base-uncased")
+        >>> model.register_initial_embeddings(token_df, data_origin="pca")
+
+        >>> # Or use with gs10k embeddings
+        >>> MMContextEncoder.add_gs10k_embeddings_to_adata(adata)
+        >>> token_df = MMContextEncoder.create_token_dataframe_from_obsm(adata, obsm_key="gs10k")
+        >>> model.register_initial_embeddings(token_df, data_origin="gs10k")
+        """
+        import anndata as ad
+
+        if obsm_key not in adata.obsm:
+            raise KeyError(f"Key '{obsm_key}' not found in adata.obsm. Available keys: {list(adata.obsm.keys())}")
+
+        # Extract embeddings from obsm
+        embedding_matrix = adata.obsm[obsm_key]
+
+        # Create DataFrame mapping cell IDs to their embeddings
+        token_df = pd.DataFrame(
+            {
+                token_col: adata.obs.index.tolist(),
+                embedding_col: [embedding_matrix[i] for i in range(embedding_matrix.shape[0])],
+            }
+        )
+
+        logger.info(f"Created token DataFrame from adata.obsm['{obsm_key}'] with shape: {token_df.shape}")
+        logger.info(f"Each embedding has dimension: {embedding_matrix.shape[1]}")
+        logger.info("Use the returned DataFrame to register the embeddings with `register_initial_embeddings()`.")
+
+        return token_df
+
+    def prefix_ds(
         self,
         ds: HFDataset | DatasetDict,
-        primary_cell_sentence_col: str,
-        *,  # keyword-only below
-        prefix: bool = True,
-        caption_col: str = "caption",
-        positive_col: str = "positive",
-        label_col: str = "label",
-        negative_prefix: str = "negative",
-        index_col: str = "sample_idx",
-        keep_index_col: bool = False,
+        columns_to_prefix: list[str] | str,
     ) -> HFDataset | DatasetDict:
-        """Return a copy ready for SentenceTransformerTrainer.
+        """Return a copy ready for SentenceTransformerTrainer with prefixes applied and columns renamed.
+
+        This simplified version only handles:
+        1. Adding prefixes to specified columns
+        2. Renaming columns based on dataset type (for sentence transformers compatibility)
 
         Parameters
         ----------
         ds : HFDataset | DatasetDict
-            Input dataset to prepare
-        primary_cell_sentence_col : str
-            Column containing cell/sample representations. References one of the cell_sentence columns in the dataset, that you want to process.
-            These will be tokenized by the omics part of the model, if prefix=True, or by the text part of the model, if prefix=False.
-            These will be the primary output columns. For multiplets, negative samples will be chosen from this column, if they are sample indices. Other negatives
-            are captions and are not modified.
-            If prefix=True, these will be prefixed with the processor's prefix.
-        prefix : bool, optional
-            Whether to add the processor's prefix to primary_cell_sentence_col. If False, only subsetting is performed.
-        caption_col : str, optional
-            Name of the caption column for pairs
-        positive_col : str, optional
-            Name of the positive column for multiplets
-        label_col : str, optional
-            Name of the label column for pairs
-        negative_prefix : str, optional
-            Prefix for negative columns in multiplets
-        index_col : str, optional
-            Name of the index column for HFDataset. Only if index_col is provided, it will be left in the output.
-        keep_index_col : bool, optional
-            Whether to keep the index column in the output. Defaults to False. Is needed for the embedding workflow.
+            Input dataset to prepare (should have columns already selected and indices resolved)
+        columns_to_prefix : list[str]
+            List of column names to add the processor's prefix to
 
         Returns
         -------
         HFDataset | DatasetDict
-            Processed dataset with appropriate columns and optional prefixes
+            Processed dataset with prefixes and renamed columns
         """
+        if isinstance(columns_to_prefix, str):
+            columns_to_prefix = [columns_to_prefix]
 
         def _add_prefix(tok: str) -> str:
             p = self.processor.prefix
             return tok if tok.startswith(p) else f"{p}{tok}"
 
-        def _pref(batch, pref_col):
-            if isinstance(pref_col, str):
-                # Handle single column
-                batch[pref_col] = [_add_prefix(t.strip()) for t in batch[pref_col]]
-            else:
-                # Handle list of columns (for backward compatibility)
-                for col in pref_col:
+        def _apply_prefixes(batch):
+            for col in columns_to_prefix:
+                if col in batch:
                     batch[col] = [_add_prefix(t.strip()) for t in batch[col]]
             return batch
 
-        def _resolve_negative_indices(split: HFDataset, negative_cols: list[str]) -> HFDataset:
-            """Resolve sample indices in negative columns to actual values.
-
-            Odd-numbered negatives (1, 3, 5, ...) map to positive column values.
-            Even-numbered negatives (2, 4, 6, ...) map to anchor column values.
-            """
-            if not index_col or not negative_cols:
-                return split
-
-            import re
-
-            # Create mappings from index to both positive and anchor values
-            index_to_positive = {}
-            index_to_anchor = {}
-
-            for _, row in enumerate(split):
-                if index_col in row:
-                    idx_val = str(row[index_col])
-                    if positive_col in row:
-                        index_to_positive[idx_val] = row[positive_col]
-                    if primary_cell_sentence_col in row:
-                        index_to_anchor[idx_val] = row[primary_cell_sentence_col]
-
-            def _resolve_negatives(batch):
-                for neg_col in negative_cols:
-                    if neg_col in batch:
-                        # Extract the number from column name (e.g., "negative_1_idx" -> 1)
-                        match = re.search(r"negative_(\d+)_idx", neg_col)
-                        if match:
-                            neg_num = int(match.group(1))
-                            is_odd = neg_num % 2 == 1
-
-                            resolved_values = []
-                            for idx_value in batch[neg_col]:
-                                if is_odd and idx_value in index_to_positive:
-                                    resolved_values.append(index_to_positive[idx_value])
-                                elif not is_odd and idx_value in index_to_anchor:
-                                    resolved_values.append(index_to_anchor[idx_value])
-                                else:
-                                    # Fallback: keep original value if mapping not found
-                                    resolved_values.append(idx_value)
-
-                            batch[neg_col] = resolved_values
-                return batch
-
-            # Apply the resolution
-            proc = split.map(_resolve_negatives, batched=True, desc="Resolving negative indices")
-
-            # Rename columns to remove "_idx" suffix
-            for neg_col in negative_cols:
-                if neg_col in proc.column_names and neg_col.endswith("_idx"):
-                    new_col_name = neg_col.replace("_idx", "")
-                    proc = proc.rename_column(neg_col, new_col_name)
-
-            return proc
-
         def _process_split(split: HFDataset) -> HFDataset:
-            is_pairs = label_col in split.column_names and label_col != primary_cell_sentence_col
-            is_multiplets = positive_col in split.column_names
-
-            keep_cols = [primary_cell_sentence_col]
-
-            if is_multiplets:
-                keep_cols.append(positive_col)
-                negative_cols = [c for c in split.column_names if c.startswith(negative_prefix)]
-                # Add the renamed negative column names (without "_idx") to keep_cols
-                renamed_negative_cols = [c.replace("_idx", "") if c.endswith("_idx") else c for c in negative_cols]
-                keep_cols += renamed_negative_cols
-            elif is_pairs:
-                keep_cols += [caption_col, label_col]
-            else:  # single – keep only the main column
-                keep_cols = [primary_cell_sentence_col]
-
-            if keep_index_col:
-                keep_cols.append(index_col)
-
-            # sanity checks --------------------------------------------------
-            if primary_cell_sentence_col not in split.column_names:
-                raise TypeError(f"Column '{primary_cell_sentence_col}' missing from dataset split.")
-
-            if split.features[primary_cell_sentence_col].dtype != "string":
-                raise TypeError(f"Column '{primary_cell_sentence_col}' must contain strings.")
-
-            # prefix if requested + drop unused columns ----------------------
-            if prefix:
+            # Apply prefixes to specified columns
+            if columns_to_prefix:
                 proc = split.map(
-                    lambda b: _pref(b, primary_cell_sentence_col),
+                    _apply_prefixes,
                     batched=True,
-                    desc=f"Prefixing {primary_cell_sentence_col}",
+                    desc=f"Prefixing columns: {columns_to_prefix}",
                 )
             else:
                 proc = split
 
-            # resolve negative indices to actual cell sentence values --------
-            # (after prefix is added so resolved values also have prefix)
-            if is_multiplets:
-                proc = _resolve_negative_indices(proc, negative_cols)
+            # Note: Column renaming (e.g., primary column to "anchor") is now handled
+            # in the resolve_negative_indices_and_rename function for multiplets.
+            # This method only handles prefixing.
 
-            drop_cols = [c for c in proc.column_names if c not in keep_cols]
-            if drop_cols:
-                proc = proc.remove_columns(drop_cols)
-            if is_pairs:
-                proc = proc.rename_column(primary_cell_sentence_col, "sentence_1")
-                if caption_col:
-                    proc = proc.rename_column(caption_col, "sentence_2")
-            elif is_multiplets:
-                proc = proc.rename_column(primary_cell_sentence_col, "anchor")
             return proc
 
         if isinstance(ds, HFDataset):
@@ -1326,7 +1606,7 @@ class MMContextEncoder(Module):
         elif isinstance(ds, DatasetDict):
             return DatasetDict({name: _process_split(s) for name, s in ds.items()})
         else:
-            raise TypeError("prepare_ds expects a datasets.Dataset or DatasetDict")
+            raise TypeError("prefix_ds expects a datasets.Dataset or DatasetDict")
 
     @property
     def registered_data_origin(self) -> str:

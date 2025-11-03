@@ -33,6 +33,7 @@ def load_test_adata_from_hf_dataset(
     *,
     layer_key: str | None = None,
     axis: str = "obs",
+    link_column: str = "adata_link",
 ) -> tuple[ad.AnnData, Path]:
     """
     Download the unique AnnData chunk referenced in *test_split* and load it.
@@ -61,7 +62,7 @@ def load_test_adata_from_hf_dataset(
         If the split references multiple different files.
     """
     # 1) ensure there is exactly ONE unique link
-    links, _ = collect_unique_links({"test": test_split}, split="test")
+    links, _ = collect_unique_links({"test": test_split}, split="test", link_column=link_column)
     # pick the first one
     link = links[0]
     logger.info("Picked share-link %s (out of %d)", link, len(links))
@@ -336,7 +337,7 @@ ZARR_MAGIC = b"{"  # first byte of .zmetadata  (fallback)
 def collect_unique_links(
     ds_dict: Dataset | DatasetDict,
     split: str | None = None,
-    link_column: str = "share_link",
+    link_column: str = "adata_link",
 ) -> tuple[list[str], "pd.DataFrame"]:
     """
     Collect all unique share links from a DatasetDict.
@@ -392,7 +393,7 @@ def download_and_extract_links(
     *,
     temp_dir: str | Path | None = None,
     overwrite: bool = False,
-    extract: bool = True,  # NEW – choose A (False) or B (True)
+    extract: bool = True,
 ) -> dict[str, Path]:
     """
     Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either
@@ -594,47 +595,3 @@ def save_table(
     else:
         raise ValueError(f"Unsupported format '{fmt}'")
     logger.info("Saved %s (%d rows) → %s", fmt.upper(), len(df), file)
-
-
-def copy_resolved_config(cfg, hydra_output_dir: Path, named_output_dir: Path) -> None:
-    """
-    Copy the resolved config to the output directory.
-
-    Serialize the *instantiated* Hydra config twice: once in the Hydra run
-    directory and once in the named output directory so downstream users can
-    locate it without knowing the run-dir.
-
-    The config is enriched with a few runtime fields first (git SHA, SLURM
-    job-ID, command line, etc.).
-    """
-    import subprocess
-
-    from hydra.utils import to_absolute_path
-    from omegaconf import OmegaConf
-
-    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-
-    # --- enrich with runtime metadata -------------------------------------
-    git_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    cfg_dict["_meta"] = {
-        "git_sha": git_sha,
-        "cmd": " ".join([to_absolute_path("main.py"), *os.sys.argv[1:]]),
-        "slurm_job_id": os.getenv("SLURM_JOB_ID") if cfg.slurm.store_id else None,
-    }
-
-    # -----------------------------------------------------------------------
-    for target_dir in (hydra_output_dir, named_output_dir):
-        target_dir.mkdir(parents=True, exist_ok=True)
-        out = target_dir / "resolved_config.json"
-        with out.open("w") as fp:
-            json.dump(cfg_dict, fp, indent=2)
-        logger.info("Wrote resolved Hydra config → %s", out)
-
-    # Also copy *raw* yaml files for debugging
-    orig_conf_dir = Path("conf").absolute()
-    shutil.copytree(orig_conf_dir, named_output_dir / "conf_raw", dirs_exist_ok=True)

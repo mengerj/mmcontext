@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=embed
-#SBATCH --partition=slurm
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1            # Request amount of GPUs
 #SBATCH --mem=64G               # Request 64GB of host RAM, not GPU VRAM!
 #SBATCH --time=04:00:00         # Max job time of 1 hour
 
@@ -38,11 +39,21 @@ echo "Output directory: $BASE_OUT"
 source .venv/bin/activate
 echo "venv activated"
 
+#echo "installing flash-attn"#
+#uv pip install ninja packaging wheel setuptools
+#uv pip install flash-attn==2.8.1 --no-build-isolation
+#echo "flash-attn installed"
 ###
 # 4. Run your training script with Hydra overrides
 ##
+# only continue if cuda is available
+python3 scripts/cuda_available.py
+if [ $? -ne 0 ]; then
+    echo "CUDA is not available"
+    exit 1
+fi
 
-python3 scripts/embed.py \
+python3 scripts/embed_serial.py \
     ++hydra.run.dir="$BASE_OUT"
     # Add run.overwrite=true to force overwrite existing embeddings
     # Example: run.overwrite=true

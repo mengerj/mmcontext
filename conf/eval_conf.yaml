@@ -1,16 +1,18 @@
 # conf/eval.yaml
 defaults:
-  - dataset_list
-  - model_list
+  - datasets: dataset_list.yaml
+  - models: model_list.yaml
+  - _self_
 
 eval:
-  suite: ["LabelSimilarity"] # Standard evaluators + scib (handled separately)
+  suite: ["LabelSimilarity", "ARI"] # Standard evaluators + scib (handled separately)
   n_top_genes: 5000 # For scib
 
   # Evaluation mode settings
   skip_plotting: false # If true, skip plotting
-  plot_only: true # If true, skip computation and only regenerate plots from cached data
-  skip_missing_cache: true # If true, skip datasets/models without cache when plot_only=true
+  plot_only: false # If true, skip computation and only regenerate plots from cached data
+  skip_missing_cache: false # If true, skip datasets/models without cache when plot_only=true
+  skip_if_eval_exists: false # If true, skip processing if eval directory already exists
 
   # Parallelization settings
   enable_parallel: false # Enable parallel processing of dataset/model combinations
@@ -27,7 +29,7 @@ eval:
   point_size: 100 # Size of points in scatter plots (null uses default)
 
   # Font and text styling
-  font_size: 26 # General font size
+  font_size: 20 # General font size
   font_style: "normal" # Font style: "normal", "italic", "oblique"
   font_weight: "normal" # Font weight: "normal", "bold", "light", "heavy"
 

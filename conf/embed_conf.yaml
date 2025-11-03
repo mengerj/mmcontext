@@ -1,18 +1,24 @@
 defaults:
-  - dataset_list.yaml
-  - model_list.yaml
+  - datasets: dataset_list.yaml
+  - models: model_list.yaml
+  - _self_
 
 run:
   seed: 42
-  n_rows: 5_000 # rows per dataset split
+  n_rows: 50_000 # rows per dataset split
   batch_size: 128
-  num_workers: 4
+  num_workers: 2
   overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
 
   # Parallelization settings
-  enable_parallel: true # Enable parallel processing of dataset/model combinations
+  enable_parallel: false # Enable parallel processing of dataset/model combinations
   max_workers: null # Maximum number of parallel workers (null = auto-detect CPU count)
   task_timeout: 7200 # Maximum time (seconds) per dataset/model combination (2 hours default)
+
+  # GPU settings
+  use_threads_for_gpu: true # Use ThreadPoolExecutor instead of ProcessPoolExecutor for GPU (better memory sharing)
+  # Set max_workers to 1-2 for GPU processing to avoid memory conflicts
+  # For CPU processing, you can use higher values (e.g., 4-8)
 
 output:
   adata_cache: ${hydra:runtime.cwd}/data/from_nxtcloud

@@ -23,6 +23,70 @@ for m in pkgutil.walk_packages(ev_pkg.__path__, prefix=ev_pkg.__name__ + "."):
 logger = logging.getLogger(__name__)
 
 
+def _extract_cellwhisperer_logit_scale(modules_dir: Path, hf_cache: str = None) -> float | None:
+    """
+    Extract logit_scale from CellWhisperer model.
+
+    Parameters
+    ----------
+    modules_dir : Path
+        Directory containing CellWhisperer installation
+    hf_cache : str, optional
+        HuggingFace cache directory
+
+    Returns
+    -------
+    float or None
+        Extracted logit_scale value, or None if extraction fails
+    """
+    try:
+        # Import CellWhisperer utilities
+        import sys
+
+        cellwhisperer_path = modules_dir / "CellWhisperer"
+        if cellwhisperer_path.exists():
+            sys.path.insert(0, str(cellwhisperer_path))
+
+        from cellwhisperer.utils.model_io import load_cellwhisperer_model
+
+        # Determine checkpoint path
+        # Checkpoint is typically in cache_dir/cellwhisperer_emb/, where cache_dir is parent of modules_dir
+        if modules_dir.name == "modules":
+            cache_dir = modules_dir.parent
+        else:
+            # If modules_dir doesn't end with "modules", assume it's the cache root
+            cache_dir = modules_dir
+
+        # Try both possible checkpoint names
+        ckpt_path = cache_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt"
+        if not ckpt_path.exists():
+            ckpt_path = cache_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt"
+
+        # Also try in modules_dir itself
+        if not ckpt_path.exists():
+            ckpt_path = modules_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt"
+        if not ckpt_path.exists():
+            ckpt_path = modules_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt"
+
+        if not ckpt_path.exists():
+            logger.warning(f"CellWhisperer checkpoint not found at {ckpt_path}, cannot extract logit_scale")
+            return None
+
+        # Load model to extract logit_scale
+        logger.info(f"Loading CellWhisperer model to extract logit_scale from {ckpt_path}")
+        pl_model, _, _ = load_cellwhisperer_model(ckpt_path, eval=True, cache=False)
+
+        # Extract logit_scale
+        logit_scale = float(pl_model.model.discriminator.temperature.exp().item())
+        logger.info(f"✓ Extracted CellWhisperer logit_scale: {logit_scale}")
+
+        return logit_scale
+
+    except Exception as e:
+        logger.warning(f"Failed to extract CellWhisperer logit_scale: {e}")
+        return None
+
+
 def run_scib_evaluation(cfg) -> None:
     """
     Run ScIB evaluation separately for all dataset/model combinations.
@@ -45,22 +109,34 @@ def run_scib_evaluation(cfg) -> None:
 
     successful = 0
     failed = 0
+    skipped = 0
 
     for i, (ds_cfg, model_cfg) in enumerate(tasks):
         dataset_name = ds_cfg.name
         model_id = model_cfg.source
         model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
         text_only = model_cfg.get("text_only", False)
+        model_dir_name = model_name
         if text_only:
             model_id = model_id + "_text_only"
+            model_dir_name = model_dir_name + "_text_only"
 
         print(f"\n=== [{i + 1}/{len(tasks)}] ScIB for: {dataset_name}/{model_id} (name: {model_name}) ===")
 
-        emb_dir = Path(cfg.output.root) / dataset_name / Path(model_id).name.replace("/", "_")
+        emb_dir = Path(cfg.output.root) / dataset_name / model_dir_name
+
+        # ── Check if eval directory exists and skip if requested ─────────────
+        skip_if_eval_exists = cfg.eval.get("skip_if_eval_exists", False)
+        eval_dir = emb_dir / "eval"
+
+        if skip_if_eval_exists and eval_dir.exists():
+            print(f"↷ Skipping {dataset_name}/{model_id} - eval directory already exists: {eval_dir}")
+            skipped += 1
+            continue
 
         # Check if required files exist
         embeddings_file = emb_dir / "embeddings.parquet"
-        adata_file = emb_dir / "subset.zarr"
+        adata_file = emb_dir / "subset.h5ad"
 
         if not embeddings_file.exists() or not adata_file.exists():
             print(f"✗ Missing required files for {dataset_name}/{model_id}")
@@ -72,7 +148,7 @@ def run_scib_evaluation(cfg) -> None:
             print(f"Loading data from: {emb_dir}")
             emb_df = pd.read_parquet(embeddings_file)
             E1 = np.vstack(emb_df["embedding"].to_numpy())
-            adata = ad.read_zarr(adata_file)
+            adata = ad.read_h5ad(adata_file)
 
             print(f"Loaded embeddings: {E1.shape}, AnnData: {adata.n_obs} obs × {adata.n_vars} vars")
 
@@ -91,14 +167,18 @@ def run_scib_evaluation(cfg) -> None:
             ScibClass = get_evaluator("scib")
             scib_evaluator = ScibClass()
 
+            # Handle cases where label lists might be None or empty
+            bio_labels = ds_cfg.bio_label_list or []
+            batch_labels = ds_cfg.batch_label_list or []
+
             scib_results = scib_evaluator.compute_dataset_model(
                 emb1=E1,
                 adata=adata,
                 dataset_name=dataset_name,
                 model_id=model_id,
                 model_name=model_name,
-                bio_labels=ds_cfg.bio_label_list,
-                batch_labels=ds_cfg.batch_label_list,
+                bio_labels=bio_labels,
+                batch_labels=batch_labels,
                 **cfg.eval,
             )
 
@@ -145,11 +225,14 @@ def run_scib_evaluation(cfg) -> None:
     print("\n=== ScIB Evaluation Summary ===")
     print(f"Total tasks: {len(tasks)}")
     print(f"Successful: {successful}")
+    print(f"Skipped: {skipped}")
     print(f"Failed: {failed}")
     print(f"Success rate: {successful / len(tasks) * 100:.1f}%")
 
 
-def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str, Any], output_root: str) -> list[dict]:
+def process_single_dataset_model(
+    ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str, Any], output_root: str, modules_dir: Path | None = None
+) -> list[dict]:
     """
     Process a single dataset/model combination for standard evaluators only.
 
@@ -160,6 +243,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         model_cfg: Model configuration
         eval_cfg: Evaluation configuration
         output_root: Output root directory
+        modules_dir: Path to modules directory (for CellWhisperer logit_scale extraction)
 
     Returns
     -------
@@ -170,29 +254,50 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
     model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
     text_only = model_cfg.get("text_only", False)
     if text_only:
-        model_id = model_id + "_text_only"
+        model_name = model_name + "_text_only"
 
     plot_only = eval_cfg.get("plot_only", False)
     skip_missing_cache = eval_cfg.get("skip_missing_cache", True)
 
     if plot_only:
-        logger.info(f"Plot-only mode: {model_id} (name: {model_name}) for dataset: {dataset_name}")
+        logger.info(f"Plot-only mode: {model_name} for dataset: {dataset_name}")
     else:
-        logger.info(f"Processing model: {model_id} (name: {model_name}) for dataset: {dataset_name}")
+        logger.info(f"Processing model: {model_name} for dataset: {dataset_name}")
 
-    label_specs = [LabelSpec(n, LabelKind.BIO) for n in ds_cfg.bio_label_list] + [
-        LabelSpec(n, LabelKind.BATCH) for n in ds_cfg.batch_label_list
+    # Handle cases where label lists might be None or empty
+    bio_labels = ds_cfg.bio_label_list or []
+    batch_labels = ds_cfg.batch_label_list or []
+
+    label_specs = [LabelSpec(n, LabelKind.BIO) for n in bio_labels] + [
+        LabelSpec(n, LabelKind.BATCH) for n in batch_labels
     ]
 
     rows = []
 
-    emb_dir = Path(output_root) / dataset_name / Path(model_id).name.replace("/", "_")
+    emb_dir = Path(output_root) / dataset_name / Path(model_name).name.replace("/", "_")
     logger.info(f"Looking for embeddings in: {emb_dir}")
+
+    # ── Check if eval directory exists and skip if requested ─────────────
+    skip_if_eval_exists = eval_cfg.get("skip_if_eval_exists", False)
+    eval_dir = emb_dir / "eval"
+
+    if skip_if_eval_exists and eval_dir.exists():
+        logger.info(f"Skipping {dataset_name}/{model_name} - eval directory already exists: {eval_dir}")
+        return []  # Return empty list to indicate skipped
 
     # ── Handle plot-only mode ───────────────────────────────────────
     if plot_only:
         return process_plot_only_mode(
-            ds_cfg, model_cfg, eval_cfg, emb_dir, label_specs, dataset_name, model_id, model_name, skip_missing_cache
+            ds_cfg,
+            model_cfg,
+            eval_cfg,
+            emb_dir,
+            label_specs,
+            dataset_name,
+            model_id,
+            model_name,
+            skip_missing_cache,
+            modules_dir,
         )
 
     # ── load shared artefacts *once* per model ───────────────────────
@@ -204,37 +309,93 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         E1 = np.vstack(emb_df["embedding"].to_numpy())
         logger.info(f"✓ Stacked embeddings: {E1.shape}")
 
-        logger.info(f"Loading AnnData from: {emb_dir / 'subset.zarr'}")
-        adata = ad.read_zarr(emb_dir / "subset.zarr")
+        logger.info(f"Loading AnnData from: {emb_dir / 'subset.h5ad'}")
+        adata = ad.read_h5ad(emb_dir / "subset.h5ad")
         logger.info(f"✓ Loaded AnnData: {adata.n_obs} obs × {adata.n_vars} vars")
 
     except FileNotFoundError as e:
-        logger.error(f"✗ Missing file for {dataset_name}/{model_id}: {e}")
+        logger.error(f"✗ Missing file for {dataset_name}/{model_name}: {e}")
         raise
     except Exception as e:
-        logger.error(f"✗ Error loading data for {dataset_name}/{model_id}: {e}")
+        logger.error(f"✗ Error loading data for {dataset_name}/{model_name}: {e}")
         raise
+
+    # ──── Handle CellWhisperer vs other models ────────────────────
+    # Check if we're dealing with a CellWhisperer model
+    is_cellwhisperer = (
+        model_id == "cellwhisperer"
+        or model_name.lower() == "cellwhisperer"
+        or str(model_cfg.get("source", "")).lower() == "cellwhisperer"
+    )
+
+    # Make a copy of eval_cfg to modify
+    eval_cfg = eval_cfg.copy()
+
+    # Set parameters based on model type
+    if is_cellwhisperer:
+        # For CellWhisperer: use dot similarity + softmax + logit_scale
+        logger.info("Detected CellWhisperer model - using dot similarity + softmax normalization")
+        eval_cfg["similarity"] = "dot"
+        eval_cfg["score_norm_method"] = "softmax"
+
+        # Get logit_scale from eval_cfg, or extract it if None
+        logit_scale = eval_cfg.get("logit_scale")
+        if logit_scale is None:
+            if modules_dir is not None and modules_dir.exists():
+                extracted_scale = _extract_cellwhisperer_logit_scale(modules_dir)
+                if extracted_scale is not None:
+                    logit_scale = extracted_scale
+                    logger.info(f"Using extracted CellWhisperer logit_scale: {logit_scale}")
+                    eval_cfg["logit_scale"] = logit_scale
+                else:
+                    logger.warning("Could not extract CellWhisperer logit_scale, using default (1.0)")
+                    eval_cfg["logit_scale"] = 1.0
+            else:
+                logger.warning(
+                    f"modules_dir not provided or doesn't exist: {modules_dir}, using default logit_scale (1.0)"
+                )
+                eval_cfg["logit_scale"] = 1.0
+    else:
+        # For all other models: use cosine similarity + no normalization + no logit_scale
+        logger.info("Detected standard model - using cosine similarity + no normalization")
+        eval_cfg["similarity"] = "cosine"
+        eval_cfg["score_norm_method"] = None
+        eval_cfg["logit_scale"] = None  # Will default to 1.0 in LabelSimilarity.__init__
 
     # ──── Run standard evaluators ────────────────────
     evaluators = eval_cfg.get("suite", [])
     logger.info(f"Running evaluators: {evaluators}")
 
     # try to load label embeddings only once
-    label_emb_cache = {}  # (kind, name) → ndarray | None
+    label_emb_cache = {}  # (kind, name) → tuple[ndarray, dict] | None
     # ------------- ITERATE over labels AND evaluators --------------
     for label_spec in label_specs:
         if label_spec.name not in adata.obs.columns:
             logger.info(f"  Skipping label {label_spec.name} - not found in adata.obs")
             continue  # skip silently
         logger.info(f"  Processing label: {label_spec.name} ({label_spec.kind})")
-        y = adata.obs[label_spec.name].to_numpy()
+        y = adata.obs[label_spec.name].unique().tolist()
         if (label_spec.kind, label_spec.name) not in label_emb_cache:
             prefix = "bio_label_embeddings" if label_spec.kind == LabelKind.BIO else "batch_label_embeddings"
             path = emb_dir / f"{prefix}_{label_spec.name}.parquet"
+            mapping_path = emb_dir / f"{prefix}_{label_spec.name}_mapping.json"
             if path.exists():
                 try:
                     df2 = pd.read_parquet(path)
-                    label_emb_cache[(label_spec.kind, label_spec.name)] = np.vstack(df2["embedding"].to_numpy())
+                    embeddings = np.vstack(df2["embedding"].to_numpy())
+
+                    # Load label mapping if available
+                    label_to_index = None
+                    if mapping_path.exists():
+                        import json
+
+                        with open(mapping_path) as f:
+                            label_to_index = json.load(f)
+                        logger.info(f"    ✓ Loaded label mapping for {label_spec.name}")
+                    else:
+                        logger.warning(f"    - No label mapping found for {label_spec.name}, using legacy format")
+
+                    label_emb_cache[(label_spec.kind, label_spec.name)] = (embeddings, label_to_index)
                     logger.info(f"    ✓ Loaded label embeddings for {label_spec.name}")
                 except Exception as e:
                     logger.error(f"    ✗ Error loading label embeddings for {label_spec.name}: {e}")
@@ -242,27 +403,45 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
             else:
                 logger.info(f"    - No label embeddings found for {label_spec.name}")
                 label_emb_cache[(label_spec.kind, label_spec.name)] = None
-        E2 = label_emb_cache[(label_spec.kind, label_spec.name)]
+
+        # Extract embeddings and mapping
+        cache_entry = label_emb_cache[(label_spec.kind, label_spec.name)]
+        if cache_entry is not None:
+            E2, label_to_index = cache_entry
+        else:
+            E2, label_to_index = None, None
 
         for ev_name in evaluators:
             logger.info(f"    Running evaluator: {ev_name}")
             try:
                 EvClass = get_evaluator(ev_name)
-                ev = EvClass()
 
-                if ev.requires_pair and E2 is None:
-                    logger.info(f"      Skipping {ev_name} - requires pair but E2 is None")
-                    continue
+                # Extract LabelSimilarity-specific parameters for constructor
+                # These are constructor parameters, not method parameters
+                evaluator_kwargs = {}
+                if ev_name == "LabelSimilarity":
+                    if "similarity" in eval_cfg:
+                        evaluator_kwargs["similarity"] = eval_cfg["similarity"]
+                    if "logit_scale" in eval_cfg:
+                        evaluator_kwargs["logit_scale"] = eval_cfg["logit_scale"]
+                    if "score_norm_method" in eval_cfg:
+                        evaluator_kwargs["score_norm_method"] = eval_cfg["score_norm_method"]
+
+                ev = EvClass(**evaluator_kwargs)
+
+                # Remove constructor parameters from eval_cfg before passing to compute/plot
+                method_eval_cfg = {
+                    k: v for k, v in eval_cfg.items() if k not in ["similarity", "logit_scale", "score_norm_method"]
+                }
 
                 result = ev.compute(
-                    E1,
-                    emb2=E2,
-                    labels=y,
-                    adata=adata,
-                    label_kind=label_spec.kind,  # evaluators may ignore
-                    label_key=label_spec.name,  # evaluators may ignore
-                    out_dir=emb_dir,  # Pass output directory for caching
-                    **eval_cfg,
+                    omics_embeddings=E1,
+                    label_embeddings=E2,
+                    query_labels=y,
+                    true_labels=adata.obs[label_spec.name],
+                    label_key=label_spec.name,
+                    out_dir=emb_dir,
+                    **method_eval_cfg,
                 )
 
                 for key, val in result.items():
@@ -277,7 +456,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                             "value": val,
                         }
                     )
-                logger.info(f"      ✓ {ev_name} completed, {len(result)} metrics")
+                logger.info(f"      ✓ {ev_name} completed")
 
                 if ev.produces_plot:
                     logger.info(f"      Generating plots for {ev_name}")
@@ -288,14 +467,13 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
                     plot_dir.mkdir(parents=True, exist_ok=True)
 
                     ev.plot(
-                        E1,
+                        omics_embeddings=E1,
                         out_dir=plot_dir,
-                        emb2=E2,
-                        labels=y,  # ground-truth for *this* label column
-                        adata=adata,
-                        label_kind=label_spec.kind,  # "bio"  or  "batch"
-                        label_key=label_spec.name,  # column name (e.g. "celltype")
-                        **eval_cfg,  # forward any extra Hydra knobs
+                        label_embeddings=E2,
+                        query_labels=y,
+                        true_labels=adata.obs[label_spec.name],
+                        label_key=label_spec.name,
+                        **method_eval_cfg,
                     )
                     logger.info(f"      ✓ Plots saved to {plot_dir}")
             except Exception as e:
@@ -309,7 +487,7 @@ def process_single_dataset_model(ds_cfg: Any, model_cfg: Any, eval_cfg: dict[str
         save_table(out_df, emb_dir / "eval/metrics", fmt="csv")
         logger.info(f"✓ Saved {len(rows)} evaluation results")
 
-    logger.info(f"✓ Completed processing model {model_id} for dataset {dataset_name}")
+    logger.info(f"✓ Completed processing model {model_name} for dataset {dataset_name}")
 
     return rows
 
@@ -324,6 +502,7 @@ def process_plot_only_mode(
     model_id: str,
     model_name: str,
     skip_missing_cache: bool,
+    modules_dir: Path | None = None,
 ) -> list[dict]:
     """
     Process a single dataset/model combination in plot-only mode.
@@ -411,18 +590,23 @@ def _process_single_worker(args):
     Worker function for parallel processing of standard evaluators.
 
     Args:
-        args: Tuple of (ds_cfg, model_cfg, eval_cfg, output_root)
+        args: Tuple of (ds_cfg, model_cfg, eval_cfg, output_root, modules_dir)
 
     Returns
     -------
-        Tuple of (dataset_name, model_id, success, result_count, error_msg)
+        Tuple of (dataset_name, model_id, success, result_count, error_msg, was_skipped)
     """
     import os
     import sys
     import time
     import traceback
 
-    ds_cfg, model_cfg, eval_cfg, output_root = args
+    if len(args) == 5:
+        ds_cfg, model_cfg, eval_cfg, output_root, modules_dir = args
+    else:
+        # Backwards compatibility
+        ds_cfg, model_cfg, eval_cfg, output_root = args
+        modules_dir = None
     dataset_name = ds_cfg.name
     model_id = model_cfg.source
     model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
@@ -444,13 +628,20 @@ def _process_single_worker(args):
     start_time = time.time()
 
     try:
-        results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root)
+        results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root, modules_dir)
+
+        # Check if this was skipped (empty results + skip flag enabled)
+        was_skipped = False
+        if len(results) == 0 and eval_cfg.get("skip_if_eval_exists", False):
+            eval_dir = Path(output_root) / dataset_name / Path(model_name).name.replace("/", "_") / "eval"
+            if eval_dir.exists():
+                was_skipped = True
 
         elapsed_time = time.time() - start_time
         worker_logger.info(
             f"Completed processing: {dataset_name}/{model_id} (name: {model_name}) in {elapsed_time:.1f}s"
         )
-        return dataset_name, model_id, True, len(results), None
+        return dataset_name, model_id, True, len(results), None, was_skipped
 
     except Exception as e:
         # Get full traceback for debugging
@@ -459,7 +650,7 @@ def _process_single_worker(args):
         worker_logger.error(
             f"Error processing {dataset_name}/{model_id} (name: {model_name}) after {elapsed_time:.1f}s: {error_msg}"
         )
-        return dataset_name, model_id, False, 0, str(e)
+        return dataset_name, model_id, False, 0, str(e), False
 
 
 def run_eval_suite(cfg) -> None:
@@ -484,10 +675,11 @@ def run_eval_suite(cfg) -> None:
         print("\n=== Running Full Evaluation Suite ===")
 
     # Create list of all dataset/model combinations
+    modules_dir = Path(cfg.eval.get("modules_dir", "")) if cfg.eval.get("modules_dir") else None
     tasks = []
     for ds_cfg in cfg.datasets:
         for model_cfg in cfg.models:
-            tasks.append((ds_cfg, model_cfg, cfg.eval, cfg.output.root))
+            tasks.append((ds_cfg, model_cfg, cfg.eval, cfg.output.root, modules_dir))
 
     print(f"Total dataset/model combinations to process: {len(tasks)}")
 
@@ -505,8 +697,14 @@ def run_eval_suite(cfg) -> None:
         print("Running in sequential mode...")
         successful = 0
         failed = 0
+        skipped = 0
 
-        for i, (ds_cfg, model_cfg, eval_cfg, output_root) in enumerate(tasks):
+        for i, task in enumerate(tasks):
+            if len(task) == 5:
+                ds_cfg, model_cfg, eval_cfg, output_root, modules_dir = task
+            else:
+                ds_cfg, model_cfg, eval_cfg, output_root = task
+                modules_dir = None
             dataset_name = ds_cfg.name
             model_id = model_cfg.source
             model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
@@ -519,8 +717,19 @@ def run_eval_suite(cfg) -> None:
                 f"\n=== [{i + 1}/{len(tasks)}] Processing dataset: {dataset_name}, model: {model_id} (name: {model_name}) ==="
             )
             try:
-                results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root)
+                results = process_single_dataset_model(ds_cfg, model_cfg, eval_cfg, output_root, modules_dir)
                 task_time = time.time() - task_start
+
+                if len(results) == 0 and eval_cfg.get("skip_if_eval_exists", False):
+                    # Check if this was actually skipped (empty results + skip flag enabled)
+                    eval_dir = Path(output_root) / dataset_name / Path(model_name).name.replace("/", "_") / "eval"
+                    if eval_dir.exists():
+                        skipped += 1
+                        print(
+                            f"↷ Skipped {model_id} (name: {model_name}) for dataset {dataset_name} - eval directory exists ({task_time:.1f}s)"
+                        )
+                        continue
+
                 successful += 1
                 print(
                     f"✓ Completed processing model {model_id} (name: {model_name}) for dataset {dataset_name} ({task_time:.1f}s)"
@@ -543,6 +752,7 @@ def run_eval_suite(cfg) -> None:
         print("\n=== Summary ===")
         print(f"Total tasks: {len(tasks)}")
         print(f"Successful: {successful}")
+        print(f"Skipped: {skipped}")
         print(f"Failed: {failed}")
         print(f"Success rate: {successful / len(tasks) * 100:.1f}%")
         print(f"Total time: {total_time:.1f}s")
@@ -559,7 +769,11 @@ def run_eval_suite(cfg) -> None:
             # Submit all tasks
             future_to_task = {}
             for i, task in enumerate(tasks):
-                ds_cfg, model_cfg, eval_cfg, output_root = task
+                if len(task) == 5:
+                    ds_cfg, model_cfg, eval_cfg, output_root, modules_dir = task
+                else:
+                    ds_cfg, model_cfg, eval_cfg, output_root = task
+                    modules_dir = None
                 dataset_name = ds_cfg.name
                 model_id = model_cfg.source
                 model_name = model_cfg.get("name", model_cfg.source)  # Use name if available, fallback to source
@@ -574,6 +788,7 @@ def run_eval_suite(cfg) -> None:
             completed = 0
             successful = 0
             failed = 0
+            skipped = 0
             timed_out = 0
 
             try:
@@ -584,16 +799,22 @@ def run_eval_suite(cfg) -> None:
 
                     try:
                         # Get result with timeout
-                        dataset_name_result, model_id_result, success, result_count, error_msg = future.result(
-                            timeout=10
+                        dataset_name_result, model_id_result, success, result_count, error_msg, was_skipped = (
+                            future.result(timeout=10)
                         )
 
                         if success:
-                            successful += 1
-                            print(
-                                f"✓ [{completed}/{len(tasks)}] Completed: {dataset_name_result}/{model_id_result} (name: {model_name}) ({task_time:.1f}s)"
-                            )
-                            print(f"  → {result_count} evaluation metrics")
+                            if was_skipped:
+                                skipped += 1
+                                print(
+                                    f"↷ [{completed}/{len(tasks)}] Skipped: {dataset_name_result}/{model_id_result} (name: {model_name}) - eval exists ({task_time:.1f}s)"
+                                )
+                            else:
+                                successful += 1
+                                print(
+                                    f"✓ [{completed}/{len(tasks)}] Completed: {dataset_name_result}/{model_id_result} (name: {model_name}) ({task_time:.1f}s)"
+                                )
+                                print(f"  → {result_count} evaluation metrics")
                         else:
                             failed += 1
                             print(
@@ -634,6 +855,7 @@ def run_eval_suite(cfg) -> None:
             print("\n=== Summary ===")
             print(f"Total tasks: {len(tasks)}")
             print(f"Successful: {successful}")
+            print(f"Skipped: {skipped}")
             print(f"Failed: {failed}")
             if timed_out > 0:
                 print(f"Timed out: {timed_out}")
