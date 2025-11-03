@@ -50,7 +50,7 @@ def embed_serial_pipeline(cfg: DictConfig) -> None:
         print(f"💾 GPU memory available: {gpu_memory:.1f} GB")
         print("✅ Using serial processing - no CUDA context issues!")
     else:
-        #print("💻 Using CPU processing")
+        # print("💻 Using CPU processing")
         raise ValueError("No GPU detected")
 
     # Build list of tasks
