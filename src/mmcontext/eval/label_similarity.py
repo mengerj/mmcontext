@@ -170,6 +170,8 @@ class LabelSimilarity(BaseEvaluator):
         bimodal_threshold: float = 0.1,
         rare_threshold: float = 2.0,
         similarity: str = "cosine",
+        logit_scale: float | None = None,
+        score_norm_method: str | None = None,
         bins: int = 40,
         umap_n_neighbors: int = 15,
         umap_min_dist: float = 0.1,
@@ -202,6 +204,13 @@ class LabelSimilarity(BaseEvaluator):
             Threshold for rare_label_score in label filtering (stage 2)
         similarity : str, default "cosine"
             Similarity metric ("cosine" or "dot")
+        logit_scale : float, optional
+            Scale factor to multiply similarity scores before normalization.
+            If None, defaults to 1.0 (no scaling).
+        score_norm_method : str, optional
+            Normalization method to apply after similarity calculation and scaling.
+            Options: "softmax" (normalizes across cells for each label, matching torch.softmax(..., dim=0)).
+            If None, no normalization is applied.
         bins : int, default 40
             Number of bins for histograms
         umap_n_neighbors : int, default 15
@@ -245,6 +254,8 @@ class LabelSimilarity(BaseEvaluator):
 
         # Other parameters
         self.similarity = similarity
+        self.logit_scale = logit_scale if logit_scale is not None else 1.0
+        self.score_norm_method = score_norm_method
         self.bins = bins
         self.umap_n_neighbors = umap_n_neighbors
         self.umap_min_dist = umap_min_dist
@@ -386,16 +397,34 @@ class LabelSimilarity(BaseEvaluator):
         """
         # Compute similarity matrix using vectorized operations
         if self.similarity == "cosine":
-            return _cosine_matrix(omics_embeddings, label_embeddings)
+            sim_matrix = _cosine_matrix(omics_embeddings, label_embeddings)
         elif self.similarity == "dot":
-            return omics_embeddings @ label_embeddings.T
+            sim_matrix = omics_embeddings @ label_embeddings.T
         else:
             raise ValueError(f"Unknown similarity: {self.similarity}")
+
+        # Apply logit scale
+        sim_matrix = sim_matrix * self.logit_scale
+
+        # Apply normalization if specified
+        if self.score_norm_method == "softmax":
+            # Apply softmax along axis=0 (normalize across cells for each label)
+            # This matches the behavior of torch.softmax(..., dim=0) in the reference code
+            # Shape: (N_cells, M_labels) -> softmax across cells for each label
+            exp_scores = np.exp(sim_matrix - np.max(sim_matrix, axis=0, keepdims=True))  # Numerical stability
+            sim_matrix = exp_scores / np.sum(exp_scores, axis=0, keepdims=True)
+        elif self.score_norm_method is not None:
+            raise ValueError(f"Unknown score_norm_method: {self.score_norm_method}")
+
+        return sim_matrix
 
     def _compute_umap(self, embeddings: np.ndarray) -> np.ndarray:
         """Compute UMAP embedding of the data."""
         reducer = umap.UMAP(
-            n_neighbors=self.umap_n_neighbors, min_dist=self.umap_min_dist, random_state=self.umap_random_state
+            n_neighbors=self.umap_n_neighbors,
+            min_dist=self.umap_min_dist,
+            random_state=self.umap_random_state,
+            metric="cosine",
         )
         return reducer.fit_transform(embeddings)
 
@@ -586,7 +615,7 @@ class LabelSimilarity(BaseEvaluator):
         y_range = ylim[1] - ylim[0]
 
         # Much larger offset distance to avoid crowding
-        base_offset = 0.25  # Increased from 0.15
+        base_offset = 0.15  # Increased from 0.15
         x_offset_base = base_offset * x_range
         y_offset_base = base_offset * y_range
 
@@ -1130,9 +1159,10 @@ class LabelSimilarity(BaseEvaluator):
         roc_dir = out_dir / "roc_curves"
         umap_dir = out_dir / "umap"
         hist_dir = out_dir / "histograms"
+        true_label_boxplots_dir = out_dir / "true_label_boxplots"
         cm_dir = out_dir / "confusion_matrix"
 
-        for d in [roc_dir, umap_dir, hist_dir, cm_dir]:
+        for d in [roc_dir, umap_dir, hist_dir, true_label_boxplots_dir, cm_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
         # Compute predicted labels using the precomputed similarity matrix
@@ -1489,6 +1519,60 @@ class LabelSimilarity(BaseEvaluator):
             )
             _safe_tight_layout()
             plt.savefig(hist_dir / f"{safe_query_label}_legend.{save_format}", dpi=dpi, bbox_inches="tight")
+            plt.close()
+
+        # Create second round of boxplots: for each true cell type, plot similarities to all query labels
+        unique_true_labels = np.unique(true_labels)
+
+        # Use the same color_map from UMAP plots to ensure consistency
+        # The color_map is already created earlier for UMAP plots
+
+        for true_label in unique_true_labels:
+            # Get mask for cells with this true label
+            mask = true_labels == true_label
+            cells_with_label = np.sum(mask)
+
+            if cells_with_label == 0:
+                continue
+
+            # For these cells, get their similarities to all query labels
+            cells_similarities = similarity_matrix[mask, :]  # Shape: (N_cells_with_label, N_query_labels)
+
+            # Plot boxplots for each query label
+            plt.figure(figsize=figsize, dpi=dpi)
+
+            # Prepare data for boxplots: list of similarity arrays for each query label
+            data_to_plot = [cells_similarities[:, i] for i in range(len(query_labels))]
+            query_label_names = [str(label) for label in query_labels]
+
+            # Create boxplot with flipped axes (horizontal)
+            bp = plt.boxplot(data_to_plot, labels=query_label_names, vert=False, widths=0.6, patch_artist=True)
+
+            # Color the boxes with query colors and set outlier size
+            for i, patch in enumerate(bp["boxes"]):
+                patch.set_facecolor(color_map[query_label_names[i]])
+                patch.set_alpha(0.7)
+
+            # Make outliers smaller
+            for flier in bp["fliers"]:
+                flier.set_markersize(3)
+                flier.set_markeredgewidth(0.5)
+
+            plt.xlabel(f"{self.similarity.title()} Similarity", fontsize=font_size)
+            plt.ylabel("Query Labels", fontsize=font_size)
+            plt.xlim(-0.6, 0.6)
+            plt.title(f"True Label: {true_label} (n={cells_with_label})", fontsize=font_size)
+
+            # Set tick label sizes for both axes
+            ax = plt.gca()
+            ax.tick_params(axis="x", labelsize=axis_tick_size)
+            ax.tick_params(axis="y", labelsize=axis_tick_size)
+            plt.yticks(rotation=0, ha="right")
+
+            _safe_tight_layout()
+
+            safe_true_label = re.sub(r"[^\w\d\-\.]", "_", str(true_label))
+            plt.savefig(true_label_boxplots_dir / f"{safe_true_label}.{save_format}", dpi=dpi, bbox_inches="tight")
             plt.close()
 
         # Plot mean ROC curve
