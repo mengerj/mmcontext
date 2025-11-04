@@ -1,16 +1,17 @@
 #!/bin/bash
 #SBATCH --job-name=embed_array
 #SBATCH --partition=slurm
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
 #SBATCH --time=48:00:00         # Max job time
-#SBATCH --array=1-2%1           # Array job: 1-2 with max 1 concurrent job (adjust %N for more parallel jobs)
+#SBATCH --array=1           # Array job: 1-2 with max 1 concurrent job (adjust %N for more parallel jobs)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_1" "model_list_2")  # Add more model configs here as needed
+MODEL_CONFIGS=("model_list_6")  # Add more model configs here as needed
+###!!! Adjust array size to the number of model configs!!!
 
 # Validate array task ID
 if [[ ${SLURM_ARRAY_TASK_ID} -gt ${#MODEL_CONFIGS[@]} ]]; then
@@ -79,7 +80,7 @@ echo "venv activated"
 python3 scripts/embed.py \
     --config-path=../conf \
     --config-name=embed_conf \
-    defaults=models/${MODEL_CONFIG} \
+    models=${MODEL_CONFIG} \
     ++hydra.run.dir="$BASE_OUT"
     # Add run.overwrite=true to force overwrite existing embeddings
     # Example: run.overwrite=true
