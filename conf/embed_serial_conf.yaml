@@ -4,7 +4,7 @@ defaults:
 
 run:
   seed: 42
-  n_rows: 5_000 # rows per dataset split
+  n_rows: 50_000 # rows per dataset split
   batch_size: 32 # Larger batch for better GPU utilization
   num_workers: 0 # IMPORTANT: No DataLoader workers to avoid CUDA issues
   overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
@@ -14,7 +14,7 @@ run:
 
 output:
   adata_cache: ${hydra:runtime.cwd}/data/from_nxtcloud
-  root: ${hydra:runtime.cwd}/out/embeddings_serial
+  root: ${hydra:runtime.cwd}/out/embeddings
   format: parquet # csv | parquet
 
 slurm:

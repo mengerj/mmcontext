@@ -1,4 +1,4 @@
-- source: jo-mengr/mmcontext-pubmedbert-scvi_fm-cxg_100k_dim2048
+- source: jo-mengr/mmcontext-pubmedbert-scvi_fm-cxg_dim2048
   name: scvi_fm_cxg_100k_dim2048
   text_only: false
   layer_key: X_scvi_fm

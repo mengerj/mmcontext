@@ -6,13 +6,14 @@ defaults:
 run:
   seed: 42
   n_rows: 50_000 # rows per dataset split
-  batch_size: 128
-  num_workers: 2
+  batch_size: 512
+  num_workers: 0
   overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
-
+  hf_cache_dir: /scratch/local/menger/cache/huggingface
+  
   # Parallelization settings
-  enable_parallel: false # Enable parallel processing of dataset/model combinations
-  max_workers: null # Maximum number of parallel workers (null = auto-detect CPU count)
+  enable_parallel: true # Enable parallel processing of dataset/model combinations
+  max_workers: 4 # Maximum number of parallel workers (null = auto-detect CPU count)
   task_timeout: 7200 # Maximum time (seconds) per dataset/model combination (2 hours default)
 
   # GPU settings
@@ -21,8 +22,9 @@ run:
   # For CPU processing, you can use higher values (e.g., 4-8)
 
 output:
-  adata_cache: ${hydra:runtime.cwd}/data/from_nxtcloud
-  root: ${hydra:runtime.cwd}/out/embeddings
+
+  adata_cache: /scratch/global/menger/data/from_nxtcloud
+  root: /scratch/global/menger/out/embeddings
   format: parquet # csv | parquet
 
 slurm:
