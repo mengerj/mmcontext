@@ -359,7 +359,7 @@ def process_cellwhisperer_dataset_model(
         )
 
         # Check if numeric data is available
-        numeric_data_available = "share_link" or "adata_link" in raw_ds.column_names
+        numeric_data_available = ("adata_link" in raw_ds.column_names) or ("share_link" in raw_ds.column_names)
 
         if not numeric_data_available:
             logger.warning("CellWhisperer requires numeric data (share_link or adata_link), but none found")

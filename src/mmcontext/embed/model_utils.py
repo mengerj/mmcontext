@@ -99,7 +99,7 @@ def prepare_model_and_embed(
     *,
     layer_key: str = None,
     adata_download_dir: str | Path = None,
-    main_col: str,
+    main_col: str = "cell_sentence_1",
     index_col: str = "sample_index",
     batch_size: int = 32,
     num_workers: int = 0,
@@ -165,9 +165,9 @@ def prepare_model_and_embed(
     # --- optional model-specific preparation ----------------
     ###########################################################
     impl = st_model[0] if len(st_model) > 0 else st_model
-    has_numeric = (
-        "share_link" or "adata_link"
-    ) in data.column_names  # otherwise we cannot download the initial embeddings and register them with the model
+    has_numeric = ("share_link" in data.column_names) or (
+        "adata_link" in data.column_names
+    )  # otherwise we cannot download the initial embeddings and register them with the model
     path_map = None
     if data is not None and has_numeric:
         link_column = "share_link" if "share_link" in data.column_names else "adata_link"
