@@ -93,3 +93,6 @@ build/
 models_trained/
 exploratory/notebooks/models
 exploratory/notebooks/eval
+
+#modules
+modules/
