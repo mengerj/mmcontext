@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from mmcontext.models.mmcontextencoder import MMContextEncoder, MMContextProcessor
+from mmcontext.mmcontextencoder import MMContextEncoder, MMContextProcessor
 
 
 # --- fixtures ---------------------------------------------------------

@@ -9,9 +9,9 @@
   bio_label_list:
     - AIFI_L1
     - AIFI_L2
-    - AIFI_L3
+    #- AIFI_L3
   batch_label_list:
-    - batch_id
+    #- batch_id
 
 - name: tabula_sapiens
   source: jo-mengr/tabula_sapiens_50k_single_no_caption
@@ -47,3 +47,4 @@
   bio_label_list:
     - Disease
   batch_label_list:
+    - "sra_study_acc"

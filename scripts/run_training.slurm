@@ -110,4 +110,14 @@ if [[ -n "$LEARNING_RATE" ]]; then
 fi
 
 echo "Executing: $TRAIN_CMD"
+<<<<<<< HEAD
 eval $TRAIN_CMD
+=======
+eval $TRAIN_CMD
+
+# clean up scratch local
+echo "Cleaning up scratch local"
+rm -rf /scratch/local/menger/data/from_nxtcloud/${RUN_ID}
+rm -rf /scratch/local/menger/cache/huggingface/${RUN_ID}
+echo "Cleaned up data/from_nxtcloud and cache/huggingface"
+>>>>>>> 44025f0cde6fcaaeda2e3b1a4232177e4a0ca234
