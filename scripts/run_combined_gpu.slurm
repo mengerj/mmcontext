@@ -1,18 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=combined_array
-#SBATCH --partition=slurm
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
-#SBATCH --time=72:00:00         # Max job time (3 days for combined pipeline)
-#SBATCH --array=1-5%5           # Array job
+#SBATCH --partition=gpu
+#SBATCH --time=24:00:00         # Max job time (3 days for combined pipeline)
+#SBATCH --array=1-1%1           # Array job
+#SBATCH --gres=gpu:2            # Request amount of GPUs
+#SBATCH --mem=120G
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_omics_enc_dim2048_full_1" "model_list_omics_enc_dim2048_full_2" "model_list_omics_enc_dim2048_full_3" "model_list_omics_enc_dim2048_full_4" "model_list_omics_enc_dim2048_full_5")  # Add more model configs here as needed
-run_cellwhisperer=false
-final_root="/scratch/global/menger/mmcontext_out/0411_results"
+MODEL_CONFIGS=("model_list_to_cellwhisp")  # Add more model configs here as needed
+run_cellwhisperer=true
+final_root="/scratch/global/menger/mmcontext_out/final_results"
 
 # Validate array task ID
 if [[ ${SLURM_ARRAY_TASK_ID} -gt ${#MODEL_CONFIGS[@]} ]]; then
