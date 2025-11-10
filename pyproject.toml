@@ -93,6 +93,14 @@ include = [ "mmcontext*" ]
 [tool.setuptools.package-data]
 #"mmcontext.conf" = [ "*.json" ]
 
+[tool.uv.sources]
+transformers = { git = "git+https://github.com/huggingface/transformers.git" }
+#torch = { index = "pytorch-cu121" }
+
+#[[tool.uv.index]]
+#name = "pytorch-cu121"
+#url = "https://download.pytorch.org/whl/cu121"
+
 [tool.ruff]
 line-length = 120
 src = [ "src" ]
@@ -165,11 +173,3 @@ skip = [
   "docs/references.md",
   "docs/notebooks/example.ipynb",
 ]
-
-[tool.uv.sources]
-transformers = { git = "git+https://github.com/huggingface/transformers.git" }
-#torch = { index = "pytorch-cu121" }
-
-#[[tool.uv.index]]
-#name = "pytorch-cu121"
-#url = "https://download.pytorch.org/whl/cu121"
