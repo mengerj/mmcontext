@@ -34,14 +34,14 @@ exec 2>"$BASE_OUT"/train.err
 
 # Configuration file path (relative to PROJECT_ROOT)
 # Override this by setting CONFIG_FILE environment variable before running
-CONFIG_FILE="/home/menger/git/mmcontext/conf/training/basebert_text_no_bio.yaml"
+CONFIG_FILE="/home/menger/git/mmcontext/conf/training/basebert_numeric.yaml"
 #extend adata cache dir with run_id
 ADATA_CACHE_DIR="/scratch/local/menger/data/from_nxtcloud/${RUN_ID}"
 CACHE_DIR="/scratch/local/menger/cache/huggingface/${RUN_ID}"
 # Optional command-line overrides
 # These can be set as environment variables to override config file values
 MODEL=null
-EMBEDDING_METHOD=null
+EMBEDDING_METHOD=gs10k
 TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
 # Validate that config file exists
@@ -80,12 +80,9 @@ echo "Cache directory: $CACHE_DIR"
 source .venv/bin/activate
 echo "venv activated"
 
-#echo "installing flash-attn"
-#uv pip install ninja packaging wheel setuptools
-#uv pip install flash-attn==2.8.1 --no-build-isolation
-#echo "flash-attn installed"
-
-#python scripts/cuda_available.py
+echo "installing accelerate"
+uv pip install accelerate
+echo "accelerate installed"
 
 echo "Running training script with configuration from: $CONFIG_FILE"
 
@@ -93,7 +90,7 @@ echo "Running training script with configuration from: $CONFIG_FILE"
 #cd "$PROJECT_ROOT"
 
 # Build the command with optional overrides
-TRAIN_CMD="python3 scripts/train.py --config-path=\"$(dirname "$CONFIG_FILE")\" --config-name=\"$(basename "$CONFIG_FILE" .yaml)\" hydra.run.dir=\"$BASE_OUT\" ++adata_cache_dir=\"$ADATA_CACHE_DIR\" ++cache_dir=\"$CACHE_DIR\""
+TRAIN_CMD="python scripts/train.py --config-path=\"$(dirname "$CONFIG_FILE")\" --config-name=\"$(basename "$CONFIG_FILE" .yaml)\" hydra.run.dir=\"$BASE_OUT\" ++adata_cache_dir=\"$ADATA_CACHE_DIR\" ++cache_dir=\"$CACHE_DIR\""
 
 # Add optional overrides if provided
 if [[ -n "$EMBEDDING_METHOD" ]]; then
@@ -110,9 +107,6 @@ if [[ -n "$LEARNING_RATE" ]]; then
 fi
 
 echo "Executing: $TRAIN_CMD"
-<<<<<<< HEAD
-eval $TRAIN_CMD
-=======
 eval $TRAIN_CMD
 
 # clean up scratch local
@@ -120,4 +114,3 @@ echo "Cleaning up scratch local"
 rm -rf /scratch/local/menger/data/from_nxtcloud/${RUN_ID}
 rm -rf /scratch/local/menger/cache/huggingface/${RUN_ID}
 echo "Cleaned up data/from_nxtcloud and cache/huggingface"
->>>>>>> 44025f0cde6fcaaeda2e3b1a4232177e4a0ca234
