@@ -17,7 +17,8 @@ from anndata import AnnData
 from matplotlib.patches import Patch
 from scipy.sparse import issparse
 from sklearn.metrics.pairwise import cosine_similarity
-from wordcloud import WordCloud
+
+# from wordcloud import WordCloud
 
 logger = logging.getLogger(__name__)
 
@@ -568,6 +569,7 @@ def plot_umap(
         raise e
 
 
+'''
 def plot_wordcloud(
     list_of_terms: list[str],
     separator: str = ",",
@@ -630,6 +632,7 @@ def plot_wordcloud(
     plt.axis("off")
     plt.title(title)
     plt.show()
+'''
 
 
 def plot_query_scores_umap(

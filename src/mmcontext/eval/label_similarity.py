@@ -1020,6 +1020,7 @@ class LabelSimilarity(BaseEvaluator):
         text_dot_edge_color: str = None,
         text_dot_alpha: float = None,
         umap_method: str = None,
+        cell_umap: np.ndarray | None = None,
         **kw,
     ) -> None:
         """
@@ -1083,6 +1084,12 @@ class LabelSimilarity(BaseEvaluator):
             Transparency for text annotation dots
         umap_method : str, optional
             UMAP computation method ("combined", "separate")
+        cell_umap : np.ndarray, optional
+            Precomputed cell UMAP coordinates with shape (N_cells, 2).
+            If provided, these coordinates will be reused instead of computing new ones.
+            Label positions will always be recomputed based on current embeddings.
+            This is useful when reusing UMAP coordinates from a full dataset with
+            a subset of cells or different label embeddings.
         **eval_cfg: Any
             Additional evaluation configuration parameters
         """
@@ -1230,20 +1237,39 @@ class LabelSimilarity(BaseEvaluator):
         point_colors = [color_map.get(label, "gray") for label in true_labels]
 
         # Use label_embeddings directly for UMAP visualization
-        # Compute UMAP based on selected method
-        if umap_computation_method == "separate":
-            # Use separate UMAP computation with highest similarity positioning
-            cell_umap, label_umap = self._compute_separate_umap_with_labels(
-                omics_embeddings, label_embeddings, true_labels, query_labels
-            )
-        else:
-            # Use combined UMAP computation (original method)
-            combined_embeddings = np.vstack([omics_embeddings, label_embeddings])
-            combined_umap = self._compute_umap(combined_embeddings)
+        # Check if precomputed cell UMAP is provided
+        if cell_umap is not None:
+            # Validate dimensions
+            if len(cell_umap) != len(omics_embeddings):
+                raise ValueError(
+                    f"cell_umap length ({len(cell_umap)}) must match omics_embeddings length ({len(omics_embeddings)})"
+                )
+            if cell_umap.shape[1] != 2:
+                raise ValueError(f"cell_umap must have shape (N, 2), got {cell_umap.shape}")
 
-            # Split back into cell and label coordinates
-            cell_umap = combined_umap[: len(omics_embeddings)]
-            label_umap = combined_umap[len(omics_embeddings) :]
+            # Use provided cell UMAP (already subsetted by user if needed)
+            # Always recompute label positions based on current embeddings and labels
+            similarity_matrix = self._compute_similarity_matrix(omics_embeddings, label_embeddings)
+            label_umap = np.zeros((len(query_labels), 2))
+            for i, _label in enumerate(query_labels):
+                max_similarity_idx = np.argmax(similarity_matrix[:, i])
+                label_umap[i] = cell_umap[max_similarity_idx]
+
+        else:
+            # Compute UMAP based on selected method
+            if umap_computation_method == "separate":
+                # Use separate UMAP computation with highest similarity positioning
+                cell_umap, label_umap = self._compute_separate_umap_with_labels(
+                    omics_embeddings, label_embeddings, true_labels, query_labels
+                )
+            else:
+                # Use combined UMAP computation (original method)
+                combined_embeddings = np.vstack([omics_embeddings, label_embeddings])
+                combined_umap = self._compute_umap(combined_embeddings)
+
+                # Split back into cell and label coordinates
+                cell_umap = combined_umap[: len(omics_embeddings)]
+                label_umap = combined_umap[len(omics_embeddings) :]
 
         # Version 1: Without text annotations (using cell_umap which has label positions)
         plt.figure(figsize=figsize, dpi=dpi)

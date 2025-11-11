@@ -711,6 +711,72 @@ def create_separate_legend(
     plt.close(fig_legend)
 
 
+def create_model_legend(
+    model_color_dict: dict,
+    output_dir: Path,
+    plot_format: str = "png",
+    font_size: int = 12,
+    ncol: int = 1,
+) -> None:
+    """
+    Create a separate legend image for models.
+
+    Parameters
+    ----------
+    model_color_dict : dict
+        Dictionary mapping model names to colors
+    output_dir : Path
+        Directory to save the legend
+    plot_format : str
+        Plot file format (png, pdf, svg)
+    font_size : int
+        Font size for legend text
+    ncol : int
+        Number of columns in the legend (1 = vertical, >1 = horizontal)
+    """
+    # Create a new figure just for the legend
+    unique_models = sorted(model_color_dict.keys())
+
+    # Adjust figure size based on orientation
+    if ncol == 1:
+        # Vertical layout
+        fig_legend = plt.figure(figsize=(3, len(unique_models) * 0.3 + 0.5))
+    else:
+        # Horizontal layout - adjust width based on number of columns
+        n_rows = (len(unique_models) + ncol - 1) // ncol  # Ceiling division
+        fig_legend = plt.figure(figsize=(ncol * 1.5 + 1, n_rows * 0.3 + 0.5))
+
+    # Create legend handles for all models
+    legend_handles = []
+    legend_labels = []
+    for model in unique_models:
+        color = model_color_dict[model]
+        legend_handles.append(Patch(color=color))
+        legend_labels.append(model)
+
+    # Create legend
+    _legend = fig_legend.legend(
+        legend_handles,
+        legend_labels,
+        loc="center",
+        frameon=True,
+        fancybox=True,
+        shadow=True,
+        fontsize=font_size - 2,
+        ncol=ncol,
+    )
+
+    # Remove axes
+    fig_legend.gca().set_axis_off()
+
+    # Save legend
+    legend_file = output_dir / f"scatter_legend_models.{plot_format}"
+    plt.savefig(legend_file, dpi=300, bbox_inches="tight")
+    print(f"Saved model legend to: {legend_file}")
+
+    plt.close(fig_legend)
+
+
 def create_dataset_pair_scatter_plots(
     accuracy_data: pd.DataFrame,
     baseline_data: pd.DataFrame,
@@ -719,6 +785,10 @@ def create_dataset_pair_scatter_plots(
     font_size: int = 12,
     fig_width: int = 8,
     fig_height: int = 8,
+    tick_label_size: int = None,
+    show_labels: bool = True,
+    legend_ncol: int = 1,
+    point_size: float = 150,
 ) -> None:
     """
     Create scatter plots comparing accuracy between pairs of datasets.
@@ -739,6 +809,15 @@ def create_dataset_pair_scatter_plots(
         Figure width in inches
     fig_height : int
         Figure height in inches
+    tick_label_size : int
+        Font size for tick labels and tick marks
+    show_labels : bool
+        If True, use colored points and create separate legend file.
+        If False, plot all points in gray without labels/legend.
+    legend_ncol : int
+        Number of columns in the legend (1 = vertical, >1 = horizontal)
+    point_size : float
+        Size of scatter plot points (in points^2)
     """
     if accuracy_data.empty:
         print("No accuracy data available for scatter plots")
@@ -773,6 +852,26 @@ def create_dataset_pair_scatter_plots(
 
     # Set style
     sns.set_style("whitegrid")
+
+    # Get all unique models across all datasets for consistent color mapping
+    # Only create color mapping and legend if show_labels is True
+    model_color_dict = {}
+    if show_labels:
+        all_models = sorted(accuracy_data["model_name"].unique())
+        # Use Set2 palette - distinct colors different from typical UMAP colors
+        # Set2 works well for up to 8 categories, cycles for more
+        # This avoids colors like yellow, grey, red, brown, green, orange, cyan, blue, purple, pink
+        n_models = len(all_models)
+        if n_models <= 8:
+            model_colors = sns.color_palette("Set2", n_models)
+        else:
+            # Cycle through Set2 palette if more than 8 models
+            base_colors = sns.color_palette("Set2", 8)
+            model_colors = [base_colors[i % 8] for i in range(n_models)]
+        model_color_dict = dict(zip(all_models, model_colors, strict=False))
+
+        # Create separate legend file for models
+        create_model_legend(model_color_dict, output_dir, plot_format, font_size, legend_ncol)
 
     # Process each combined metric separately (this handles different label_kinds)
     for combined_metric in unique_combined_metrics:
@@ -839,28 +938,34 @@ def create_dataset_pair_scatter_plots(
             # Create the plot
             fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-            # Plot points
-            ax.scatter(
-                merged["x_value"],
-                merged["y_value"],
-                s=100,
-                alpha=0.7,
-                color="black",
-                edgecolors="white",
-                linewidths=1.5,
-                zorder=3,
-            )
-
-            # Add annotations for each point (using model_name which contains displayed_name)
-            for model_name, row in merged.iterrows():
-                ax.annotate(
-                    model_name,
-                    (row["x_value"], row["y_value"]),
-                    xytext=(5, 5),
-                    textcoords="offset points",
-                    fontsize=font_size - 2,
-                    alpha=0.8,
-                    zorder=4,
+            # Plot points - either colored with labels or gray without labels
+            if show_labels:
+                # Plot points with colors for each model (group by model to avoid duplicate legend entries)
+                for model_name in merged.index:
+                    model_data = merged.loc[[model_name]]
+                    color = model_color_dict.get(model_name, "black")
+                    ax.scatter(
+                        model_data["x_value"],
+                        model_data["y_value"],
+                        s=point_size,
+                        alpha=0.8,
+                        color=color,
+                        edgecolors="white",
+                        linewidths=2,
+                        zorder=3,
+                        label=model_name,
+                    )
+            else:
+                # Plot all points in gray without labels
+                ax.scatter(
+                    merged["x_value"],
+                    merged["y_value"],
+                    s=point_size,
+                    alpha=0.6,
+                    color="gray",
+                    edgecolors="white",
+                    linewidths=2,
+                    zorder=3,
                 )
 
             # Add baseline lines
@@ -892,6 +997,15 @@ def create_dataset_pair_scatter_plots(
             ax.set_xlabel(dataset1, fontsize=font_size, fontweight="bold")
             ax.set_ylabel(dataset2, fontsize=font_size, fontweight="bold")
 
+            # Set tick sizes (both labels and tick marks)
+            tick_size = tick_label_size if tick_label_size is not None else font_size - 2
+            # Set tick mark size: length in points (make it proportional to font size)
+            tick_length = max(8, tick_size * 0.5)  # Minimum 8 points, proportional to font size
+            tick_width = max(1.5, tick_size * 0.15)  # Minimum 1.5 points
+            ax.tick_params(axis="both", labelsize=tick_size, length=tick_length, width=tick_width)
+
+            # No legend on individual plots - legend is saved separately
+
             # Create a safe filename from dataset names
             safe_name1 = dataset1.replace(" ", "_").replace("/", "_")
             safe_name2 = dataset2.replace(" ", "_").replace("/", "_")
@@ -902,20 +1016,26 @@ def create_dataset_pair_scatter_plots(
 
             # Set equal aspect ratio (1:1) so diagonal comparisons are fair
             # But allow for different axis ranges
-            x_range = merged["x_value"].max() - merged["x_value"].min()
-            y_range = merged["y_value"].max() - merged["y_value"].min()
+            x_max = merged["x_value"].max()
+            x_min = merged["x_value"].min()
+            y_max = merged["y_value"].max()
+            y_min = merged["y_value"].min()
+
+            x_range = x_max - x_min
+            y_range = y_max - y_min
 
             # Add some padding
-            x_padding = x_range * 0.1 if x_range > 0 else 0.05
-            y_padding = y_range * 0.1 if y_range > 0 else 0.05
+            x_padding = x_range * 0.1 if x_range > 0 else x_max * 0.05 if x_max > 0 else 0.05
+            y_padding = y_range * 0.1 if y_range > 0 else y_max * 0.05 if y_max > 0 else 0.05
 
-            ax.set_xlim(merged["x_value"].min() - x_padding, merged["x_value"].max() + x_padding)
-            ax.set_ylim(merged["y_value"].min() - y_padding, merged["y_value"].max() + y_padding)
+            # Ensure axes start at -0.05
+            ax.set_xlim(-0.05, x_max + x_padding)
+            ax.set_ylim(-0.05, y_max + y_padding)
 
             # Add diagonal line for reference (y = x)
-            min_val = min(ax.get_xlim()[0], ax.get_ylim()[0])
+            # Since both axes start at -0.05, diagonal goes from (-0.05,-0.05) to the maximum of both axes
             max_val = max(ax.get_xlim()[1], ax.get_ylim()[1])
-            ax.plot([min_val, max_val], [min_val, max_val], "k:", alpha=0.3, linewidth=1, zorder=2, label="y=x")
+            ax.plot([-0.05, max_val], [-0.05, max_val], "k:", alpha=0.3, linewidth=1, zorder=2, label="y=x")
 
             # Save the plot
             plot_name = f"scatter_{safe_metric}_{safe_name1}_vs_{safe_name2}"
@@ -947,6 +1067,9 @@ def plot_metrics(
     y_axis_max: float = None,
     accuracy_over_random_y_max: float = None,
     model_order: list = None,
+    scatter_show_labels: bool = True,
+    scatter_legend_ncol: int = 1,
+    scatter_point_size: float = 150,
 ) -> None:
     """Main plotting function."""
     # Load the metrics data
@@ -1128,6 +1251,10 @@ def plot_metrics(
             font_size,
             fig_width,
             fig_height,
+            tick_label_size,
+            scatter_show_labels,
+            scatter_legend_ncol,
+            scatter_point_size,
         )
 
     # Plot regular metrics (non-accuracy, non-baseline)
@@ -1231,6 +1358,11 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
     y_axis_max = cfg.collect_metrics.get("y_axis_max", None)
     accuracy_over_random_y_max = cfg.collect_metrics.get("accuracy_over_random_y_max", None)
 
+    # Get scatter plot configuration
+    scatter_show_labels = cfg.collect_metrics.get("scatter_show_labels", True)
+    scatter_legend_ncol = cfg.collect_metrics.get("scatter_legend_ncol", 1)
+    scatter_point_size = cfg.collect_metrics.get("scatter_point_size", 150)
+
     # Default skip options (can be overridden by command line)
     skip_scib = True  # Default to skipping scib since it has issues
     skip_batch = True  # Default to skipping batch since it has issues
@@ -1273,6 +1405,9 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
         y_axis_max,
         accuracy_over_random_y_max,
         model_order,
+        scatter_show_labels,
+        scatter_legend_ncol,
+        scatter_point_size,
     )
 
     print(f"\nPlotting completed! Check output directory: {plots_output_dir}")
