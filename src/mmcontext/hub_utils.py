@@ -205,6 +205,163 @@ def copy_mmcontext_files(model_dir: Path) -> None:
         logger.info(f"Copied: {src_file} -> {dest_file}")
 
 
+def prepare_model_for_hub(
+    model: SentenceTransformer,
+    output_dir: str | Path,
+    repo_id: str,
+    model_name: str | None = None,
+    text_encoder: str | None = None,
+    embedding_method: str | None = None,
+    output_dim: int | None = None,
+    pooling_mode: str = "mean",
+    training_details: str | None = None,
+    tutorial_notebook: str | None = None,
+    notebook_path: str | Path | None = None,
+) -> Path:
+    """
+    Prepare a model for Hugging Face Hub upload by creating all necessary files locally.
+
+    This function prepares the model directory with all metadata, model cards, and required files,
+    but does not upload to the Hub. This allows users to push manually later if automatic upload fails.
+
+    Parameters
+    ----------
+    model : SentenceTransformer
+        The trained model to prepare
+    output_dir : str or Path
+        Directory where the prepared model should be saved
+    repo_id : str
+        Hugging Face repository ID (e.g., 'username/model-name')
+    model_name : str, optional
+        Display name for the model (defaults to repo_id)
+    text_encoder : str, optional
+        Name of text encoder (auto-detected if not provided)
+    embedding_method : str, optional
+        Omics embedding method (auto-detected if not provided)
+    output_dim : int, optional
+        Output dimension (auto-detected if not provided)
+    pooling_mode : str, optional
+        Pooling strategy (auto-detected if not provided)
+    training_details : str, optional
+        Additional training details
+    tutorial_notebook : str, optional
+        Name of tutorial notebook
+    notebook_path : str or Path, optional
+        Path to notebook file to include
+
+    Returns
+    -------
+    Path
+        Path to the prepared model directory
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Auto-detect model parameters if not provided
+    if model_name is None:
+        model_name = repo_id.split("/")[-1].replace("-", " ").title()
+
+    # Try to extract parameters from the model
+    mmcontext_encoder = None
+    for module in model.modules():
+        if hasattr(module, "__class__") and "MMContextEncoder" in str(module.__class__):
+            mmcontext_encoder = module
+            break
+
+    if mmcontext_encoder:
+        if text_encoder is None:
+            text_encoder = getattr(mmcontext_encoder, "text_encoder_name", "Unknown")
+        if embedding_method is None:
+            embedding_method = getattr(mmcontext_encoder, "_registered_data_origin", "unknown")
+        if output_dim is None:
+            output_dim = getattr(mmcontext_encoder, "_output_dim", "Unknown")
+        if pooling_mode == "mean":  # Only override default
+            pooling_mode = getattr(mmcontext_encoder, "pooling_mode", "mean")
+
+    # Set defaults for missing values
+    text_encoder = text_encoder or "Unknown"
+    embedding_method = embedding_method or "unknown"
+    output_dim = output_dim or "Unknown"
+
+    # Create custom model card
+    include_notebook = notebook_path is not None
+    model_card_content = create_model_card(
+        model_name=model_name,
+        repo_id=repo_id,
+        text_encoder=text_encoder,
+        embedding_method=embedding_method,
+        output_dim=output_dim,
+        pooling_mode=pooling_mode,
+        training_details=training_details,
+        tutorial_notebook=tutorial_notebook,
+        include_notebook=include_notebook,
+    )
+
+    # Save model to output directory
+    logger.info(f"Preparing model for Hub in {output_path}...")
+    model.save(str(output_path))
+
+    # Copy MMContext files to top level
+    logger.info("Adding MMContext files to top level...")
+    copy_mmcontext_files(output_path)
+
+    # Update modules.json to reference the top-level mmcontextencoder file
+    modules_json_path = output_path / "modules.json"
+    if modules_json_path.exists():
+        import json
+
+        with open(modules_json_path) as f:
+            modules_config = json.load(f)
+
+        # Update the first module to use top-level mmcontextencoder.py
+        if modules_config and len(modules_config) > 0:
+            modules_config[0]["type"] = "mmcontextencoder.MMContextEncoder"
+
+        with open(modules_json_path, "w") as f:
+            json.dump(modules_config, f, indent=2)
+
+        logger.info("Updated modules.json to reference top-level mmcontextencoder.py")
+
+    # Create combined README (custom content + SentenceTransformer content)
+    readme_path = output_path / "README.md"
+
+    # Check if SentenceTransformer already created a README
+    existing_readme = ""
+    if readme_path.exists():
+        existing_readme = readme_path.read_text()
+        logger.info("Found existing SentenceTransformer README, will combine with custom content")
+
+    # Combine custom content with existing content
+    if existing_readme:
+        # Insert our custom content after the YAML frontmatter and widget section
+        combined_content = insert_custom_content_after_yaml(existing_readme, model_card_content)
+    else:
+        combined_content = model_card_content
+
+    readme_path.write_text(combined_content)
+    logger.info("Created combined model card (custom + SentenceTransformer content)")
+
+    # Copy notebook if provided
+    if notebook_path:
+        notebook_path = Path(notebook_path)
+        if notebook_path.exists():
+            dest_notebook = output_path / notebook_path.name
+
+            # Read notebook and replace model_id placeholder
+            notebook_content = notebook_path.read_text()
+            # Replace the placeholder model ID with actual repo_id
+            notebook_content = notebook_content.replace('"jo-mengr/your-model-name"', f'"{repo_id}"')
+            # Also replace the comment
+            notebook_content = notebook_content.replace("# Update this!", "# Automatically set to this repository")
+            dest_notebook.write_text(notebook_content)
+            logger.info(f"Added tutorial notebook: {notebook_path.name}")
+        else:
+            logger.warning(f"Notebook not found: {notebook_path}")
+
+    logger.info(f"✅ Model prepared for Hub at {output_path}")
+    return output_path
+
+
 def upload_model_to_hub(
     model: SentenceTransformer,
     repo_id: str,
@@ -218,6 +375,7 @@ def upload_model_to_hub(
     notebook_path: str | Path | None = None,
     private: bool = False,
     commit_message: str | None = None,
+    prepared_model_dir: str | Path | None = None,
 ) -> str:
     """
     Upload MMContext model to Hugging Face Hub with custom model card.
@@ -280,103 +438,46 @@ def upload_model_to_hub(
     embedding_method = embedding_method or "unknown"
     output_dim = output_dim or "Unknown"
 
-    # Create custom model card
-    include_notebook = notebook_path is not None
-    model_card_content = create_model_card(
-        model_name=model_name,
-        repo_id=repo_id,
-        text_encoder=text_encoder,
-        embedding_method=embedding_method,
-        output_dim=output_dim,
-        pooling_mode=pooling_mode,
-        training_details=training_details,
-        tutorial_notebook=tutorial_notebook,
-        include_notebook=include_notebook,
-    )
-
-    # Use temporary directory for preparation
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # Use prepared directory if provided, otherwise prepare in temp directory
+    if prepared_model_dir is not None:
+        temp_path = Path(prepared_model_dir)
+        logger.info(f"Using prepared model directory: {temp_path}")
+    else:
+        # Prepare model in temporary directory
+        temp_dir = tempfile.mkdtemp()
         temp_path = Path(temp_dir) / "model"
+        prepare_model_for_hub(
+            model=model,
+            output_dir=temp_path,
+            repo_id=repo_id,
+            model_name=model_name,
+            text_encoder=text_encoder,
+            embedding_method=embedding_method,
+            output_dim=output_dim,
+            pooling_mode=pooling_mode,
+            training_details=training_details,
+            tutorial_notebook=tutorial_notebook,
+            notebook_path=notebook_path,
+        )
 
-        # Save model to temporary directory
-        logger.info("Preparing model for upload...")
-        model.save_pretrained(temp_path)
+    # Upload to Hub
+    api = HfApi()
 
-        # Copy MMContext files to top level
-        logger.info("Adding MMContext files to top level...")
-        copy_mmcontext_files(temp_path)
+    # Create repository
+    logger.info(f"Creating repository: {repo_id}")
+    try:
+        api.create_repo(repo_id=repo_id, private=private, exist_ok=True)
+        logger.info(f"Repository {repo_id} ready")
+    except Exception as e:
+        logger.warning(f"Repository creation: {e}")
 
-        # Update modules.json to reference the top-level mmcontextencoder file
-        modules_json_path = temp_path / "modules.json"
-        if modules_json_path.exists():
-            import json
+    # Upload all files
+    commit_msg = commit_message or f"Upload {model_name} with MMContext architecture"
+    logger.info("Uploading model and files...")
+    api.upload_folder(folder_path=temp_path, repo_id=repo_id, commit_message=commit_msg)
 
-            with open(modules_json_path) as f:
-                modules_config = json.load(f)
-
-            # Update the first module to use top-level mmcontextencoder.py
-            if modules_config and len(modules_config) > 0:
-                modules_config[0]["type"] = "mmcontextencoder.MMContextEncoder"
-
-            with open(modules_json_path, "w") as f:
-                json.dump(modules_config, f, indent=2)
-
-            logger.info("Updated modules.json to reference top-level mmcontextencoder.py")
-
-        # Create combined README (custom content + SentenceTransformer content)
-        readme_path = temp_path / "README.md"
-
-        # Check if SentenceTransformer already created a README
-        existing_readme = ""
-        if readme_path.exists():
-            existing_readme = readme_path.read_text()
-            logger.info("Found existing SentenceTransformer README, will combine with custom content")
-
-        # Combine custom content with existing content
-        if existing_readme:
-            # Insert our custom content after the YAML frontmatter and widget section
-            combined_content = insert_custom_content_after_yaml(existing_readme, model_card_content)
-        else:
-            combined_content = model_card_content
-
-        readme_path.write_text(combined_content)
-        logger.info("Created combined model card (custom + SentenceTransformer content)")
-
-        # Copy notebook if provided
-        if notebook_path:
-            notebook_path = Path(notebook_path)
-            if notebook_path.exists():
-                dest_notebook = temp_path / notebook_path.name
-
-                # Read notebook and replace model_id placeholder
-                notebook_content = notebook_path.read_text()
-                # Replace the placeholder model ID with actual repo_id
-                notebook_content = notebook_content.replace('"jo-mengr/your-model-name"', f'"{repo_id}"')
-                # Also replace the comment
-                notebook_content = notebook_content.replace("# Update this!", "# Automatically set to this repository")
-                dest_notebook.write_text(notebook_content)
-                logger.info(f"Added tutorial notebook: {notebook_path.name}")
-            else:
-                logger.warning(f"Notebook not found: {notebook_path}")
-
-        # Upload to Hub
-        api = HfApi()
-
-        # Create repository
-        logger.info(f"Creating repository: {repo_id}")
-        try:
-            api.create_repo(repo_id=repo_id, private=private, exist_ok=True)
-            logger.info(f"Repository {repo_id} ready")
-        except Exception as e:
-            logger.warning(f"Repository creation: {e}")
-
-        # Upload all files
-        commit_msg = commit_message or f"Upload {model_name} with MMContext architecture"
-        logger.info("Uploading model and files...")
-        api.upload_folder(folder_path=temp_path, repo_id=repo_id, commit_message=commit_msg)
-
-        logger.info(f"✅ Successfully uploaded model to https://huggingface.co/{repo_id}")
-        return f"https://huggingface.co/{repo_id}"
+    logger.info(f"✅ Successfully uploaded model to https://huggingface.co/{repo_id}")
+    return f"https://huggingface.co/{repo_id}"
 
 
 def insert_custom_content_after_yaml(existing_readme: str, custom_content: str) -> str:

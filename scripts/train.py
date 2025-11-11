@@ -20,7 +20,7 @@ from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
-from mmcontext.hub_utils import upload_model_to_hub
+from mmcontext.hub_utils import prepare_model_for_hub, upload_model_to_hub
 from mmcontext.mmcontextencoder import MMContextEncoder
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
@@ -1109,10 +1109,14 @@ def main(cfg: DictConfig):
             tutorial_notebook_path = Path("templates/usage_tutorial.ipynb")
             notebook_path = tutorial_notebook_path if tutorial_notebook_path.exists() else None
 
-            # Upload with custom model card
-            repo_url = upload_model_to_hub(
+            repo_id = f"jo-mengr/{unique_model_name}"
+
+            # Always prepare the model locally first (with all metadata, model card, etc.)
+            logger.info("Preparing model for Hub upload (creating model card, metadata, etc.)...")
+            prepared_model_dir = prepare_model_for_hub(
                 model=model,
-                repo_id=f"jo-mengr/{unique_model_name}",
+                output_dir=model_dir,
+                repo_id=repo_id,
                 model_name=unique_model_name.replace("-", " ").title(),
                 text_encoder=cfg.text_encoder.name,
                 embedding_method=cfg.embedding_method if cfg.embedding_method else "text_only",
@@ -1120,10 +1124,45 @@ def main(cfg: DictConfig):
                 training_details=training_details,
                 tutorial_notebook="usage_tutorial.ipynb" if notebook_path else None,
                 notebook_path=notebook_path,
-                private=True,
-                commit_message=f"Upload trained {unique_model_name} model",
             )
-            logger.info(f"Model uploaded to Hub: {repo_url}")
+            logger.info(f"Model prepared for Hub at: {prepared_model_dir}")
+            logger.info("Model card, metadata, and all required files have been created locally.")
+
+            # Try to upload to Hub
+            try:
+                repo_url = upload_model_to_hub(
+                    model=model,
+                    repo_id=repo_id,
+                    model_name=unique_model_name.replace("-", " ").title(),
+                    text_encoder=cfg.text_encoder.name,
+                    embedding_method=cfg.embedding_method if cfg.embedding_method else "text_only",
+                    output_dim=cfg.adapter.output_dim,
+                    training_details=training_details,
+                    tutorial_notebook="usage_tutorial.ipynb" if notebook_path else None,
+                    notebook_path=notebook_path,
+                    private=True,
+                    commit_message=f"Upload trained {unique_model_name} model",
+                    prepared_model_dir=prepared_model_dir,
+                )
+                logger.info(f"✅ Model successfully uploaded to Hub: {repo_url}")
+            except Exception as e:
+                logger.warning(f"⚠️ Automatic upload to Hugging Face Hub failed: {e}")
+                logger.warning("The model has been prepared locally with all metadata and can be pushed manually.")
+                logger.warning("")
+                logger.warning("=" * 80)
+                logger.warning("MANUAL UPLOAD INSTRUCTIONS:")
+                logger.warning("=" * 80)
+                logger.warning("")
+                logger.warning("To push the model manually, use the following Python code:")
+                logger.warning("")
+                logger.warning("  from huggingface_hub import HfApi")
+                logger.warning("  api = HfApi()")
+                logger.warning(f"  api.create_repo(repo_id='{repo_id}', private=True, exist_ok=True)")
+                logger.warning(f"  api.upload_folder(folder_path='{prepared_model_dir}', repo_id='{repo_id}')")
+                logger.warning("")
+                logger.warning(f"Prepared model directory: {prepared_model_dir}")
+                logger.warning("=" * 80)
+                logger.warning("")
 
         logger.info(f"Training completed successfully. Model saved to {model_dir}")
     except Exception as e:
