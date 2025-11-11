@@ -2,7 +2,8 @@
 #SBATCH --job-name=train
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1            # Request amount of GPUs
-#SBATCH --time=6:00:00         # Max job time of 4 hours
+#SBATCH --mem=60G               # Max memory usage
+#SBATCH --time=24:00:00         # Max job time
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0) Define a unified RUN_ID: real job ID under SLURM, or a timestamp locally
@@ -40,7 +41,7 @@ CACHE_DIR="/scratch/local/menger/cache/huggingface/${RUN_ID}"
 # Optional command-line overrides
 # These can be set as environment variables to override config file values
 MODEL=null
-EMBEDDING_METHOD=gs
+EMBEDDING_METHOD=gs10k
 TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
 # Validate that config file exists
@@ -57,8 +58,19 @@ if [[ -n "$TEXT_ENCODER_NAME" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3) Activate environment and run training
+# 3) Setup cleanup trap and activate environment
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Function to clean up scratch directories
+cleanup() {
+    echo "Cleaning up scratch local directories..."
+    rm -rf $ADATA_CACHE_DIR
+    rm -rf $CACHE_DIR
+    echo "Cleaned up data/from_nxtcloud and cache/huggingface"
+}
+
+# Set trap to ensure cleanup runs on script exit (success, failure, or termination)
+trap cleanup EXIT
 
 echo "Starting training job with RUN_ID: $RUN_ID"
 echo "Output directory: $BASE_OUT"
@@ -68,12 +80,9 @@ echo "Cache directory: $CACHE_DIR"
 source .venv/bin/activate
 echo "venv activated"
 
-#echo "installing flash-attn"
-#uv pip install ninja packaging wheel setuptools
-#uv pip install flash-attn==2.8.1 --no-build-isolation
-#echo "flash-attn installed"
-
-#python scripts/cuda_available.py
+echo "installing accelerate"
+uv pip install accelerate
+echo "accelerate installed"
 
 echo "Running training script with configuration from: $CONFIG_FILE"
 
@@ -81,7 +90,7 @@ echo "Running training script with configuration from: $CONFIG_FILE"
 #cd "$PROJECT_ROOT"
 
 # Build the command with optional overrides
-TRAIN_CMD="python3 scripts/train.py --config-path=\"$(dirname "$CONFIG_FILE")\" --config-name=\"$(basename "$CONFIG_FILE" .yaml)\" hydra.run.dir=\"$BASE_OUT\" ++adata_cache_dir=\"$ADATA_CACHE_DIR\" ++cache_dir=\"$CACHE_DIR\""
+TRAIN_CMD="python scripts/train.py --config-path=\"$(dirname "$CONFIG_FILE")\" --config-name=\"$(basename "$CONFIG_FILE" .yaml)\" hydra.run.dir=\"$BASE_OUT\" ++adata_cache_dir=\"$ADATA_CACHE_DIR\" ++cache_dir=\"$CACHE_DIR\""
 
 # Add optional overrides if provided
 if [[ -n "$EMBEDDING_METHOD" ]]; then
@@ -92,6 +101,9 @@ if [[ -n "$TEXT_ENCODER_NAME" ]]; then
 fi
 if [[ -n "$MODEL" ]]; then
     TRAIN_CMD="$TRAIN_CMD model=\"$MODEL\""
+fi
+if [[ -n "$LEARNING_RATE" ]]; then
+    TRAIN_CMD="$TRAIN_CMD trainer.learning_rate=\"$LEARNING_RATE\""
 fi
 
 echo "Executing: $TRAIN_CMD"

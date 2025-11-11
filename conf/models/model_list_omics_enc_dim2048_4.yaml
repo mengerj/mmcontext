@@ -1,9 +1,0 @@
-- source: jo-mengr/mmcontext-pubmedbert-gs10k-cxg_100k_dim2048
-  name: gs10k_cxg_100k_dim2048
-  text_only: false
-  layer_key: X_gs10k
-
-- source: jo-mengr/mmcontext-pubmedbert-gs10k-cxg_100k_dim2048-v2
-  name: gs10k_cxg_100k_dim2048_v2
-  text_only: false
-  layer_key: X_gs10k

@@ -31,8 +31,11 @@ exec 2>"$BASE_OUT"/eval.err
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Parallel processing settings (can be overridden via command line)
-ENABLE_PARALLEL="${ENABLE_PARALLEL:-true}"
+ENABLE_PARALLEL="${ENABLE_PARALLEL:-false}"
 MAX_WORKERS="${MAX_WORKERS:-}"  # Empty means auto-detect
+# Model and dataset file overrides
+MODEL_FILE="model_list.yaml"
+DATASET_FILE="dataset_list_1.yaml"
 
 # If running under SLURM, we can use the allocated CPU count
 if [[ -n "${SLURM_CPUS_PER_TASK:-}" ]]; then
@@ -59,6 +62,12 @@ if [[ -n "$MAX_WORKERS" ]]; then
     echo "Max workers: $MAX_WORKERS"
 else
     echo "Max workers: auto-detect"
+fi
+if [[ -n "$MODEL_FILE" ]]; then
+    EVAL_OVERRIDES="${EVAL_OVERRIDES} models=${MODEL_FILE}"
+fi
+if [[ -n "$DATASET_FILE" ]]; then
+    EVAL_OVERRIDES="${EVAL_OVERRIDES} datasets=${DATASET_FILE}"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
