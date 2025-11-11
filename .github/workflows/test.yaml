@@ -48,15 +48,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-          cache: "pip"
-          cache-dependency-path: "**/pyproject.toml"
 
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip wheel
       - name: Install dependencies
         run: |
-          pip install ${{ matrix.pip-flags }} ".[dev,test]"
+          pip install --no-cache-dir ${{ matrix.pip-flags }} ".[dev,test]"
+      - name: Clean up pip cache
+        run: |
+          pip cache purge || true
+          rm -rf ~/.cache/pip || true
       - name: Test
         env:
           MPLBACKEND: agg
