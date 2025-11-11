@@ -1,7 +1,7 @@
 # conf/combined_conf.yaml
 # Combined configuration for embedding + evaluation pipeline
 defaults:
-  - datasets: dataset_list_1.yaml
+  - datasets: dataset_list.yaml
   - models: model_list_omics_enc_dim2048_4.yaml
   - _self_
 
@@ -13,17 +13,17 @@ settings:
   task_timeout: 7200 # Maximum time (seconds) per dataset/model combination
 
   # Processing mode
-  skip_existing_embeddings: true # Skip embedding if files already exist
-  skip_existing_evaluations: true # Skip evaluation if eval directory already exists
+  skip_existing_embeddings: false # Skip embedding if files already exist
+  skip_existing_evaluations: false # Skip evaluation if eval directory already exists
 
   # CellWhisperer integration
   run_cellwhisperer: true # Enable CellWhisperer model processing alongside other models
-  cellwhisperer_modules_dir: /Users/mengerj/repos/mmcontext/modules # Directory where CellWhisperer will be installed
+  cellwhisperer_modules_dir: /home/menger/git/mmcontext/modules # Directory where CellWhisperer will be installed
   # Output paths
-  computation_root: /Users/mengerj/repos/mmcontext/out/test_combined_pipeline # Fast/local storage for embeddings (will be cleaned up)
-  final_root: /Users/mengerj/repos/mmcontext/out/test_combined_pipeline_out # Long-term storage for evaluation results
-  adata_cache: /Users/mengerj/repos/mmcontext/data/from_nxtcloud # AnnData cache directory
-  hf_cache: /Users/mengerj/repos/mmcontext/data/huggingface # HuggingFace cache directory
+  computation_root: /scratch/local/menger/mmcontext_out/0411_computation # Fast/local storage for embeddings (will be cleaned up)
+  final_root: /scratch/global/menger/mmcontext_out/0411_results # Long-term storage for evaluation results
+  adata_cache: /scratch/local/menger/data/from_nxtcloud # AnnData cache directory
+  hf_cache: /scratch/local/menger/cache/huggingface # HuggingFace cache directory
   output_format: parquet # csv | parquet
 
   # SLURM settings
@@ -32,7 +32,7 @@ settings:
 # Embedding-specific settings
 embed:
   seed: 42
-  n_rows: 1_000 # rows per dataset split
+  n_rows: 50_000 # rows per dataset split
   batch_size: 128
   num_workers: 2
   overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
@@ -55,15 +55,6 @@ eval:
   skip_plotting: true # If true, skip plotting
   plot_only: false # If true, skip computation and only regenerate plots from cached data
   skip_missing_cache: false # If true, skip datasets/models without cache when plot_only=true
-
-  # LabelSimilarity evaluator settings
-  # Note: These are automatically set based on model type:
-  #   - CellWhisperer: dot similarity + softmax + auto-extracted logit_scale
-  #   - All other models: cosine similarity + no normalization + logit_scale=1.0
-  # The values below are ignored (kept for backwards compatibility)
-  similarity: "cosine" # Ignored - auto-set based on model type
-  score_norm_method: None # Ignored - auto-set based on model type
-  logit_scale: null # Ignored for standard models, auto-extracted for CellWhisperer
 
   # ScIB specific settings
   skip_scib_on_error: true # Skip ScIB evaluation if it encounters errors instead of failing entire task
