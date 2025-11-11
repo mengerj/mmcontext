@@ -2,7 +2,7 @@
 # Core ML/DL packages
 anndata==0.10.2
 transformers==4.34.1
-torch==2.1.0
+torch==2.2.0
 numpy<2.0
 lightning==2.1.0
 datasets==2.12.0

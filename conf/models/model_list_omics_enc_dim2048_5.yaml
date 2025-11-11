@@ -1,9 +1,0 @@
-- source: jo-mengr/mmcontext-pubmedbert-geneformer-v1-cxg_100k_dim2048
-  name: geneformer_cxg_100k_dim2048
-  text_only: false
-  layer_key: X_geneformer
-
-- source: jo-mengr/mmcontext-pubmedbert-geneformer-v1-cxg_100k_dim2048-v2
-  name: geneformer_cxg_100k_dim2048_v2
-  text_only: false
-  layer_key: X_geneformer

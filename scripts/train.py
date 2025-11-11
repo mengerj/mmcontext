@@ -497,12 +497,14 @@ def prepare_ds(
     # Step 1: Handle embedding registration FIRST (needs access to raw dataset with all columns)
     if not dataset_text_only and hasattr(model[0], "get_initial_embeddings_from_adata_link"):
         logger.info(f"Loading numeric embeddings for dataset '{dataset_name}' (before column selection)")
+        link_column = "share_link" if "share_link" in dataset["train"].column_names else "adata_link"
         token_df, _ = model[0].get_initial_embeddings_from_adata_link(
             dataset,
             layer_key=precomputed_key,
             download_dir=adata_cache_dir,
             axis=layer_axis,
             overwrite=force_refresh_cache,
+            link_column=link_column,
         )
         model[0].register_initial_embeddings(token_df, data_origin=chosen_method)
     elif not dataset_text_only and not hasattr(model[0], "get_initial_embeddings_from_adata_link"):

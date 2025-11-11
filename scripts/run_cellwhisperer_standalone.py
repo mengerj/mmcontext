@@ -135,6 +135,7 @@ def create_embeddings(adata, model, transcriptome_processor, batch_size):
     logger.info(f"Creating embeddings for {adata.n_obs} cells...")
     # set adata.X to adata.layers["counts"] for cellwhisperer
     if "counts" in adata.layers:
+        logger.info("Setting adata.X to adata.layers['counts']")
         adata.X = adata.layers["counts"]
     else:
         logger.error("counts layer not found in adata.layers, cellwhisperer requires raw counts")
