@@ -6,6 +6,7 @@ from pathlib import Path
 import hydra
 import torch
 from datasets import DatasetDict, load_dataset
+from dotenv import load_dotenv
 from huggingface_hub import HfApi, HfFolder
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
@@ -33,6 +34,8 @@ from mmcontext.utils import (  # , load_test_adata_from_hf_dataset
 )
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 
 def resolve_torch_dtype_strings(kwargs_dict: dict) -> dict:
@@ -505,6 +508,7 @@ def prepare_ds(
             axis=layer_axis,
             overwrite=force_refresh_cache,
             link_column=link_column,
+            zenodo_token=os.getenv("ZENODO_TOKEN"),
         )
         model[0].register_initial_embeddings(token_df, data_origin=chosen_method)
     elif not dataset_text_only and not hasattr(model[0], "get_initial_embeddings_from_adata_link"):

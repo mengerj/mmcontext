@@ -394,6 +394,7 @@ def download_and_extract_links(
     temp_dir: str | Path | None = None,
     overwrite: bool = False,
     extract: bool = True,
+    zenodo_token: str | None = None,
 ) -> dict[str, Path]:
     """
     Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either
@@ -402,6 +403,22 @@ def download_and_extract_links(
     • extract *all* members to ``chunk_<n>.zarr/`` (extract=True).
 
     For local paths, they are used directly without downloading or copying.
+
+    Parameters
+    ----------
+    links : list[str]
+        List of URLs or local paths to download.
+    target_dir : str | Path
+        Directory where downloaded files will be saved.
+    temp_dir : str | Path | None, optional
+        Temporary directory for downloads. Defaults to system temp.
+    overwrite : bool, default False
+        Whether to re-download existing files.
+    extract : bool, default True
+        Whether to extract ZIP files.
+    zenodo_token : str | None, optional
+        Zenodo access token for authenticating draft record downloads.
+        Required for draft records, optional for published records.
 
     Returns
     -------
@@ -452,13 +469,39 @@ def download_and_extract_links(
         # ---- stream into tmp file -----------------------------------------
         tmp = tmp_root / f"{uuid4().hex}.tmp"
         d_link = link  # use normal link to store later, to be consistent with how link is stored in dataset
-        if not d_link.endswith("/download"):
+
+        # Prepare headers based on URL source
+        headers = {}
+        if "zenodo.org" in d_link:
+            # Zenodo requires User-Agent header (works for both sandbox and production)
+            headers = {"User-Agent": "Mozilla/5.0 (compatible; mmcontext/1.0)", "Accept": "*/*"}
+            # Add authentication token if provided (required for draft records)
+            if zenodo_token:
+                headers["Authorization"] = f"Bearer {zenodo_token}"
+        elif not d_link.endswith("/download") and "nxc-fredato" in d_link:
             d_link += "/download"  # add NC download suffix
-        with requests.get(d_link, stream=True, timeout=(10, 900)) as r:
-            r.raise_for_status()
-            with open(tmp, "wb") as fh:
-                for chunk in r.iter_content(1 << 20):
-                    fh.write(chunk)
+
+        try:
+            with requests.get(d_link, stream=True, timeout=(10, 900), headers=headers) as r:
+                r.raise_for_status()
+                with open(tmp, "wb") as fh:
+                    for chunk in r.iter_content(1 << 20):
+                        fh.write(chunk)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403 and "zenodo" in d_link.lower():
+                is_draft = "/draft/" in d_link
+                if is_draft:
+                    logger.error(
+                        f"403 Forbidden for Zenodo draft record: {d_link}\n"
+                        f"Draft records require authentication. Please provide a zenodo_token parameter.\n"
+                        f"You can create a token at https://sandbox.zenodo.org/account/settings/applications/tokens/new"
+                    )
+                else:
+                    logger.error(
+                        f"403 Forbidden for Zenodo URL: {d_link}\n"
+                        f"This may require authentication. Try providing a zenodo_token parameter."
+                    )
+            raise
 
         m4 = tmp.read_bytes()[:4]
         if m4 == PK_MAGIC:  # ⇒ ZIP archive
@@ -542,7 +585,16 @@ def build_embedding_df(
             logger.warning("Skip unsupported file %s", p)
             continue
 
-        emb_matrix = adata.obsm[layer_key] if axis == "obs" else adata.varm[layer_key]
+        # Get embedding matrix with helpful error message if key is missing
+        try:
+            emb_matrix = adata.obsm[layer_key] if axis == "obs" else adata.varm[layer_key]
+        except KeyError as e:
+            available_keys = list(adata.obsm.keys()) if axis == "obs" else list(adata.varm.keys())
+            axis_name = "obsm" if axis == "obs" else "varm"
+            raise KeyError(
+                f"Layer key '{layer_key}' not found in adata.{axis_name} for file {p}.\n"
+                f"Available keys in adata.{axis_name}: {available_keys}"
+            ) from e
         tokens = adata.obs.index.to_numpy() if axis == "obs" else adata.var.index.to_numpy()
 
         # -------------------------------------------------- stream rows ----

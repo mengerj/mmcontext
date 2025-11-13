@@ -1389,6 +1389,7 @@ class MMContextEncoder(Module):
         extract_zip: bool = True,
         overwrite: bool = False,
         link_column: str = "adata_link",
+        zenodo_token: str | None = None,
     ) -> tuple[pd.DataFrame, dict[str, Path]]:
         """
         Download all embedding chunks referenced in *hf_dataset* and return in a format suitable for registration.
@@ -1422,6 +1423,9 @@ class MMContextEncoder(Module):
             Only applies to downloaded files.
         link_column
             Column name that stores the share links or local paths.
+        zenodo_token : str | None, optional
+            Zenodo access token for authenticating draft record downloads.
+            Required for draft records, optional for published records.
 
         Returns
         -------
@@ -1441,6 +1445,7 @@ class MMContextEncoder(Module):
             target_dir=download_dir,
             extract=extract_zip,
             overwrite=overwrite,
+            zenodo_token=zenodo_token,
         )
         # if the layer key is none, this means that only the download step was needed. The model will be used as text only without initial embeddings.
         if layer_key is None:
