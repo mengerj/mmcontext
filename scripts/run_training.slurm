@@ -34,14 +34,14 @@ exec 2>"$BASE_OUT"/train.err
 
 # Configuration file path (relative to PROJECT_ROOT)
 # Override this by setting CONFIG_FILE environment variable before running
-CONFIG_FILE="/home/menger/git/mmcontext/conf/training/basebert_numeric.yaml"
+CONFIG_FILE="/home/menger/git/mmcontext/conf/training/biobert_numeric.yaml"
 #extend adata cache dir with run_id
 ADATA_CACHE_DIR="/scratch/local/menger/data/from_nxtcloud/${RUN_ID}"
 CACHE_DIR="/scratch/local/menger/cache/huggingface/${RUN_ID}"
 # Optional command-line overrides
 # These can be set as environment variables to override config file values
 MODEL=null
-EMBEDDING_METHOD=gs10k
+EMBEDDING_METHOD=geneformer
 TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
 # Validate that config file exists
@@ -80,9 +80,9 @@ echo "Cache directory: $CACHE_DIR"
 source .venv/bin/activate
 echo "venv activated"
 
-echo "installing accelerate"
-uv pip install accelerate
-echo "accelerate installed"
+#echo "installing accelerate"
+#uv pip install accelerate
+#echo "accelerate installed"
 
 echo "Running training script with configuration from: $CONFIG_FILE"
 

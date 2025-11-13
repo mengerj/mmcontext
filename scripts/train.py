@@ -1040,6 +1040,8 @@ def main(cfg: DictConfig):
             run_name=unique_model_name,
             dataloader_num_workers=cfg.trainer.dataloader_num_workers,
         )
+        if getattr(cfg.trainer, "use_cosine_scheduler", False):
+            args.set_lr_scheduler(name="cosine", warmup_ratio=cfg.trainer.warmup_ratio)
 
         if cfg.trainer.gradient_checkpointing:
             model[
