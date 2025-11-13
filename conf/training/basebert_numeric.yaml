@@ -118,7 +118,7 @@ text_encoder:
 
 adapter: #each output of both models parts is passed through a separate adapter
   omics_input_dim: #this will be overwritten by the embedding_dim_map
-  hidden_dim: null
+  hidden_dim: 1024
   output_dim: 2048
   use_text_adapter: true
 
