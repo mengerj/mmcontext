@@ -31,7 +31,7 @@ input_dim_map:
 # Training hardware requirements
 force_cuda: true # If true, training will stop if CUDA is not available
 force_refresh_cache: true # If true, re-download datasets even if cached (useful when datasets are updated online)
-cache_dir: /scratch/local/menger/cache/huggingface 
+cache_dir: /scratch/local/menger/cache/huggingface
 auto_push_processed_datasets: true
 push_to_hub: true
 
@@ -47,18 +47,18 @@ push_to_hub: true
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-#  - name: "cellxgene_pseudo_bulk_100k"
-#    type: "multiplets"
-#    caption: "natural_language_annotation"
-#    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
-#    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
-#   index_column: sample_idx
-#    keep_columns: [
-#        "cell_sentence_1",
-#        "positive",
-#        "negative_1_idx",
-#        "negative_2_idx",
-#      ] # Columns to select from raw dataset
+  #  - name: "cellxgene_pseudo_bulk_100k"
+  #    type: "multiplets"
+  #    caption: "natural_language_annotation"
+  #    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+  #    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
+  #   index_column: sample_idx
+  #    keep_columns: [
+  #        "cell_sentence_1",
+  #        "positive",
+  #        "negative_1_idx",
+  #        "negative_2_idx",
+  #      ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
   - name: "cellxgene_pseudo_bulk_100k"
     type: "multiplets"
@@ -80,7 +80,7 @@ omics_datasets:
 #    cs_length: 64 # Truncate cell sentences to 50 tokens
 #    cs_col: "cell_sentence_2" # Column to truncate
 #    index_column: sample_idx
-#    keep_columns: 
+#    keep_columns:
 #      ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
 
 # Bio datasets - biological background knowledge datasets (always processed as text-only)
