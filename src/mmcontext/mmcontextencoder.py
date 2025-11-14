@@ -390,18 +390,6 @@ class MMContextEncoder(Module):
         should be used at all. Defaults to True.
     """
 
-    VALID_DATA_ORIGINS = [
-        "unregistered",
-        "pca",
-        "hvg",
-        "scvi_fm",
-        "geneformer",
-        "geneformer-v1",
-        "gs",
-        "gs10k",
-        "random",
-    ]
-
     # Configuration attributes for SentenceTransformer Module base class
     config_keys = [
         "text_encoder_name",
@@ -447,8 +435,6 @@ class MMContextEncoder(Module):
         tokenizer_added_tokens: list | str | None = None,
     ) -> None:
         super().__init__()
-        if registered_data_origin not in self.VALID_DATA_ORIGINS:
-            raise ValueError(f"registered_data_origin must be one of {self.VALID_DATA_ORIGINS}")
 
         # Store the parameters
         self.text_encoder_name = text_encoder_name
@@ -1230,8 +1216,6 @@ class MMContextEncoder(Module):
             e.g. ``{"EGFR": 12345, "KRAS": 12346}``.
         """
         # ---------- 0. Make sure data origin is compatible -------------------
-        if data_origin not in self.VALID_DATA_ORIGINS:
-            raise ValueError(f"{data_origin!r} is not in {self.VALID_DATA_ORIGINS}")
         if self._registered_data_origin != "unregistered" and data_origin != self._registered_data_origin:
             raise ValueError(
                 f"Model already registered for {self._registered_data_origin!r}; "
