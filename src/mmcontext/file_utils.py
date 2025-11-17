@@ -34,6 +34,7 @@ def load_test_adata_from_hf_dataset(
     layer_key: str | None = None,
     axis: str = "obs",
     link_column: str = "adata_link",
+    zenodo_token: str | None = None,
 ) -> tuple[ad.AnnData, Path]:
     """
     Download the unique AnnData chunk referenced in *test_split* and load it.
@@ -48,6 +49,9 @@ def load_test_adata_from_hf_dataset(
         If provided and missing, raises ``KeyError``.
     axis
         ``"obs"`` or ``"var"`` – used only for the optional *layer_key* check.
+    zenodo_token : str | None, optional
+        Zenodo access token for authenticating draft record downloads.
+        Required for draft records, optional for published records.
 
     Returns
     -------
@@ -73,6 +77,7 @@ def load_test_adata_from_hf_dataset(
         target_dir=save_dir,
         extract=True,
         overwrite=False,
+        zenodo_token=zenodo_token,
     )
     local_path = next(iter(local_map.values()))
 
