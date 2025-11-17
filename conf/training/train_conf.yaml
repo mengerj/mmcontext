@@ -12,7 +12,7 @@ model: #if huggingface repo is provided, this model will be loaded and fine-tune
 tag: cxg_test # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
 
 # Here are some defaults:
-embedding_method: gs #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
+embedding_method: scvi_fm #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
 input_dim_map:
   hvg: 512
@@ -20,6 +20,7 @@ input_dim_map:
   scvi_fm: 50
   geneformer: 512
   gs: 3936
+  gs10k: 10000
 
 # Cell sentence configuration moved to dataset-specific parameters (cs_length and cs_col)
 # Global cs_length and cs_col removed - now specified per dataset
@@ -36,7 +37,7 @@ force_cuda: false # If true, training will stop if CUDA is not available
 force_refresh_cache: false # If true, re-download datasets even if cached (useful when datasets are updated online)
 cache_dir: /Users/mengerj/repos/mmcontext/data/huggingface # Optional directory to cache datasets (if null, uses default HuggingFace cache)
 adata_cache_dir: /Users/mengerj/repos/mmcontext/data/from_nxtcloud # Optional directory to cache adata objects (if null, uses default HuggingFace cache)
-push_to_hub: true
+push_to_hub: false
 # Omics datasets - represent actual omics data that can be processed as text_only or with numeric embeddings
 # Processing workflow: get_initial_embeddings_from_adata_link (if not text_only) → select_columns → resolve_negative_indices (if multiplets) → prefix_ds (prefixing)
 # - index_column: Name of the index column (automatically included in keep_columns, removed after resolving indices)
@@ -49,18 +50,18 @@ push_to_hub: true
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-  #  - name: "cellxgene_pseudo_bulk_100k"
-  #    type: "multiplets"
-  #    caption: "natural_language_annotation"
-  #    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
-  #    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
-  #   index_column: sample_idx
-  #    keep_columns: [
-  #        "cell_sentence_1",
-  #        "positive",
-  #        "negative_1_idx",
-  #        "negative_2_idx",
-  #      ] # Columns to select from raw dataset
+  - name: "cellxgene_pseudo_bulk_10k"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
+    index_column: sample_idx
+    keep_columns: [
+        "cell_sentence_1",
+        "positive",
+        "negative_1_idx",
+        "negative_2_idx",
+      ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
   # - name: "cellxgene_pseudo_bulk_10k"
   #   type: "multiplets"
@@ -70,14 +71,14 @@ omics_datasets:
   #    index_column: sample_idx
   #    keep_columns:
   #      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
-  - name: "geo_7k"
-    type: "multiplets"
-    caption: "natural_language_annotation"
-    text_only: false # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
-    layer_axis: "obs" # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
-    index_column: sample_idx
-    keep_columns:
-      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
+  #- name: "geo_7k"
+  #  type: "multiplets"
+  # caption: "natural_language_annotation"
+  # text_only: false # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+  # layer_axis: "obs" # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+  # index_column: sample_idx
+  # keep_columns:
+  #   ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
 
 # Bio datasets - biological background knowledge datasets (always processed as text-only)
 # - These do NOT have enc.prefix_ds applied (different data format)
@@ -88,14 +89,14 @@ bio_datasets:
   #    name: "gene_description"
   #    type: "multiplets"
   #    revision: "hard_negatives"
-  - id: "jo-mengr/descriptions_cell_types"
-    name: "cell_type_description"
-    type: "multiplets"
-    revision: "hard_negatives"
-  - id: "jo-mengr/ncbi_cell_types_1000"
-    name: "ncbi"
-    type: "multiplets"
-    revision: "main" #also contains hard negatives
+  # - id: "jo-mengr/descriptions_cell_types"
+  #   name: "cell_type_description"
+  #   type: "multiplets"
+#    revision: "hard_negatives"
+#  - id: "jo-mengr/ncbi_cell_types_1000"
+#    name: "ncbi"
+#    type: "multiplets"
+#    revision: "main" #also contains hard negatives
 
 #test_datasets:
 #  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"
@@ -121,7 +122,7 @@ text_encoder:
 adapter: #each output of both models parts is passed through a separate adapter
   omics_input_dim: #this will be overwritten by the embedding_dim_map
   hidden_dim: null
-  output_dim: 768
+  output_dim: 2048
   use_text_adapter: true # Whether to create an adapter for the text encoder. If false, text encoder output dimension must match adapter_output_dim
 
 joint_adapter: #if desired, the outputs of both models parts are passed through a joint adapter after the seperate adapters.
@@ -131,7 +132,7 @@ joint_adapter: #if desired, the outputs of both models parts are passed through 
 trainer:
   unfreeze_epoch: 1 #will unfreeze the whole text encoder
   output_dir: "../../models/trained"
-  num_train_epochs: 1
+  num_train_epochs: 2
   per_device_train_batch_size: 64
   per_device_eval_batch_size: 64
   learning_rate: 2e-5
