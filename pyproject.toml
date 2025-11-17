@@ -28,7 +28,7 @@ dependencies = [
   "accelerate>=1.9",
   "adata-hf-datasets @ git+https://github.com/mengerj/adata_hf_datasets.git",
   "anndata>=0.11.3",
-  "datasets>=2.19.1,!=4.0.0", #Avoid: TypeError: Wrong key type: '0' of type '<class 'numpy.int64'>'. Expected one of int, slice, range, str or Iterable.
+  "datasets>=2.19.1,!=4",                                                     #Avoid: TypeError: Wrong key type: '0' of type '<class 'numpy.int64'>'. Expected one of int, slice, range, str or Iterable.
   "huggingface-hub>=0.34.3",
   "hydra-core>=1.3.2",
   "ipykernel>=6.30",
@@ -63,6 +63,9 @@ where = [ "src" ]
 include = [ "mmcontext*" ]
 [tool.setuptools.package-data]
 #"mmcontext.conf" = [ "*.json" ]
+
+[tool.uv.sources]
+adata_hf_datasets = { git = "https://github.com/mengerj/adata_hf_datasets.git" }
 
 [tool.ruff]
 line-length = 120
@@ -130,6 +133,3 @@ skip = [
   "src/**/__init__.py",
   "src/**/basic.py",
 ]
-
-[tool.uv.sources]
-adata_hf_datasets = { git = "https://github.com/mengerj/adata_hf_datasets.git" }
