@@ -306,9 +306,8 @@ def generate_revision_name(dataset_config: DictConfig, gene_special_token: str =
 
 def push_dataset_revision(
     dataset: "DatasetDict",
-    dataset_name: str,
+    dataset_id: str,
     revision: str,
-    username: str = "jo-mengr",
     commit_message: str = None,
 ) -> bool:
     """
@@ -318,12 +317,10 @@ def push_dataset_revision(
     ----------
     dataset : DatasetDict
         The processed dataset to push
-    dataset_name : str
-        Name of the dataset
+    dataset_id : str
+        Full dataset ID (e.g., "username/dataset_name")
     revision : str
         Revision name for the processed dataset
-    username : str, optional
-        Username/organization on Hugging Face Hub (default: "jo-mengr")
     commit_message : str, optional
         Commit message for the revision
 
@@ -333,35 +330,32 @@ def push_dataset_revision(
         True if push was successful, False otherwise
     """
     try:
-        full_dataset_name = f"{username}/{dataset_name}"
         if commit_message is None:
             commit_message = f"Add preprocessed dataset revision: {revision}"
 
-        logger.info(f"Pushing dataset '{dataset_name}' as revision '{revision}' to {full_dataset_name}")
+        logger.info(f"Pushing dataset '{dataset_id}' as revision '{revision}'")
         dataset.push_to_hub(
-            full_dataset_name,
+            dataset_id,
             revision=revision,
             commit_message=commit_message,
         )
-        logger.info(f"Successfully pushed revision '{revision}' for dataset '{dataset_name}'")
+        logger.info(f"Successfully pushed revision '{revision}' for dataset '{dataset_id}'")
         return True
     except Exception as e:
-        logger.error(f"Failed to push revision '{revision}' for dataset '{dataset_name}': {e}")
+        logger.error(f"Failed to push revision '{revision}' for dataset '{dataset_id}': {e}")
         return False
 
 
-def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-mengr") -> bool:
+def check_revision_exists(dataset_id: str, revision: str) -> bool:
     """
     Check if a specific revision exists for a dataset on Hugging Face Hub.
 
     Parameters
     ----------
-    dataset_name : str
-        Name of the dataset
+    dataset_id : str
+        Full dataset ID (e.g., "username/dataset_name")
     revision : str
         Revision name to check
-    username : str, optional
-        Username/organization on Hugging Face Hub (default: "jo-mengr")
 
     Returns
     -------
@@ -370,9 +364,8 @@ def check_revision_exists(dataset_name: str, revision: str, username: str = "jo-
     """
     try:
         api = HfApi()
-        full_dataset_name = f"{username}/{dataset_name}"
         # Try to get dataset info with specific revision
-        api.dataset_info(full_dataset_name, revision=revision)
+        api.dataset_info(dataset_id, revision=revision)
         return True
     except Exception:
         # If any error occurs (404, auth, etc.), assume revision doesn't exist
@@ -759,12 +752,14 @@ def main(cfg: DictConfig):
         # Process omics datasets - these can be text_only or numeric
         if hasattr(cfg, "omics_datasets") and cfg.omics_datasets:
             for dataset_config in cfg.omics_datasets:
-                # Construct dataset name - default to multiplets type
-                base_name = dataset_config.name
-                dataset_type = getattr(dataset_config, "type", "multiplets")
-                dataset_name = f"{base_name}_{dataset_type}_{dataset_config.caption}"
+                # Get dataset repo ID
+                dataset_id = dataset_config.id
 
-                logger.info(f"Processing omics dataset: {dataset_name}")
+                # Use base name for logging/naming purposes
+                dataset_name = dataset_config.name
+                dataset_type = getattr(dataset_config, "type", "multiplets")
+
+                logger.info(f"Processing omics dataset: {dataset_name} (repo: {dataset_id})")
 
                 # Determine dataset-specific settings FIRST (needed for revision name and primary column)
                 layer_axis = getattr(dataset_config, "layer_axis", "obs")  # Default to "obs"
@@ -812,12 +807,12 @@ def main(cfg: DictConfig):
                 )
 
                 # Check if processed revision already exists
-                if check_revision_exists(dataset_name, revision_name) and dataset_text_only:
+                if check_revision_exists(dataset_id, revision_name) and dataset_text_only:
                     logger.info(
                         f"Found existing revision '{revision_name}' for dataset '{dataset_name}', loading directly"
                     )
                     dataset_ready = load_dataset(
-                        f"jo-mengr/{dataset_name}",
+                        dataset_id,
                         revision=revision_name,
                         cache_dir=cache_dir,
                         download_mode=download_mode,
@@ -829,7 +824,7 @@ def main(cfg: DictConfig):
                             f"Revision '{revision_name}' not found for dataset '{dataset_name}', processing from scratch"
                         )
                     # Load raw dataset and process it
-                    dataset = load_dataset(f"jo-mengr/{dataset_name}", cache_dir=cache_dir, download_mode=download_mode)
+                    dataset = load_dataset(dataset_id, cache_dir=cache_dir, download_mode=download_mode)
                     logger.info(f"Raw dataset loaded - Name: {dataset_name}, Keys: {list(dataset.keys())}")
                     # build a dataset specific cache directory
                     dataset_cache_dir = f"{adata_cache_dir}/{dataset_name}"
@@ -856,7 +851,7 @@ def main(cfg: DictConfig):
                     ):
                         push_success = push_dataset_revision(
                             dataset_ready,
-                            dataset_name,
+                            dataset_id,
                             revision_name,
                             commit_message=f"Processed dataset with {revision_name} settings",
                         )
