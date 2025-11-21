@@ -27,6 +27,68 @@ from tqdm.auto import tqdm
 logger = logging.getLogger(__name__)
 
 
+def remove_corrupted_null_arrays(zarr_path: str | Path) -> list[str]:
+    """Remove corrupted null arrays from zarr store.
+
+    This can happen when zarr files are zipped/unzipped, causing
+    some keys to become null arrays instead of proper groups/arrays.
+    Anndata cannot read these corrupted stores, so we remove the
+    corrupted keys before attempting to read.
+
+    Parameters
+    ----------
+    zarr_path : str | Path
+        Path to the zarr store (directory or zip file).
+
+    Returns
+    -------
+    list[str]
+        List of paths to removed corrupted keys (relative to zarr root).
+    """
+    zarr_path = Path(zarr_path)
+    if not zarr_path.exists():
+        return []
+
+    # Only process directory-based zarr stores, not zip stores
+    if zarr_path.is_file() and zarr_path.suffix == ".zip":
+        # For zip stores, we can't easily modify them, so skip
+        return []
+
+    if not zarr_path.is_dir():
+        return []
+
+    z = zarr.open(str(zarr_path), mode="r")
+    removed = []
+
+    def find_and_remove(group, path=""):
+        for key in list(group.keys()):
+            current_path = f"{path}/{key}" if path else key
+            item = group[key]
+            if isinstance(item, zarr.core.Array):
+                attrs = dict(item.attrs)
+                if attrs.get("encoding-type") == "null":
+                    # Remove the corrupted array from filesystem
+                    full_path = zarr_path / current_path
+                    if full_path.exists():
+                        if full_path.is_dir():
+                            shutil.rmtree(full_path)
+                        else:
+                            full_path.unlink()
+                        removed.append(current_path)
+            elif isinstance(item, zarr.hierarchy.Group):
+                find_and_remove(item, current_path)
+
+    find_and_remove(z)
+    if removed:
+        logger.warning(
+            "Removed %d corrupted null array(s) from %s: %s",
+            len(removed),
+            zarr_path,
+            ", ".join(removed),
+        )
+    return removed
+
+
 def load_test_adata_from_hf_dataset(
     test_split,
     save_dir: str | Path,
@@ -85,11 +147,11 @@ def load_test_adata_from_hf_dataset(
     if local_path.suffix == ".h5ad":
         adata = ad.read_h5ad(local_path)
     elif local_path.suffix == ".zip":
-        import zarr
-
         zroot = zarr.open(local_path)
         adata = ad.read_zarr(zroot)
     else:  # .zarr dir
+        # Fix corrupted null arrays before reading
+        remove_corrupted_null_arrays(local_path)
         adata = ad.read_zarr(str(local_path))
 
     # 4) optional sanity-check layer_key
@@ -585,6 +647,8 @@ def build_embedding_df(
             zroot = zarr.open(p, mode="r")
             adata = ad.read_zarr(zroot)
         elif p.suffix == ".zarr" or p.is_dir():  # dir zarr
+            # Fix corrupted null arrays before reading
+            remove_corrupted_null_arrays(p)
             adata = ad.read_zarr(str(p))
         else:
             logger.warning("Skip unsupported file %s", p)

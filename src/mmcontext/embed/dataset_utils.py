@@ -13,6 +13,8 @@ import torch
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 from huggingface_hub import HfApi
 
+from mmcontext.file_utils import remove_corrupted_null_arrays
+
 logger = logging.getLogger(__name__)
 
 
@@ -201,6 +203,8 @@ def collect_adata_subset(
         path = Path(path)
         if path.suffix == ".zarr" or (path.is_dir() and path.name.endswith(".zarr")):
             logger.debug("Scanning Zarr store %s", path)
+            # Fix corrupted null arrays before reading
+            remove_corrupted_null_arrays(path)
             view = ad.read_zarr(path)
             wanted = remaining.intersection(view.obs_names)
             if wanted:
