@@ -3,6 +3,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
+import dotenv
 import pandas as pd
 import torch
 
@@ -17,6 +18,7 @@ from mmcontext.embed.model_utils import embed_labels, load_st_model, prepare_mod
 from mmcontext.file_utils import save_table
 from mmcontext.utils import truncate_cell_sentences
 
+dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
 
 
