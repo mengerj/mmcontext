@@ -108,6 +108,7 @@ def prepare_model_and_embed(
     axis: Literal["var", "obs"] = "obs",
     text_only: bool = False,
     overwrite: bool = True,
+    zenodo_token: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Path] | None]:
     """
     Create embeddings using a Sentence-Transformer model, with some model-specific preparation.
@@ -143,6 +144,9 @@ def prepare_model_and_embed(
         a column share_link, which points to a zarr store that can be used to get initial embeddings for each token.
     overwrite : bool, default ``True``
         If ``True``, the initial embeddings will be re-downloaded even if they already exist.
+    zenodo_token : str | None, optional
+        Zenodo access token for authenticating draft record downloads.
+        Required for draft records, optional for published records.
 
     Returns
     -------
@@ -181,6 +185,7 @@ def prepare_model_and_embed(
             download_dir=adata_download_dir,
             overwrite=overwrite,
             link_column=link_column,
+            zenodo_token=zenodo_token,
         )  # type: ignore[arg-type]
     else:
         logger.info("""While the model supports initial embeddings, the dataset does not provide them.

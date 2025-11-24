@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -193,6 +194,7 @@ def process_single_dataset_model(
             layer_key=getattr(model_cfg, "layer_key", None),  # For text only models, layer_key is not needed.
             text_only=text_only,
             adata_download_dir=adata_download_dir,
+            zenodo_token=os.getenv("ZENODO_TOKEN"),
         )
 
         if numeric_data_available:
