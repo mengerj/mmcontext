@@ -9,7 +9,7 @@
 
 # Model identification
 model: #if huggingface repo is provided, this model will be loaded and fine-tuned directly
-tag: cxg_normlog # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
+tag: cxg_geo # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
 
 # Here are some defaults:
 embedding_method: null #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
@@ -22,6 +22,7 @@ input_dim_map:
   geneformer-v1: 512
   gs: 3936
   gs10k: 10000
+  cw-geneformer: 512
 
 # Cell sentence configuration moved to dataset-specific parameters (cs_length and cs_col)
 # Global cs_length and cs_col removed - now specified per dataset
@@ -46,7 +47,8 @@ adata_cache_dir: /scratch/local/menger/data/from_nxtcloud
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-  - name: "cellxgene_pseudo_bulk_200k_normlog"
+  - id: "jo-mengr/cxg_pseudo_bulk_full_multiplets_natural_language_annotation_v2"
+    name: "cellxgene_pseudo_bulk_full"
     type: "multiplets"
     caption: "natural_language_annotation"
     text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
@@ -72,14 +74,15 @@ omics_datasets:
   #       "negative_2_idx",
   #     ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
-#  - name: "geo_700k"
-#    type: "multiplets"
-#    caption: "natural_language_annotation"
-#    text_only: false  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
-#    layer_axis: "obs"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
-#    index_column: sample_idx
-#    keep_columns:
-#      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
+  - id: "jo-mengr/geo_full_v2_multiplets_natural_language_annotation_v2"
+    name: "geo_half"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+    text_only: false  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+    layer_axis: "obs"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+    index_column: sample_idx
+    keep_columns:
+      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
 
 # Bio datasets - biological background knowledge datasets (always processed as text-only)
 # - These do NOT have enc.prefix_ds applied (different data format)
