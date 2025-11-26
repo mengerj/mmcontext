@@ -46,7 +46,7 @@ adata_cache_dir: /scratch/local/menger/data/from_nxtcloud
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-  - name: "cellxgene_pseudo_bulk_full"
+  - name: "cellxgene_pseudo_bulk_200k_normlog"
     type: "multiplets"
     caption: "natural_language_annotation"
     text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
