@@ -1,0 +1,4 @@
+- source: jo-mengr/mmcontext-pubmedbert-geneformer-cxg_test
+  name: geneformer
+  text_only: false
+  layer_key: X_geneformer

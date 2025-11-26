@@ -10,9 +10,9 @@
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_to_cellwhisp")  # Add more model configs here as needed
+MODEL_CONFIGS=("model_list_cxg_geo_1")  # Add more model configs here as needed
 run_cellwhisperer=true
-final_root="/scratch/global/menger/mmcontext_out/final_results"
+final_root="/scratch/global/menger/mmcontext_out/2411_results"
 
 # Validate array task ID
 if [[ ${SLURM_ARRAY_TASK_ID} -gt ${#MODEL_CONFIGS[@]} ]]; then

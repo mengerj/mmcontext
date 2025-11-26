@@ -4,15 +4,15 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=72:00:00         # Max job time (3 days for combined pipeline)
-#SBATCH --array=1-1%1           # Array job
+#SBATCH --array=1-3%3           # Array job
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_text_full_1")  # Add more model configs here as needed
+MODEL_CONFIGS=("model_list_cxg_geo_2" "model_list_cxg_geo_3" "model_list_cxg_geo_4")  # Add more model configs here as needed
 run_cellwhisperer=false
-final_root="/scratch/global/menger/mmcontext_out/0411_results"
+final_root="/scratch/global/menger/mmcontext_out/2411_results"
 
 # Validate array task ID
 if [[ ${SLURM_ARRAY_TASK_ID} -gt ${#MODEL_CONFIGS[@]} ]]; then
