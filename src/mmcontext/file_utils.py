@@ -529,6 +529,8 @@ def download_and_extract_links(
         # Handle local paths directly
         if _is_local_path(link):
             local_path = Path(link).resolve()
+            # replace /global with /local #quick fix
+            local_path = local_path.replace("/global/", "/local/")
             logger.info(f"Using local path: {local_path}")
             out_map[link] = local_path
             continue
@@ -559,50 +561,108 @@ def download_and_extract_links(
         elif not d_link.endswith("/download") and "nxc-fredato" in d_link:
             d_link += "/download"  # add NC download suffix
 
-        try:
-            with session.get(d_link, stream=True, timeout=(30, 900), headers=headers) as r:
-                r.raise_for_status()
+        # Retry logic with exponential backoff
+        max_retries = 5
+        retry_delay = 5  # Initial delay in seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # Check if partial file exists for resumable download
+                resume_pos = 0
+                if tmp.exists() and attempt > 0:
+                    resume_pos = tmp.stat().st_size
+                    logger.info(f"Resuming download from byte {resume_pos:,}")
+                    headers["Range"] = f"bytes={resume_pos}-"
+                
+                with session.get(d_link, stream=True, timeout=(30, 900), headers=headers) as r:
+                    # Handle partial content (206) or full content (200)
+                    if r.status_code == 206:
+                        logger.info(f"Server supports resumable downloads (HTTP 206)")
+                    elif r.status_code == 200 and resume_pos > 0:
+                        logger.warning(f"Server doesn't support resumable downloads, restarting from beginning")
+                        resume_pos = 0
+                        tmp.unlink(missing_ok=True)
+                    
+                    r.raise_for_status()
 
-                # Get total file size for progress bar
-                total_size = int(r.headers.get("content-length", 0))
-
-                # Create a progress bar for this download with buffered writing
-                # Use larger buffer for better write performance
-                with open(tmp, "wb", buffering=16 * (1 << 20)) as fh:  # 16MB write buffer
-                    if total_size > 0:
-                        # Show progress bar with file size
-                        with tqdm(
-                            total=total_size,
-                            unit="B",
-                            unit_scale=True,
-                            desc=f"Downloading file {idx + 1}/{len(links)}",
-                            leave=False,
-                        ) as pbar:
-                            for chunk in r.iter_content(chunk_size):
-                                if chunk:  # filter out keep-alive new chunks
-                                    fh.write(chunk)
-                                    pbar.update(len(chunk))
+                    # Get total file size for progress bar
+                    if r.status_code == 206:
+                        # For partial content, parse Content-Range header
+                        content_range = r.headers.get("content-range", "")
+                        if content_range:
+                            # Format: "bytes start-end/total"
+                            total_size = int(content_range.split("/")[-1])
+                        else:
+                            total_size = int(r.headers.get("content-length", 0)) + resume_pos
                     else:
-                        # No content-length header, show progress without total
-                        logger.info(f"Downloading file {idx + 1}/{len(links)} (size unknown)...")
-                        for chunk in r.iter_content(chunk_size):
-                            if chunk:
-                                fh.write(chunk)
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 403 and "zenodo" in d_link.lower():
-                is_draft = "/draft/" in d_link
-                if is_draft:
-                    logger.error(
-                        f"403 Forbidden for Zenodo draft record: {d_link}\n"
-                        f"Draft records require authentication. Please provide a zenodo_token parameter.\n"
-                        f"You can create a token at https://sandbox.zenodo.org/account/settings/applications/tokens/new"
+                        total_size = int(r.headers.get("content-length", 0))
+
+                    # Open file in append mode if resuming, otherwise write mode
+                    file_mode = "ab" if resume_pos > 0 else "wb"
+                    
+                    # Create a progress bar for this download with buffered writing
+                    # Use larger buffer for better write performance
+                    with open(tmp, file_mode, buffering=16 * (1 << 20)) as fh:  # 16MB write buffer
+                        if total_size > 0:
+                            # Show progress bar with file size
+                            with tqdm(
+                                total=total_size,
+                                initial=resume_pos,
+                                unit="B",
+                                unit_scale=True,
+                                desc=f"Downloading file {idx + 1}/{len(links)}" + (f" (retry {attempt + 1}/{max_retries})" if attempt > 0 else ""),
+                                leave=False,
+                            ) as pbar:
+                                for chunk in r.iter_content(chunk_size):
+                                    if chunk:  # filter out keep-alive new chunks
+                                        fh.write(chunk)
+                                        pbar.update(len(chunk))
+                        else:
+                            # No content-length header, show progress without total
+                            logger.info(f"Downloading file {idx + 1}/{len(links)} (size unknown)...")
+                            for chunk in r.iter_content(chunk_size):
+                                if chunk:
+                                    fh.write(chunk)
+                
+                # Download successful, break out of retry loop
+                logger.info(f"Successfully downloaded file {idx + 1}/{len(links)}")
+                break
+                
+            except (
+                requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+            ) as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Download interrupted (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {e}"
                     )
+                    logger.info(f"Waiting {retry_delay} seconds before retry...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    # Remove Range header for next attempt if it was there
+                    if "Range" in headers:
+                        headers.pop("Range", None)
                 else:
-                    logger.error(
-                        f"403 Forbidden for Zenodo URL: {d_link}\n"
-                        f"This may require authentication. Try providing a zenodo_token parameter."
-                    )
-            raise
+                    logger.error(f"Download failed after {max_retries} attempts")
+                    # Clean up partial file on final failure
+                    tmp.unlink(missing_ok=True)
+                    raise
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 403 and "zenodo" in d_link.lower():
+                    is_draft = "/draft/" in d_link
+                    if is_draft:
+                        logger.error(
+                            f"403 Forbidden for Zenodo draft record: {d_link}\n"
+                            f"Draft records require authentication. Please provide a zenodo_token parameter.\n"
+                            f"You can create a token at https://sandbox.zenodo.org/account/settings/applications/tokens/new"
+                        )
+                    else:
+                        logger.error(
+                            f"403 Forbidden for Zenodo URL: {d_link}\n"
+                            f"This may require authentication. Try providing a zenodo_token parameter."
+                        )
+                raise
 
         m4 = tmp.read_bytes()[:4]
         if m4 == PK_MAGIC:  # ⇒ ZIP archive
