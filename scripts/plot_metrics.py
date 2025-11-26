@@ -789,6 +789,7 @@ def create_dataset_pair_scatter_plots(
     show_labels: bool = True,
     legend_ncol: int = 1,
     point_size: float = 150,
+    scatter_plot_metrics: list = None,
 ) -> None:
     """
     Create scatter plots comparing accuracy between pairs of datasets.
@@ -818,6 +819,9 @@ def create_dataset_pair_scatter_plots(
         Number of columns in the legend (1 = vertical, >1 = horizontal)
     point_size : float
         Size of scatter plot points (in points^2)
+    scatter_plot_metrics : list, optional
+        List of metrics to create scatter plots for. If None, creates plots for all metrics.
+        Can specify either base metric names (e.g., "accuracy") or combined metric names (e.g., "accuracy_bio").
     """
     if accuracy_data.empty:
         print("No accuracy data available for scatter plots")
@@ -842,6 +846,35 @@ def create_dataset_pair_scatter_plots(
         baseline_data["combined_metric"] = baseline_data.apply(create_combined_metric_name, axis=1)
 
     unique_combined_metrics = sorted(accuracy_data["combined_metric"].unique())
+
+    # Filter metrics if scatter_plot_metrics is specified
+    if scatter_plot_metrics is not None and len(scatter_plot_metrics) > 0:
+        # Clean metric names for comparison (remove prefixes)
+        clean_scatter_metrics = [
+            metric.replace("LabelSimilarity/", "").replace("scib/", "") for metric in scatter_plot_metrics
+        ]
+
+        # Match metrics - check both base metric name and combined metric name
+        filtered_metrics = []
+        for combined_metric in unique_combined_metrics:
+            # Get base metric name
+            base_metric = (
+                accuracy_data[accuracy_data["combined_metric"] == combined_metric]["metric"].iloc[0]
+                if not accuracy_data[accuracy_data["combined_metric"] == combined_metric].empty
+                else ""
+            )
+            base_metric_clean = base_metric.replace("LabelSimilarity/", "").replace("scib/", "")
+
+            # Check if either the base metric or combined metric matches
+            if base_metric_clean in clean_scatter_metrics or combined_metric in clean_scatter_metrics:
+                filtered_metrics.append(combined_metric)
+
+        unique_combined_metrics = filtered_metrics
+
+        if len(unique_combined_metrics) == 0:
+            print(f"No matching metrics found for scatter plots. Requested: {scatter_plot_metrics}")
+            print(f"Available combined metrics: {sorted(accuracy_data['combined_metric'].unique())}")
+            return
 
     # Create pairs of datasets
     dataset_pairs = list(combinations(unique_datasets, 2))
@@ -870,11 +903,15 @@ def create_dataset_pair_scatter_plots(
             model_colors = [base_colors[i % 8] for i in range(n_models)]
         model_color_dict = dict(zip(all_models, model_colors, strict=False))
 
-        # Create separate legend file for models
+        # Create separate legend file for models (save in main output_dir, will be shared across metrics)
         create_model_legend(model_color_dict, output_dir, plot_format, font_size, legend_ncol)
 
     # Process each combined metric separately (this handles different label_kinds)
     for combined_metric in unique_combined_metrics:
+        # Create subfolder for this metric
+        safe_metric_name = combined_metric.replace(" ", "_").replace("/", "_")
+        metric_output_dir = output_dir / safe_metric_name
+        metric_output_dir.mkdir(parents=True, exist_ok=True)
         metric_data = accuracy_data[accuracy_data["combined_metric"] == combined_metric].copy()
 
         # Get baseline for this combined metric (should match the accuracy metric pattern)
@@ -1009,7 +1046,7 @@ def create_dataset_pair_scatter_plots(
             # Create a safe filename from dataset names
             safe_name1 = dataset1.replace(" ", "_").replace("/", "_")
             safe_name2 = dataset2.replace(" ", "_").replace("/", "_")
-            safe_metric = combined_metric.replace(" ", "_").replace("/", "_")
+            # safe_metric = combined_metric.replace(" ", "_").replace("/", "_")
 
             # Add grid
             ax.grid(True, alpha=0.3, zorder=0)
@@ -1037,11 +1074,11 @@ def create_dataset_pair_scatter_plots(
             max_val = max(ax.get_xlim()[1], ax.get_ylim()[1])
             ax.plot([-0.05, max_val], [-0.05, max_val], "k:", alpha=0.3, linewidth=1, zorder=2, label="y=x")
 
-            # Save the plot
-            plot_name = f"scatter_{safe_metric}_{safe_name1}_vs_{safe_name2}"
-            plot_file = output_dir / f"{plot_name}.{plot_format}"
+            # Save the plot in the metric-specific subfolder
+            plot_name = f"scatter_{safe_name1}_vs_{safe_name2}"
+            plot_file = metric_output_dir / f"{plot_name}.{plot_format}"
             plt.savefig(plot_file, dpi=300, bbox_inches="tight")
-            print(f"  Saved scatter plot: {plot_name}")
+            print(f"  Saved scatter plot: {plot_name} (metric: {combined_metric})")
 
             plt.close()
 
@@ -1070,6 +1107,7 @@ def plot_metrics(
     scatter_show_labels: bool = True,
     scatter_legend_ncol: int = 1,
     scatter_point_size: float = 150,
+    scatter_plot_metrics: list = None,
 ) -> None:
     """Main plotting function."""
     # Load the metrics data
@@ -1241,10 +1279,28 @@ def plot_metrics(
                     accuracy_over_random_y_max,
                 )
 
-        # Create scatter plots for dataset pairs
+    # Create scatter plots for dataset pairs
+    # Filter data for scatter plots from all available data (not just accuracy_data)
+    # This allows scatter plots for any metrics specified in scatter_plot_metrics
+    # This is independent of accuracy_data, so it can run even if accuracy_data is empty
+    if scatter_plot_metrics is not None and len(scatter_plot_metrics) > 0:
+        print(f"\nFiltering scatter plot data for metrics: {scatter_plot_metrics}")
+        print(f"Available metrics in data: {sorted(df_clean['metric'].unique())}")
+        # Filter from all data (df_clean) based on scatter_plot_metrics
+        # Compare with full metric names (with prefixes) since df_clean["metric"] has prefixes
+        scatter_data = df_clean[df_clean["metric"].isin(scatter_plot_metrics)].copy()
+        print(f"Filtered scatter data shape: {scatter_data.shape}")
+        if not scatter_data.empty:
+            print(f"Metrics found in filtered data: {sorted(scatter_data['metric'].unique())}")
+    else:
+        # If no scatter_plot_metrics specified, use accuracy_data (backward compatibility)
+        print("\nNo scatter_plot_metrics specified, using accuracy_data for scatter plots")
+        scatter_data = accuracy_data.copy()
+
+    if not scatter_data.empty:
         print("\nCreating dataset pair scatter plots...")
         create_dataset_pair_scatter_plots(
-            accuracy_data,
+            scatter_data,
             baseline_data,
             output_dir,
             plot_format,
@@ -1255,7 +1311,13 @@ def plot_metrics(
             scatter_show_labels,
             scatter_legend_ncol,
             scatter_point_size,
+            scatter_plot_metrics,
         )
+    else:
+        print("\nNo data available for scatter plots (scatter_plot_metrics may not match any available metrics)")
+        if scatter_plot_metrics is not None and len(scatter_plot_metrics) > 0:
+            print(f"  Requested metrics: {scatter_plot_metrics}")
+            print(f"  Available metrics: {sorted(df_clean['metric'].unique())}")
 
     # Plot regular metrics (non-accuracy, non-baseline)
     if not regular_data.empty:
@@ -1362,6 +1424,10 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
     scatter_show_labels = cfg.collect_metrics.get("scatter_show_labels", True)
     scatter_legend_ncol = cfg.collect_metrics.get("scatter_legend_ncol", 1)
     scatter_point_size = cfg.collect_metrics.get("scatter_point_size", 150)
+    scatter_plot_metrics = cfg.collect_metrics.get("scatter_plot_metrics", None)
+    if scatter_plot_metrics is not None and isinstance(scatter_plot_metrics, list):
+        # Convert OmegaConf list to Python list
+        scatter_plot_metrics = list(scatter_plot_metrics)
 
     # Default skip options (can be overridden by command line)
     skip_scib = True  # Default to skipping scib since it has issues
@@ -1408,6 +1474,7 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
         scatter_show_labels,
         scatter_legend_ncol,
         scatter_point_size,
+        scatter_plot_metrics,
     )
 
     print(f"\nPlotting completed! Check output directory: {plots_output_dir}")

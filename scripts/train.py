@@ -20,7 +20,8 @@ from sentence_transformers.evaluation import SequentialEvaluator
 from transformers.integrations import WandbCallback
 
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
-from mmcontext.eval import SystemMonitor
+
+# from mmcontext.eval import SystemMonitor
 from mmcontext.hub_utils import prepare_model_for_hub, upload_model_to_hub
 from mmcontext.mmcontextencoder import MMContextEncoder
 
@@ -636,7 +637,7 @@ def generate_model_name(
     return model_name
 
 
-@hydra.main(config_path="../conf/training", config_name="train_conf", version_base=None)
+@hydra.main(config_path="../conf/training", config_name="basebert_numeric", version_base=None)
 def main(cfg: DictConfig):
     """
     Train the MMContext model using parameters specified in a Hydra config.
@@ -669,8 +670,8 @@ def main(cfg: DictConfig):
 
     # get the hydra output dir
     hydra_run_dir = HydraConfig.get().run.dir
-    monitor = SystemMonitor(logger=logger)
-    monitor.start()
+    # monitor = SystemMonitor(logger=logger)
+    # monitor.start()
     try:
         # -------------------------------------------------------------------------
         # 1. Create the model (MMContextEncoder => SentenceTransformer modules)
@@ -1172,9 +1173,10 @@ def main(cfg: DictConfig):
         logger.exception(e)
         raise e
     finally:
-        monitor.stop()
-        monitor.save(hydra_run_dir)
-        monitor.plot_metrics(hydra_run_dir)
+        # monitor.stop()
+        # monitor.save(hydra_run_dir)
+        # monitor.plot_metrics(hydra_run_dir)
+        pass
     # Evaluate on test datasets
 
 
