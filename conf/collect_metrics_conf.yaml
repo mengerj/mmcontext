@@ -1,14 +1,14 @@
 # conf/collect_metrics_conf.yaml
 defaults:
   - datasets: dataset_list
-  - models: model_list_cellwhisp_comp.yaml
+  - models: model_list_cellwhisp_2411.yaml
 
 collect_metrics:
   # Directory containing evaluation results
-  eval_root: "${hydra:runtime.cwd}/out/0210_combined_results/combined_results_2"
+  eval_root: "${hydra:runtime.cwd}/out/2411_results"
 
   # Output directory for collected metrics
-  output_dir: "${hydra:runtime.cwd}/out/cellwhisp_collected_metrics_old"
+  output_dir: "${hydra:runtime.cwd}/out/2411_results_collected_metrics"
 
   model_order:
     - "geneformer-v1"
@@ -16,9 +16,6 @@ collect_metrics:
     - "scvi" # Second model
     - "pca" # Third model
     - "gs10k" #
-    - "pubmedbert"
-    - "qwen"
-    - "all"
 
   # Visualization settings
   plot_format: "svg" # Options: "png", "pdf", "svg"
@@ -27,8 +24,8 @@ collect_metrics:
   vertical_plots: true # Use vertical orientation (model names on y-axis)
   font_size: 28 # Font size for labels and titles
   tick_label_size: 28 # Font size for tick labels (x-axis and y-axis)
-  fig_width: 6 # Figure width per subplot
-  fig_height: 8 # Figure height per subplot
+  fig_width: 5 # Figure width per subplot
+  fig_height: 5 # Figure height per subplot
   axis_padding: 0.05 # Padding around data as fraction of data range (0.05 = 5%)
 
   # ScIB type handling
@@ -44,6 +41,7 @@ collect_metrics:
     - "LabelSimilarity/accuracy_over_random"
     - "LabelSimilarity/random_baseline_accuracy"
     - "LabelSimilarity/accuracy"
+    - "LabelSimilarity/balanced_accuracy"
     # Add more as needed
 
   # Accuracy metrics that should be plotted with baseline overlay
@@ -70,6 +68,16 @@ collect_metrics:
   # Y-axis max values (set to None to auto-scale)
   y_axis_max: 1.0 # Fixed y-axis max for all plots (set to 1.0 for accuracy metrics in 0-1 range)
   accuracy_over_random_y_max: 50.0 # Fixed y-axis max for accuracy_over_random plots (separate because this metric has higher values)
+
+  # Scatter plot settings
+  scatter_show_labels: true # If true, use colored points with separate legend. If false, plot all points in gray without labels.
+  scatter_legend_ncol: 3 # Number of columns in legend (1 = vertical, >1 = horizontal)
+  scatter_point_size: 250 # Size of scatter plot points (in points^2)
+  scatter_plot_metrics: # List of metrics to create scatter plots for (if empty/None, creates plots for all accuracy metrics)
+    - "accuracy"
+    - "balanced_accuracy"
+    # - "LabelSimilarity/balanced_accuracy"
+    # Add more metrics as needed. Can specify either base metric names (e.g., "accuracy") or combined metric names (e.g., "accuracy_bio")
 
   # Metrics to include from scib evaluations
   scib_metrics:

@@ -564,7 +564,7 @@ def download_and_extract_links(
         # Retry logic with exponential backoff
         max_retries = 5
         retry_delay = 5  # Initial delay in seconds
-        
+
         for attempt in range(max_retries):
             try:
                 # Check if partial file exists for resumable download
@@ -573,16 +573,16 @@ def download_and_extract_links(
                     resume_pos = tmp.stat().st_size
                     logger.info(f"Resuming download from byte {resume_pos:,}")
                     headers["Range"] = f"bytes={resume_pos}-"
-                
+
                 with session.get(d_link, stream=True, timeout=(30, 900), headers=headers) as r:
                     # Handle partial content (206) or full content (200)
                     if r.status_code == 206:
-                        logger.info(f"Server supports resumable downloads (HTTP 206)")
+                        logger.info("Server supports resumable downloads (HTTP 206)")
                     elif r.status_code == 200 and resume_pos > 0:
-                        logger.warning(f"Server doesn't support resumable downloads, restarting from beginning")
+                        logger.warning("Server doesn't support resumable downloads, restarting from beginning")
                         resume_pos = 0
                         tmp.unlink(missing_ok=True)
-                    
+
                     r.raise_for_status()
 
                     # Get total file size for progress bar
@@ -599,7 +599,7 @@ def download_and_extract_links(
 
                     # Open file in append mode if resuming, otherwise write mode
                     file_mode = "ab" if resume_pos > 0 else "wb"
-                    
+
                     # Create a progress bar for this download with buffered writing
                     # Use larger buffer for better write performance
                     with open(tmp, file_mode, buffering=16 * (1 << 20)) as fh:  # 16MB write buffer
@@ -610,7 +610,8 @@ def download_and_extract_links(
                                 initial=resume_pos,
                                 unit="B",
                                 unit_scale=True,
-                                desc=f"Downloading file {idx + 1}/{len(links)}" + (f" (retry {attempt + 1}/{max_retries})" if attempt > 0 else ""),
+                                desc=f"Downloading file {idx + 1}/{len(links)}"
+                                + (f" (retry {attempt + 1}/{max_retries})" if attempt > 0 else ""),
                                 leave=False,
                             ) as pbar:
                                 for chunk in r.iter_content(chunk_size):
@@ -623,11 +624,11 @@ def download_and_extract_links(
                             for chunk in r.iter_content(chunk_size):
                                 if chunk:
                                     fh.write(chunk)
-                
+
                 # Download successful, break out of retry loop
                 logger.info(f"Successfully downloaded file {idx + 1}/{len(links)}")
                 break
-                
+
             except (
                 requests.exceptions.ChunkedEncodingError,
                 requests.exceptions.ConnectionError,
