@@ -74,7 +74,7 @@ omics_datasets:
   #       "negative_2_idx",
   #     ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
-  - id: "jo-mengr/geo_full_v2_multiplets_natural_language_annotation_v2"
+  - id: "jo-mengr/geo_full_v2_multiplets_natural_language_annotation_v3"
     name: "geo_half"
     type: "multiplets"
     caption: "natural_language_annotation"
