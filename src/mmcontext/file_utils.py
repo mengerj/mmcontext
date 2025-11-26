@@ -462,6 +462,7 @@ def download_and_extract_links(
     overwrite: bool = False,
     extract: bool = True,
     zenodo_token: str | None = None,
+    chunk_size: int = 8 * (1 << 20),  # 8MB chunks for better performance
 ) -> dict[str, Path]:
     """
     Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either
@@ -486,6 +487,9 @@ def download_and_extract_links(
     zenodo_token : str | None, optional
         Zenodo access token for authenticating draft record downloads.
         Required for draft records, optional for published records.
+    chunk_size : int, default 8MB
+        Size of chunks to download at a time. Larger chunks reduce overhead
+        and improve performance for large files.
 
     Returns
     -------
@@ -495,6 +499,13 @@ def download_and_extract_links(
     target_dir.mkdir(parents=True, exist_ok=True)
     tmp_root = Path(temp_dir or tempfile.gettempdir())
     out_map: dict[str, Path] = {}
+
+    # Create a session for connection pooling and performance
+    session = requests.Session()
+    # Configure session for better performance
+    adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10, max_retries=3, pool_block=False)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
 
     def _is_local_path(link: str) -> bool:
         """Check if a link is a local file path rather than a URL."""
@@ -549,11 +560,34 @@ def download_and_extract_links(
             d_link += "/download"  # add NC download suffix
 
         try:
-            with requests.get(d_link, stream=True, timeout=(10, 900), headers=headers) as r:
+            with session.get(d_link, stream=True, timeout=(30, 900), headers=headers) as r:
                 r.raise_for_status()
-                with open(tmp, "wb") as fh:
-                    for chunk in r.iter_content(1 << 20):
-                        fh.write(chunk)
+
+                # Get total file size for progress bar
+                total_size = int(r.headers.get("content-length", 0))
+
+                # Create a progress bar for this download with buffered writing
+                # Use larger buffer for better write performance
+                with open(tmp, "wb", buffering=16 * (1 << 20)) as fh:  # 16MB write buffer
+                    if total_size > 0:
+                        # Show progress bar with file size
+                        with tqdm(
+                            total=total_size,
+                            unit="B",
+                            unit_scale=True,
+                            desc=f"Downloading file {idx + 1}/{len(links)}",
+                            leave=False,
+                        ) as pbar:
+                            for chunk in r.iter_content(chunk_size):
+                                if chunk:  # filter out keep-alive new chunks
+                                    fh.write(chunk)
+                                    pbar.update(len(chunk))
+                    else:
+                        # No content-length header, show progress without total
+                        logger.info(f"Downloading file {idx + 1}/{len(links)} (size unknown)...")
+                        for chunk in r.iter_content(chunk_size):
+                            if chunk:
+                                fh.write(chunk)
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 403 and "zenodo" in d_link.lower():
                 is_draft = "/draft/" in d_link
@@ -592,6 +626,9 @@ def download_and_extract_links(
             shutil.move(tmp, out_path)
 
         out_map[link] = out_path
+
+    # Close the session
+    session.close()
     return out_map
 
 
