@@ -333,8 +333,8 @@ def main(cfg: DictConfig):
 
     # get the hydra output dir
     hydra_run_dir = HydraConfig.get().run.dir
-    monitor = SystemMonitor(logger=logger)
-    monitor.start()
+    # monitor = SystemMonitor(logger=logger)
+    # monitor.start()
 
     try:
         # -------------------------------------------------------------------------
@@ -716,9 +716,10 @@ def main(cfg: DictConfig):
         logger.exception(e)
         raise e
     finally:
-        monitor.stop()
-        monitor.save(hydra_run_dir)
-        monitor.plot_metrics(hydra_run_dir)
+        #   monitor.stop()
+        #  monitor.save(hydra_run_dir)
+        # monitor.plot_metrics(hydra_run_dir)
+        pass
 
 
 if __name__ == "__main__":
