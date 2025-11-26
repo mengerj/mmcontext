@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1            # Request amount of GPUs
 #SBATCH --mem=60G               # Max memory usage
-#SBATCH --time=24:00:00         # Max job time
+#SBATCH --time=48:00:00         # Max job time
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0) Define a unified RUN_ID: real job ID under SLURM, or a timestamp locally
@@ -34,14 +34,15 @@ exec 2>"$BASE_OUT"/train.err
 
 # Configuration file path (relative to PROJECT_ROOT)
 # Override this by setting CONFIG_FILE environment variable before running
-CONFIG_FILE="/home/menger/git/mmcontext/conf/training/biobert_numeric.yaml"
+CONFIG_FILE="/home/menger/git/mmcontext/conf/training/basebert_numeric.yaml"
 #extend adata cache dir with run_id
-ADATA_CACHE_DIR="/scratch/local/menger/data/from_nxtcloud/${RUN_ID}"
-CACHE_DIR="/scratch/local/menger/cache/huggingface/${RUN_ID}"
+ADATA_CACHE_DIR="/scratch/local/menger/data/from_zenodo/" #${RUN_ID}"
+CACHE_DIR="/scratch/local/menger/cache/huggingface/" #${RUN_ID}"
+venv_path="/scratch/local/menger/mmcontext_venv/"
 # Optional command-line overrides
 # These can be set as environment variables to override config file values
 MODEL=null
-EMBEDDING_METHOD=geneformer
+EMBEDDING_METHOD=cw-geneformer
 TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
 # Validate that config file exists
@@ -62,22 +63,23 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Function to clean up scratch directories
-cleanup() {
-    echo "Cleaning up scratch local directories..."
-    rm -rf $ADATA_CACHE_DIR
-    rm -rf $CACHE_DIR
-    echo "Cleaned up data/from_nxtcloud and cache/huggingface"
-}
+#cleanup() {
+#    echo "Cleaning up scratch local directories..."
+#    rm -rf $ADATA_CACHE_DIR
+#    rm -rf $CACHE_DIR
+#    echo "Cleaned up data/from_nxtcloud and cache/huggingface"
+#}
 
 # Set trap to ensure cleanup runs on script exit (success, failure, or termination)
-trap cleanup EXIT
+#trap cleanup EXIT
 
 echo "Starting training job with RUN_ID: $RUN_ID"
 echo "Output directory: $BASE_OUT"
 echo "Configuration file: $CONFIG_FILE"
 echo "Adata cache directory: $ADATA_CACHE_DIR"
 echo "Cache directory: $CACHE_DIR"
-source .venv/bin/activate
+echo "Venv path: $venv_path"
+source $venv_path/bin/activate
 echo "venv activated"
 
 #echo "installing accelerate"
@@ -110,7 +112,7 @@ echo "Executing: $TRAIN_CMD"
 eval $TRAIN_CMD
 
 # clean up scratch local
-echo "Cleaning up scratch local"
-rm -rf /scratch/local/menger/data/from_nxtcloud/${RUN_ID}
-rm -rf /scratch/local/menger/cache/huggingface/${RUN_ID}
-echo "Cleaned up data/from_nxtcloud and cache/huggingface"
+#echo "Cleaning up scratch local"
+#rm -rf /scratch/local/menger/data/from_nxtcloud/${RUN_ID}
+#rm -rf /scratch/local/menger/cache/huggingface/${RUN_ID}
+#echo "Cleaned up data/from_nxtcloud and cache/huggingface"
