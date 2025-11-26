@@ -1,6 +1,6 @@
 # conf/dataset_list.yaml
-- name: human_immune_health_atlas
-  source: jo-mengr/human_immune_health_atlas_50k_single_no_caption
+- name: hiha
+  source: jo-mengr/hiha_100k_single_no_caption
   cs_length: 64
   gene_filter_strings: ["RPS", "RPL", "MT"]
   split: test
@@ -14,7 +14,7 @@
     #- batch_id
 
 - name: tabula_sapiens
-  source: jo-mengr/tabula_sapiens_50k_single_no_caption
+  source: jo-mengr/tabula_sapiens_schaefer_single_no_caption
   cs_length: 64
   gene_filter_strings: ["RPS", "RPL", "MT"]
   split: test
@@ -26,7 +26,7 @@
     - donor
 
 - name: human_pancreas
-  source: jo-mengr/human_pancreas_single_no_caption
+  source: jo-mengr/human_pancreas_luecken_single_no_caption_v2
   cs_length: 64
   gene_filter_strings: ["RPS", "RPL", "MT"]
   split: test
@@ -38,7 +38,7 @@
     - tech
 
 - name: human_disease
-  source: jo-mengr/human_disease_single_no_caption
+  source: jo-mengr/human_disease_schaefer_single_no_caption
   cs_length: 64
   gene_filter_strings: ["RPS", "RPL", "MT"]
   split: test

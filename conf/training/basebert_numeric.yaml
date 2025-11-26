@@ -78,8 +78,8 @@ omics_datasets:
     name: "geo_half"
     type: "multiplets"
     caption: "natural_language_annotation"
-    text_only: false  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
-    layer_axis: "obs"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+    text_only: false # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+    layer_axis: "obs" # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
     index_column: sample_idx
     keep_columns:
       ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
