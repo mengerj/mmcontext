@@ -62,6 +62,9 @@ include = [ "mmcontext*" ]
 [tool.setuptools.package-data]
 #"mmcontext.conf" = [ "*.json" ]
 
+[tool.uv.sources]
+adata-hf-datasets = { git = "https://github.com/mengerj/adata_hf_datasets.git" }
+
 [tool.ruff]
 line-length = 120
 src = [ "src" ]
@@ -128,6 +131,3 @@ skip = [
   "src/**/__init__.py",
   "src/**/basic.py",
 ]
-
-[tool.uv.sources]
-adata-hf-datasets = { git = "https://github.com/mengerj/adata_hf_datasets.git" }

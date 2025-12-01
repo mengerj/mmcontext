@@ -90,7 +90,7 @@ def truncate_cell_sentences(
             if filter_strings:
                 original_count = len(tokens)
                 filtered_tokens = []
-                removed_counts = {filter_str: 0 for filter_str in filter_strings}
+                removed_counts = dict.fromkeys(filter_strings, 0)
 
                 for token in tokens:
                     should_keep = True
