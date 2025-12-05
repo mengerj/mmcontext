@@ -1,32 +1,38 @@
-- source: jo-mengr/mmcontext-pubmedbert-pca-cxg_test
+- source: jo-mengr/mmcontext-pubmedbert-pca
   name: pca
   displayed_name: pca
   text_only: false
   layer_key: X_pca
 
-- source: jo-mengr/mmcontext-pubmedbert-scvi_fm-cxg_test
+- source: jo-mengr/mmcontext-pubmedbert-scvi_fm
   name: scvi_fm
   displayed_name: scvi_fm
   text_only: false
   layer_key: X_scvi_fm
 
-- source: jo-mengr/mmcontext-pubmedbert-geneformer-v1-cxg_test-v2
+- source: jo-mengr/mmcontext-pubmedbert-geneformer-v1
   name: geneformer-v1
   displayed_name: geneformer-v1
   text_only: false
   layer_key: X_geneformer-v1
 
-- source: jo-mengr/mmcontext-pubmedbert-geneformer-cxg_test
+- source: jo-mengr/mmcontext-pubmedbert-geneformer
   name: geneformer
   displayed_name: geneformer
   text_only: false
   layer_key: X_geneformer
 
-#- source: jo-mengr/mmcontext-pubmedbert-cxg
-#  name: pubmedbert_cxg
-#  displayed_name: cell sentences
-#  text_only: true
-#  layer_key: null
+- source: jo-mengr/mmcontext-pubmedbert-gs10k
+  name: gs10k
+  displayed_name: gs10k
+  text_only: false
+  layer_key: X_gs10k
+
+- source: jo-mengr/mmcontext-pubmedbert-cell_sentences
+  name: cell_sentences
+  displayed_name: cell sentences
+  text_only: true
+  layer_key: null
 
 - source: cellwhisperer
   name: cellwhisperer
