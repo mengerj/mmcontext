@@ -187,6 +187,10 @@ class LabelSimilarity(BaseEvaluator):
         skip_plotting: bool = False,
         save_labels: bool = True,
         output_sample_size: int = 100,
+        label_colors: dict[str, str | tuple] | None = None,
+        rasterize_scatter: bool = True,
+        font_family: str = "Arial",
+        annotation_fontsize: int | None = None,
         **kw,
     ):
         """
@@ -241,6 +245,28 @@ class LabelSimilarity(BaseEvaluator):
             Save true/predicted labels as parquet and CSV
         output_sample_size : int, default 100
             Number of cells to include in CSV sample
+        label_colors : dict[str, str | tuple], optional
+            Dictionary mapping label names to colors. Colors can be specified as:
+            - Named colors: "red", "blue", "grey", etc.
+            - Hex strings: "#7f7f7f"
+            - RGB tuples: (0.5, 0.5, 0.5)
+            Labels not in this dictionary will be assigned colors automatically.
+            This ensures consistent colors across different runs regardless of the
+            number of classes. Example: {"T cell": "grey", "B cell": "blue"}
+        rasterize_scatter : bool, default True
+            Whether to rasterize scatter plot points when saving figures.
+            When True, scatter points are embedded as a raster image while text
+            annotations remain as vectors. This dramatically reduces SVG file sizes
+            (from ~100MB to ~1MB) making them suitable for PowerPoint.
+            The DPI parameter controls the raster quality.
+        font_family : str, default "Arial"
+            Font family to use for text annotations in plots.
+            Arial is recommended for PowerPoint compatibility as it's universally available.
+            Other options: "Helvetica", "Times New Roman", "DejaVu Sans", etc.
+        annotation_fontsize : int, optional
+            Font size for label annotations on UMAP plots.
+            If None, calculated automatically from legend_fontsize.
+            Set explicitly (e.g., 18) if PowerPoint changes the size during import.
         """
         # Label filtering parameters
         self.auto_filter_labels = auto_filter_labels
@@ -271,6 +297,10 @@ class LabelSimilarity(BaseEvaluator):
         self.skip_plotting = skip_plotting
         self.save_labels = save_labels
         self.output_sample_size = output_sample_size
+        self.label_colors = label_colors
+        self.rasterize_scatter = rasterize_scatter
+        self.font_family = font_family
+        self.annotation_fontsize = annotation_fontsize
 
     def get_filtering_results(self) -> dict[str, list[str]]:
         """
@@ -581,129 +611,132 @@ class LabelSimilarity(BaseEvaluator):
         labels: list,
         color_map: dict,
         fontsize: int = 8,
-        fill_color: str = "red",
-        edge_color: str = "white",
-        alpha: float = 0.8,
+        min_distance: float = 0.08,
+        spring_strength: float = 0.5,
+        repulsion_strength: float = 1.0,
     ) -> None:
         """
-        Add text annotations with arrows to avoid overlap.
+        Add text annotations with arrows using force-directed layout to avoid overlap.
+
+        Uses a physics-inspired approach where labels are:
+        - Attracted to their anchor points (spring force)
+        - Repelled from each other (repulsion force)
+
+        Each label has a colored dot at its embedding position, with the label text
+        placed nearby and connected by a line. All colors match the label's assigned color.
 
         Parameters
         ----------
         points : np.ndarray
-            Array of (x, y) coordinates for label positions
+            Array of (x, y) coordinates for label positions (anchor points)
         labels : list
             List of label strings
         color_map : dict
-            Mapping from label to color
+            Mapping from label to color. Each label's dot, text box, and connecting line
+            will use this color.
         fontsize : int
             Font size for the text
-        fill_color : str
-            Fill color of the annotation dots ("red", "blue", "none", "label", etc.)
-            Use "label" to use the label's color from color_map
-        edge_color : str
-            Edge color of the annotation dots ("white", "black", "none", "label", etc.)
-            Use "label" to use the label's color from color_map
-        alpha : float
-            Transparency of the annotation dots (0.0 = fully transparent, 1.0 = fully opaque)
+        min_distance : float
+            Minimum desired distance between labels as fraction of plot range (0.05-0.20 recommended).
+            Labels closer than this will experience strong repulsive forces.
+            Lower = more compact, Higher = more spread out
+        spring_strength : float
+            How strongly labels are pulled toward their anchor points (0.1-2.0 recommended).
+            Lower = labels can move far from anchors, Higher = labels stay very close to anchors
+        repulsion_strength : float
+            How strongly labels repel each other (0.3-3.0 recommended).
+            Uses inverse-square law (like electromagnetic forces).
+            Lower = allows tighter packing, Higher = forces labels further apart
         """
-        # Get plot bounds for relative offset calculation
+        # Get plot bounds for relative calculations
         ax = plt.gca()
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
         x_range = xlim[1] - xlim[0]
         y_range = ylim[1] - ylim[0]
 
-        # Much larger offset distance to avoid crowding
-        base_offset = 0.15  # Increased from 0.15
-        x_offset_base = base_offset * x_range
-        y_offset_base = base_offset * y_range
+        # Initialize label positions with slight random offset from anchor points
+        n_labels = len(labels)
+        label_positions = points.copy().astype(float)
 
-        # Store chosen positions to avoid overlap
-        chosen_positions = []
+        # Add small random offset to break symmetry
+        np.random.seed(42)  # For reproducibility
+        label_positions += np.random.randn(n_labels, 2) * 0.02 * np.array([x_range, y_range])
 
-        # Define more angles for better distribution
-        angles = np.linspace(0, 2 * np.pi, 16, endpoint=False)  # 16 directions instead of 8
+        # Minimum distance in plot units
+        min_dist_units = min_distance * np.sqrt(x_range**2 + y_range**2)
 
-        for i, (point, label) in enumerate(zip(points, labels, strict=False)):
+        # Force-directed layout simulation
+        n_iterations = 100  # Increased for better convergence
+        for iteration in range(n_iterations):
+            forces = np.zeros_like(label_positions)
+
+            # Spring force: pull labels toward their anchor points
+            spring_force = spring_strength * (points - label_positions)
+            forces += spring_force
+
+            # Repulsion force: push labels away from each other
+            # Uses inverse-square law like electromagnetic repulsion
+            for i in range(n_labels):
+                for j in range(i + 1, n_labels):
+                    diff = label_positions[i] - label_positions[j]
+                    dist = np.sqrt(np.sum(diff**2))
+
+                    if dist > 0:  # Avoid division by zero
+                        # Inverse square repulsion with extra penalty when too close
+                        # Base repulsion: always active, falls off with distance
+                        base_repulsion = repulsion_strength * min_dist_units**2 / (dist**2)
+
+                        # Extra repulsion when within min_distance (exponentially stronger)
+                        if dist < min_dist_units:
+                            proximity_penalty = repulsion_strength * (min_dist_units / dist - 1.0) ** 2
+                            total_repulsion = (base_repulsion + proximity_penalty) * diff / dist
+                        else:
+                            total_repulsion = base_repulsion * diff / dist
+
+                        forces[i] += total_repulsion
+                        forces[j] -= total_repulsion
+
+            # Adaptive damping: start high, decrease over time for better settling
+            progress = iteration / n_iterations
+            damping = 0.8 * (1.0 - 0.7 * progress)  # Starts at 0.8, ends at 0.24
+
+            # Update positions
+            label_positions += damping * forces * 0.05
+
+            # Optional: keep labels within reasonable bounds (2x the plot range)
+            label_positions[:, 0] = np.clip(label_positions[:, 0], xlim[0] - x_range, xlim[1] + x_range)
+            label_positions[:, 1] = np.clip(label_positions[:, 1], ylim[0] - y_range, ylim[1] + y_range)
+
+        # Now draw the annotations
+        for _i, (point, label, label_pos) in enumerate(zip(points, labels, label_positions, strict=False)):
             # Get label color from color_map
             label_color = color_map.get(label, "red")
 
-            # Add subtle dot at actual position - much smaller and less prominent
-            if fill_color.lower() != "none" or edge_color.lower() != "none":
-                # Determine colors for fill and edge
-                if fill_color.lower() == "label":
-                    dot_fill = label_color
-                elif fill_color.lower() == "none":
-                    dot_fill = None
-                else:
-                    dot_fill = fill_color
-
-                if edge_color.lower() == "label":
-                    dot_edge = label_color
-                elif edge_color.lower() == "none":
-                    dot_edge = None
-                else:
-                    dot_edge = edge_color
-
-                plt.scatter(
-                    point[0], point[1], c=dot_fill, s=8, alpha=alpha, zorder=15, edgecolors=dot_edge, linewidths=0.5
-                )
-
-            best_pos = None
-            max_min_distance = 0  # Find position with maximum minimum distance to others
-
-            # Try different offset distances and angles
-            for distance_multiplier in [1.0, 1.5, 2.0, 2.5]:  # Try multiple distances
-                for angle in angles:
-                    # Calculate offset position
-                    x_offset = x_offset_base * distance_multiplier * np.cos(angle)
-                    y_offset = y_offset_base * distance_multiplier * np.sin(angle)
-                    test_pos = (point[0] + x_offset, point[1] + y_offset)
-
-                    # Calculate minimum distance to all previously chosen positions
-                    if chosen_positions:
-                        min_dist_to_chosen = min(
-                            np.sqrt((test_pos[0] - pos[0]) ** 2 + (test_pos[1] - pos[1]) ** 2)
-                            for pos in chosen_positions
-                        )
-                    else:
-                        min_dist_to_chosen = float("inf")
-
-                    # Also check distance to original points
-                    min_dist_to_points = (
-                        min(
-                            np.sqrt((test_pos[0] - other_point[0]) ** 2 + (test_pos[1] - other_point[1]) ** 2)
-                            for j, other_point in enumerate(points)
-                            if i != j
-                        )
-                        if len(points) > 1
-                        else float("inf")
-                    )
-
-                    # Use the minimum of the two distances
-                    min_dist = min(min_dist_to_chosen, min_dist_to_points)
-
-                    # Keep the position with the largest minimum distance
-                    if min_dist > max_min_distance:
-                        max_min_distance = min_dist
-                        best_pos = test_pos
-
-            # Fallback if no good position found - use systematic distribution
-            if best_pos is None:
-                angle = (i / len(labels)) * 2 * np.pi
-                x_offset = x_offset_base * 2.0 * np.cos(angle)  # Use larger multiplier
-                y_offset = y_offset_base * 2.0 * np.sin(angle)
-                best_pos = (point[0] + x_offset, point[1] + y_offset)
-
-            chosen_positions.append(best_pos)
+            # Always add a visible dot at the actual label embedding position
+            # The dot color matches the label color for clear visual association
+            plt.scatter(
+                point[0],
+                point[1],
+                c=[label_color],  # Use label color for the dot
+                s=40,  # Slightly larger for visibility
+                alpha=0.9,  # High alpha for clear visibility
+                zorder=15,
+                edgecolors="white",  # White edge for contrast
+                linewidths=1.5,  # Thicker edge
+            )
 
             # Add annotation with label color
+            # Use explicit annotation_fontsize if set, otherwise calculate from legend fontsize
+            effective_fontsize = (
+                self.annotation_fontsize if self.annotation_fontsize is not None else max(4, int(fontsize * 0.4))
+            )
             plt.annotate(
                 str(label),
-                xy=(point[0], point[1]),  # Point to annotate
-                xytext=best_pos,  # Text position
-                fontsize=max(4, int(fontsize * 0.4)),  # Much smaller: 40% of legend font
+                xy=(point[0], point[1]),  # Point to annotate (anchor)
+                xytext=(label_pos[0], label_pos[1]),  # Text position (after force-directed layout)
+                fontsize=effective_fontsize,
+                fontfamily=self.font_family,
                 ha="center",
                 va="center",
                 weight="normal",
@@ -711,15 +744,15 @@ class LabelSimilarity(BaseEvaluator):
                     "boxstyle": "round,pad=0.05",
                     "facecolor": "white",
                     "alpha": 0.85,
-                    "edgecolor": label_color,  # Use label color for box outline
-                    "linewidth": 1.0,  # Slightly thicker for better visibility
+                    "edgecolor": label_color,  # Box edge matches label color
+                    "linewidth": 1.0,
                 },
                 arrowprops={
                     "arrowstyle": "-",
-                    "color": label_color,
-                    "lw": 0.8,
-                    "alpha": 0.7,
-                },  # Use label color for arrow
+                    "color": label_color,  # Arrow matches label color
+                    "lw": 1.0,  # Slightly thicker line
+                    "alpha": 0.8,  # High alpha for visibility
+                },
                 zorder=20,
             )
 
@@ -1016,11 +1049,12 @@ class LabelSimilarity(BaseEvaluator):
         text_plot_enlargement_factor: float = None,
         legend_layout: str = None,
         legend_point_size: int = None,
-        text_dot_fill_color: str = None,
-        text_dot_edge_color: str = None,
-        text_dot_alpha: float = None,
+        label_min_distance: float = 0.08,
+        label_spring_strength: float = 0.5,
+        label_repulsion_strength: float = 1.0,
         umap_method: str = None,
         cell_umap: np.ndarray | None = None,
+        label_colors: dict[str, str | tuple] | None = None,
         **kw,
     ) -> None:
         """
@@ -1076,12 +1110,17 @@ class LabelSimilarity(BaseEvaluator):
             Legend layout ("horizontal", "vertical")
         legend_point_size : int, optional
             Size of points in legends
-        text_dot_fill_color : str, optional
-            Fill color for text annotation dots
-        text_dot_edge_color : str, optional
-            Edge color for text annotation dots
-        text_dot_alpha : float, optional
-            Transparency for text annotation dots
+        label_min_distance : float, default 0.08
+            Minimum desired distance between label annotations as fraction of plot range (0.05-0.20 recommended).
+            Labels closer than this will experience strong repulsive forces.
+            Lower values = more compact layout, higher values = more spread out.
+        label_spring_strength : float, default 0.5
+            How strongly labels are pulled toward their anchor points (0.1-2.0 recommended).
+            Lower values = labels can move far from anchors, higher values = labels stay very close.
+        label_repulsion_strength : float, default 1.0
+            How strongly labels repel each other (0.3-3.0 recommended).
+            Uses inverse-square law (like electromagnetic forces) - always active, stronger when close.
+            Lower values = allows tighter packing, higher values = forces labels further apart.
         umap_method : str, optional
             UMAP computation method ("combined", "separate")
         cell_umap : np.ndarray, optional
@@ -1090,6 +1129,11 @@ class LabelSimilarity(BaseEvaluator):
             Label positions will always be recomputed based on current embeddings.
             This is useful when reusing UMAP coordinates from a full dataset with
             a subset of cells or different label embeddings.
+        label_colors : dict[str, str | tuple], optional
+            Dictionary mapping label names to colors. Overrides the class-level setting.
+            Colors can be specified as named colors ("grey"), hex strings ("#7f7f7f"),
+            or RGB tuples. Labels not in this dictionary will be assigned colors automatically.
+            Example: {"T cell": "grey", "B cell": "blue"}
         **eval_cfg: Any
             Additional evaluation configuration parameters
         """
@@ -1124,9 +1168,6 @@ class LabelSimilarity(BaseEvaluator):
         )
         legend_layout_mode = self.legend_layout if legend_layout is None else legend_layout
         legend_marker_size = self.legend_point_size if legend_point_size is None else legend_point_size
-        annotation_fill_color = self.text_dot_fill_color if text_dot_fill_color is None else text_dot_fill_color
-        annotation_edge_color = self.text_dot_edge_color if text_dot_edge_color is None else text_dot_edge_color
-        annotation_alpha = self.text_dot_alpha if text_dot_alpha is None else text_dot_alpha
         umap_computation_method = self.umap_method if umap_method is None else umap_method
 
         # Validate umap_method parameter
@@ -1151,6 +1192,7 @@ class LabelSimilarity(BaseEvaluator):
                 "font.size": font_size,
                 "font.weight": font_weight,
                 "font.style": font_style,
+                "font.family": self.font_family,  # Use specified font for PowerPoint compatibility
                 "axes.labelsize": axis_label_size,
                 "xtick.labelsize": axis_tick_size,
                 "ytick.labelsize": axis_tick_size,
@@ -1159,6 +1201,8 @@ class LabelSimilarity(BaseEvaluator):
                 "axes.spines.bottom": frameon,
                 "axes.spines.top": frameon,
                 "axes.spines.right": frameon,
+                # Use actual text elements in SVG instead of paths for better PowerPoint compatibility
+                "svg.fonttype": "none",
             }
         )
 
@@ -1217,21 +1261,39 @@ class LabelSimilarity(BaseEvaluator):
         # This ensures all query labels have colors, even if they don't appear in true data
         all_labels = np.unique(np.concatenate([unique_labels, query_labels]))
 
-        # Use categorical color palettes for better distinction
-        if len(all_labels) <= 10:
-            colors = sns.color_palette("tab10", len(all_labels))
-        elif len(all_labels) <= 20:
-            colors = sns.color_palette("tab20", len(all_labels))
-        elif len(all_labels) <= 40:
-            # For 21-40 classes, combine tab20 and tab20b
-            colors = sns.color_palette("tab20", 20) + sns.color_palette("tab20b", len(all_labels) - 20)
-        else:
-            # For >40 classes, use a continuous colormap to ensure we have enough colors
-            # Use HSV colormap for maximum distinction between colors
-            colors = sns.color_palette("hsv", len(all_labels))
+        # Get user-provided label colors (method parameter overrides class attribute)
+        user_colors = label_colors if label_colors is not None else self.label_colors
 
-        # Create color map for all labels (query + unique)
-        color_map = {label: colors[i] for i, label in enumerate(all_labels)}
+        # Build color map: use user-provided colors first, then fill in remaining with palette
+        color_map = {}
+
+        if user_colors is not None:
+            # Add user-specified colors
+            for label in all_labels:
+                label_str = str(label)
+                if label_str in user_colors:
+                    color_map[label] = user_colors[label_str]
+                elif label in user_colors:
+                    color_map[label] = user_colors[label]
+
+        # Find labels that still need colors
+        labels_needing_colors = [label for label in all_labels if label not in color_map]
+
+        if labels_needing_colors:
+            # Generate colors for remaining labels using palette
+            n_colors_needed = len(labels_needing_colors)
+            if n_colors_needed <= 10:
+                auto_colors = sns.color_palette("tab10", n_colors_needed)
+            elif n_colors_needed <= 20:
+                auto_colors = sns.color_palette("tab20", n_colors_needed)
+            elif n_colors_needed <= 40:
+                auto_colors = sns.color_palette("tab20", 20) + sns.color_palette("tab20b", n_colors_needed - 20)
+            else:
+                auto_colors = sns.color_palette("hsv", n_colors_needed)
+
+            # Assign auto colors to remaining labels
+            for i, label in enumerate(labels_needing_colors):
+                color_map[label] = auto_colors[i]
 
         # For true labels plot, only use colors for labels that exist in true data
         point_colors = [color_map.get(label, "gray") for label in true_labels]
@@ -1277,7 +1339,15 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=plot_point_size, alpha=0.7, edgecolors="none")
+        plt.scatter(
+            cell_umap[:, 0],
+            cell_umap[:, 1],
+            c=point_colors,
+            s=plot_point_size,
+            alpha=0.7,
+            edgecolors="none",
+            rasterized=self.rasterize_scatter,
+        )
         plt.xticks([])
         plt.yticks([])
         _safe_tight_layout()
@@ -1292,7 +1362,15 @@ class LabelSimilarity(BaseEvaluator):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        plt.scatter(cell_umap[:, 0], cell_umap[:, 1], c=point_colors, s=plot_point_size, alpha=0.7, edgecolors="none")
+        plt.scatter(
+            cell_umap[:, 0],
+            cell_umap[:, 1],
+            c=point_colors,
+            s=plot_point_size,
+            alpha=0.7,
+            edgecolors="none",
+            rasterized=self.rasterize_scatter,
+        )
 
         # Fix axis limits before adding annotations to prevent plot area from expanding
         xlim = ax.get_xlim()
@@ -1304,9 +1382,9 @@ class LabelSimilarity(BaseEvaluator):
             query_labels,
             color_map=color_map,
             fontsize=max(6, legend_fontsize - 2),
-            fill_color=annotation_fill_color,
-            edge_color=annotation_edge_color,
-            alpha=annotation_alpha,
+            min_distance=label_min_distance,
+            spring_strength=label_spring_strength,
+            repulsion_strength=label_repulsion_strength,
         )
 
         # Restore original axis limits to maintain consistent plot size
@@ -1363,7 +1441,13 @@ class LabelSimilarity(BaseEvaluator):
             spine.set_visible(False)
 
         plt.scatter(
-            cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=plot_point_size, alpha=0.7, edgecolors="none"
+            cell_umap[:, 0],
+            cell_umap[:, 1],
+            c=pred_point_colors,
+            s=plot_point_size,
+            alpha=0.7,
+            edgecolors="none",
+            rasterized=self.rasterize_scatter,
         )
         plt.xticks([])
         plt.yticks([])
@@ -1380,7 +1464,13 @@ class LabelSimilarity(BaseEvaluator):
             spine.set_visible(False)
 
         plt.scatter(
-            cell_umap[:, 0], cell_umap[:, 1], c=pred_point_colors, s=plot_point_size, alpha=0.7, edgecolors="none"
+            cell_umap[:, 0],
+            cell_umap[:, 1],
+            c=pred_point_colors,
+            s=plot_point_size,
+            alpha=0.7,
+            edgecolors="none",
+            rasterized=self.rasterize_scatter,
         )
 
         # Fix axis limits before adding annotations to prevent plot area from expanding
@@ -1393,9 +1483,9 @@ class LabelSimilarity(BaseEvaluator):
             query_labels,
             color_map=color_map,
             fontsize=max(6, legend_fontsize - 2),
-            fill_color=annotation_fill_color,
-            edge_color=annotation_edge_color,
-            alpha=annotation_alpha,
+            min_distance=label_min_distance,
+            spring_strength=label_spring_strength,
+            repulsion_strength=label_repulsion_strength,
         )
 
         # Restore original axis limits to maintain consistent plot size
