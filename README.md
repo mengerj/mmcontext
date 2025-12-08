@@ -87,7 +87,7 @@ Try a small training run with
 python scripts/train.py --config-name example_conf
 ```
 
-Inspect the config at ['example_conf.yaml'](conf/training/example_conf). The configs to train the models presented in the paper, are ['basebert_numeric'](conf/training/basebert_numeric.yaml), for all models using numeric initial representations and ['basebert_text.yaml'](conf/training/basebert_text.yaml) for the model using cell_sentences (text only). All datasets used in training are hosted publically on the huggingface hub (with references to zenodo), therefore the training scripts can be launched without manually downloading any data.
+Inspect the config at [`example_conf.yaml`](conf/training/example_conf). The configs to train the models presented in the paper, are [`basebert_numeric`](conf/training/basebert_numeric.yaml), for all models using numeric initial representations and [`basebert_text.yaml`](conf/training/basebert_text.yaml) for the model using cell_sentences (text only). All datasets used in training are hosted publically on the huggingface hub (with references to zenodo), therefore the training scripts can be launched without manually downloading any data.
 
 For HPC systems with CUDA support, the recommended approach is to use the [`scripts/run_training.slurm`](scripts/run_training.slurm) SLURM script to launch training jobs. Training also works on CPU or MPS devices if CUDA is not available.
 
@@ -121,7 +121,7 @@ Figure 1D of the paper investigates the latent space of one model in detail. Thi
 For Figure 1E, we evaluate several models on multiple datasets, with the [`scripts/embed_eval.py`](scripts/combined_pipeline.py) script. This runs both inference and evaluation pipelines in sequence.
 
 The combined pipeline is configured using [`embed_eval_conf.yaml`](conf/eval/combined_conf.yaml), which inherits from dataset and model configuration files that list the datasets and models to be evaluated. The configuration file contains additional parameters that are explained in the comments within the file itself.
-The models and datasets evaluated in the paper are referenced in [`model_list_cxg_geo_all.yaml'](conf/models/model_list_cxg_geo_all.yaml) and [`dataset_list.yaml`](conf/datasets/dataset_list.yaml). These configs are imported in [`embed_eval_conf.yaml`](conf/eval/combined_conf.yaml). To jointly embed data and evaluate with CellWhisperer, set `run_cellwhisperer: true`. It is highly recommended to use CUDA for CellWhisperer. The mmcontext models also run in reasonable time on MPS or CPU.
+The models and datasets evaluated in the paper are referenced in [model_list_cxg_geo_all.yaml](conf/models/model_list_cxg_geo_all.yaml) and [dataset_list.yaml](conf/datasets/dataset_list.yaml). These configs are imported in [embed_eval_conf.yaml](conf/eval/combined_conf.yaml). To jointly embed data and evaluate with CellWhisperer, set `run_cellwhisperer: true`. It is highly recommended to use CUDA for CellWhisperer. The mmcontext models also run in reasonable time on MPS or CPU.
 
 For HPC systems, you can run the combined pipeline as array jobs using [`scripts/run_combined_cpu.slurm`](scripts/run_combined_cpu.slurm):
 
