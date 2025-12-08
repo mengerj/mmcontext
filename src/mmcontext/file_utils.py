@@ -97,6 +97,7 @@ def load_test_adata_from_hf_dataset(
     axis: str = "obs",
     link_column: str = "adata_link",
     zenodo_token: str | None = None,
+    force_drafts: bool = False,
 ) -> tuple[ad.AnnData, Path]:
     """
     Download the unique AnnData chunk referenced in *test_split* and load it.
@@ -114,6 +115,10 @@ def load_test_adata_from_hf_dataset(
     zenodo_token : str | None, optional
         Zenodo access token for authenticating draft record downloads.
         Required for draft records, optional for published records.
+    force_drafts : bool, default False
+        If False, automatically converts Zenodo draft links to published links.
+        This is a quick fix for datasets created with draft links that were
+        published remotely afterwards. Set to True to use actual draft links.
 
     Returns
     -------
@@ -140,6 +145,7 @@ def load_test_adata_from_hf_dataset(
         extract=True,
         overwrite=False,
         zenodo_token=zenodo_token,
+        force_drafts=force_drafts,
     )
     local_path = next(iter(local_map.values()))
 
@@ -463,6 +469,7 @@ def download_and_extract_links(
     extract: bool = True,
     zenodo_token: str | None = None,
     chunk_size: int = 8 * (1 << 20),  # 8MB chunks for better performance
+    force_drafts: bool = False,
 ) -> dict[str, Path]:
     """
     Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either
@@ -490,6 +497,11 @@ def download_and_extract_links(
     chunk_size : int, default 8MB
         Size of chunks to download at a time. Larger chunks reduce overhead
         and improve performance for large files.
+    force_drafts : bool, default False
+        If False, automatically converts Zenodo draft links to published links
+        by removing ``/draft`` from URLs. This is a quick fix to allow using
+        datasets created with draft links that were published remotely afterwards.
+        Set to True if you actually need to download from a draft record.
 
     Returns
     -------
@@ -547,6 +559,17 @@ def download_and_extract_links(
         # ---- stream into tmp file -----------------------------------------
         tmp = tmp_root / f"{uuid4().hex}.tmp"
         d_link = link  # use normal link to store later, to be consistent with how link is stored in dataset
+
+        # Quick fix: Convert draft links to published links if force_drafts=False
+        # This allows using datasets created with draft links that were published remotely afterwards.
+        # The /draft segment appears before /files in Zenodo URLs.
+        if not force_drafts and "zenodo.org" in d_link and "/draft/" in d_link:
+            original_link = d_link
+            d_link = d_link.replace("/draft/", "/")
+            logger.info(
+                f"Converted draft link to published link (set force_drafts=True to use draft): "
+                f"{original_link} -> {d_link}"
+            )
 
         # Prepare headers based on URL source
         headers = {}

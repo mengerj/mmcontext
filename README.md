@@ -49,25 +49,6 @@ See the [Using a Pre-trained Model for Inference](tutorials/pretrained_inference
 
 Train your own mmcontext models on custom datasets.
 
-### Installation
-
-Training requires cloning the repository and installing in editable mode:
-
-```bash
-git clone https://github.com/mengerj/mmcontext.git
-cd mmcontext
-
-# Using uv (recommended)
-uv pip install -e .
-
-# Or using pip
-pip install -e .
-```
-
-### Dataset Preparation
-
-To train mmcontext models, you'll need to prepare datasets in the appropriate format. The [adata-hf-datasets](https://github.com/mengerj/adata_hf_datasets) package provides the source code and utilities for creating the datasets needed to train mmcontext models. This package handles the conversion of AnnData objects to Hugging Face datasets with proper formatting for multimodal training. For training, it is recommended to use the available pipeline in that repository to create the training datasets.
-
 ### Tutorial
 
 See the [Training a New Model](tutorials/train_new.ipynb) tutorial for:
@@ -75,6 +56,12 @@ See the [Training a New Model](tutorials/train_new.ipynb) tutorial for:
 - Step-by-step training guide
 - Configuration and hyperparameters
 - Best practices for multi-modal training
+
+### Dataset Preparation
+
+If you want to utilize the full pipeline used to process the training datasets, go to
+[adata-hf-datasets](https://github.com/mengerj/adata_hf_datasets).
+This package handles the conversion of AnnData objects to Hugging Face datasets with proper formatting for multimodal training.
 
 ## Reproducing Paper Results
 
@@ -93,11 +80,18 @@ pip install -e .
 
 ### Training Models
 
-To train a model as done for the paper, use the [`scripts/train.py`](scripts/train.py) script. For HPC systems with CUDA support, the recommended approach is to use the [`scripts/run_training.slurm`](scripts/run_training.slurm) SLURM script to launch training jobs. Training also works on CPU or MPS devices if CUDA is not available.
+To train a model as done for the paper, use the [`scripts/train.py`](scripts/train.py) script.
+Try a small training run with
 
-Training is configured using configuration files such as [`conf/training/train_conf.yaml`](conf/training/train_conf.yaml), which explains all available parameters. You can use multiple datasets for training, which should be hosted on the Hugging Face Hub.
+```bash
+python scripts/train.py --config-name example_conf
+```
 
-The SLURM script allows you to override configuration values from the command line, which is useful when launching several jobs with different configurations. For example:
+Inspect the config at ['example_conf.yaml'](conf/training/example_conf). The configs to train the models presented in the paper, are ['basebert_numeric'](conf/training/basebert_numeric.yaml), for all models using numeric initial representations and ['basebert_text.yaml'](conf/training/basebert_text.yaml) for the model using cell_sentences (text only). All datasets used in training are hosted publically on the huggingface hub (with references to zenodo), therefore the training scripts can be launched without manually downloading any data.
+
+For HPC systems with CUDA support, the recommended approach is to use the [`scripts/run_training.slurm`](scripts/run_training.slurm) SLURM script to launch training jobs. Training also works on CPU or MPS devices if CUDA is not available.
+
+The SLURM script allows you to override configuration values from the command line, which is useful when launching several jobs with different configurations.
 
 ```bash
 sbatch scripts/run_training.slurm
@@ -110,13 +104,24 @@ source .venv/bin/activate  # or your venv activation command
 hf auth login
 ```
 
+If you have a Weights & Biases (wandb) account, you can also log in so your training is tracked. From the command line, run:
+
+```bash
+wandb login
+```
+
+This will prompt you to enter your wandb API key.
+
 Once training is complete, the finished models will be automatically uploaded to the Hugging Face Hub with metadata and model cards.
 
 ### Evaluating Models
 
-To evaluate several models on multiple datasets, use the [`scripts/combined_pipeline.py`](scripts/combined_pipeline.py) script. This runs both inference and evaluation pipelines in sequence.
+Figure 1D of the paper investigates the latent space of one model in detail. This can be recreated with the [`evaluate_model.ipynb`](tutorials/evaluate_model.ipynb) notebook.
 
-The combined pipeline is configured using [`conf/combined_conf.yaml`](conf/combined_conf.yaml), which inherits from dataset and model configuration files that list the datasets and models to be evaluated. The configuration file contains additional parameters that are explained in the comments within the file itself.
+For Figure 1E, we evaluate several models on multiple datasets, with the [`scripts/embed_eval.py`](scripts/combined_pipeline.py) script. This runs both inference and evaluation pipelines in sequence.
+
+The combined pipeline is configured using [`embed_eval_conf.yaml`](conf/eval/combined_conf.yaml), which inherits from dataset and model configuration files that list the datasets and models to be evaluated. The configuration file contains additional parameters that are explained in the comments within the file itself.
+The models and datasets evaluated in the paper are referenced in [`model_list_cxg_geo_all.yaml'](conf/models/model_list_cxg_geo_all.yaml) and [`dataset_list.yaml`](conf/datasets/dataset_list.yaml). These configs are imported in [`embed_eval_conf.yaml`](conf/eval/combined_conf.yaml). To jointly embed data and evaluate with CellWhisperer, set `run_cellwhisperer: true`. It is highly recommended to use CUDA for CellWhisperer. The mmcontext models also run in reasonable time on MPS or CPU.
 
 For HPC systems, you can run the combined pipeline as array jobs using [`scripts/run_combined_cpu.slurm`](scripts/run_combined_cpu.slurm):
 
@@ -124,7 +129,14 @@ For HPC systems, you can run the combined pipeline as array jobs using [`scripts
 sbatch scripts/run_combined_cpu.slurm
 ```
 
-This allows you to process multiple model configurations in parallel across different array job tasks.
+This allows you to process multiple model configurations in parallel across different array job tasks, by spreading the models across several config files and passing them as a list to the array job.
+
+Figure Panel 1E is created by collecting the metrics from the big evaluation run. The config [`collect_metrics_conf.yaml`](conf/eval/collect_metrics_conf.yaml) has to point to the directory where the results from all datasets/models were stored. Then to collect and plot the metrics, run
+
+```bash
+python scripts/collect_metrics.py
+python scripts/plot_metrics.py
+```
 
 ## Core Components
 

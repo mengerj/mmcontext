@@ -1374,6 +1374,7 @@ class MMContextEncoder(Module):
         overwrite: bool = False,
         link_column: str = "adata_link",
         zenodo_token: str | None = None,
+        force_drafts: bool = False,
     ) -> tuple[pd.DataFrame, dict[str, Path]]:
         """
         Download all embedding chunks referenced in *hf_dataset* and return in a format suitable for registration.
@@ -1410,6 +1411,10 @@ class MMContextEncoder(Module):
         zenodo_token : str | None, optional
             Zenodo access token for authenticating draft record downloads.
             Required for draft records, optional for published records.
+        force_drafts : bool, default False
+            If False, automatically converts Zenodo draft links to published links.
+            This is a quick fix for datasets created with draft links that were
+            published remotely afterwards. Set to True to use actual draft links.
 
         Returns
         -------
@@ -1430,6 +1435,7 @@ class MMContextEncoder(Module):
             extract=extract_zip,
             overwrite=overwrite,
             zenodo_token=zenodo_token,
+            force_drafts=force_drafts,
         )
         # if the layer key is none, this means that only the download step was needed. The model will be used as text only without initial embeddings.
         if layer_key is None:
