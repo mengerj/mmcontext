@@ -81,9 +81,9 @@ echo "venv activated"
 # 4. Run the combined pipeline script with Hydra overrides
 ###
 
-python3 scripts/combined_pipeline.py \
-    --config-path=../conf \
-    --config-name=combined_conf \
+python3 scripts/embed_eval.py \
+    --config-path=../conf/eval \
+    --config-name=embed_eval_conf \
     models=${MODEL_CONFIG} \
     settings.run_cellwhisperer=${run_cellwhisperer} \
     settings.final_root=${final_root} \

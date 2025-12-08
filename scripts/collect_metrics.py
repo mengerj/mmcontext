@@ -184,7 +184,7 @@ def clean_metric_names(df: pd.DataFrame) -> pd.DataFrame:
 # Plotting functions have been moved to scripts/plot_metrics.py
 
 
-@hydra.main(version_base=None, config_path="../conf", config_name="collect_metrics_conf")
+@hydra.main(version_base=None, config_path="../conf/eval", config_name="collect_metrics_conf")
 def main(cfg: DictConfig) -> None:
     """Main function to collect and save metrics."""
     # Create output directory

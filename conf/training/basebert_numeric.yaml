@@ -9,7 +9,7 @@
 
 # Model identification
 model: #if huggingface repo is provided, this model will be loaded and fine-tuned directly
-tag: cxg # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
+tag: # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
 
 # Here are some defaults:
 embedding_method: null #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
@@ -47,8 +47,8 @@ adata_cache_dir: /scratch/local/menger/data/from_nxtcloud
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-  - id: "jo-mengr/cxg_pseudo_bulk_full_multiplets_natural_language_annotation_v3"
-    name: "cellxgene_pseudo_bulk_full"
+  - id: "jo-mengr/cxg_schaefer_full"
+    name: "cxg_full"
     type: "multiplets"
     caption: "natural_language_annotation"
     text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
@@ -61,20 +61,8 @@ omics_datasets:
         "negative_2_idx",
       ] # Columns to select from raw dataset
 
-  # - name: "cellxgene_pseudo_bulk_100k"
-  #   type: "multiplets"
-  #   caption: "cell_type"
-  #   text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
-  #   layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
-  #   index_column: sample_idx
-  #   keep_columns: [
-  #       "cell_sentence_1",
-  #       "positive",
-  #       "negative_1_idx",
-  #       "negative_2_idx",
-  #     ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
-  - id: "jo-mengr/geo_full_v2_multiplets_natural_language_annotation_v3"
+  - id: "jo-mengr/geo_schaefer_half"
     name: "geo_half"
     type: "multiplets"
     caption: "natural_language_annotation"
@@ -107,16 +95,13 @@ text_encoder:
   name: "NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings"
   freeze_text_encoder: True
   unfreeze_last_n_layers: 0
-#  model_kwargs:
-#    attn_implementation: "flash_attention_2"
-#    torch_dtype: "torch.float16"
+
 # Optional: Additional kwargs to pass to AutoModel.from_pretrained()
 # model_kwargs:
 #   attn_implementation: "flash_attention_2"
 #   torch_dtype: "auto"
 
-#loss: "MultipleNegativesRankingLoss"
-#loss: "ContrastiveLoss"
+#loss: "MultipleNegativesRankingLoss" #is the default loss function
 #evaluator: "TripletEvaluator" # If not provided, the default evaluator is used
 
 adapter: #each output of both models parts is passed through a separate adapter

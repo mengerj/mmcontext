@@ -9,14 +9,14 @@
 
 # Model identification
 model: #if huggingface repo is provided, this model will be loaded and fine-tuned directly
-tag: cxg_100k_genespecialtoken_delim # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
+tag:  # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
 
 # Here are some defaults:
 embedding_method: null #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
 
 # Gene processing configuration
-gene_special_token: "[GENE]" # Optional special token to add in front of each gene (e.g., "[GENE]")
-delimiter: "|" # Delimiter to use between tokens (default: " ")
+gene_special_token: "" # Optional special token to add in front of each gene (e.g., "[GENE]")
+delimiter: "" # Delimiter to use between tokens (default: " ")
 
 input_dim_map:
   hvg: 512
@@ -60,7 +60,8 @@ omics_datasets:
   #        "negative_2_idx",
   #      ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
-  - name: "cellxgene_pseudo_bulk_100k"
+  - id: "jo-mengr/cxg_schaefer_full"
+    name: "cxg_full"
     type: "multiplets"
     caption: "natural_language_annotation"
     text_only: true # Text-only dataset with truncation
@@ -71,31 +72,32 @@ omics_datasets:
     index_column: sample_idx
     keep_columns:
       ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
-#  - name: "geo_70k"
-#    type: "multiplets"
-#    caption: "natural_language_annotation"
-#    text_only: true  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
-#    layer_axis: "var"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
-#    gene_filter_strings: ["RPS", "RPL", "MT"]
-#    cs_length: 64 # Truncate cell sentences to 50 tokens
-#    cs_col: "cell_sentence_2" # Column to truncate
-#    index_column: sample_idx
-#    keep_columns:
-#      ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
+  - id: "jo-mengr/geo_schaefer_half"
+    name: "geo_half"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+    text_only: true  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+    layer_axis: "var"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+    gene_filter_strings: ["RPS", "RPL", "MT"]
+    cs_length: 64 # Truncate cell sentences to 50 tokens
+    cs_col: "cell_sentence_2" # Column to truncate
+    index_column: sample_idx
+    keep_columns:
+      ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
 
 # Bio datasets - biological background knowledge datasets (always processed as text-only)
 # - These do NOT have enc.prefix_ds applied (different data format)
 # - These do NOT get cell sentence truncation
 # - Use keep_columns to specify which columns to retain from the raw dataset
 bio_datasets:
-  - id: "jo-mengr/descriptions_genes"
-    name: "gene_description"
-    type: "multiplets"
-    revision: "hard_negatives"
-  - id: "jo-mengr/descriptions_cell_types"
-    name: "cell_type_description"
-    type: "multiplets"
-    revision: "hard_negatives"
+#  - id: "jo-mengr/descriptions_genes"
+#    name: "gene_description"
+#    type: "multiplets"
+#    revision: "hard_negatives"
+#  - id: "jo-mengr/descriptions_cell_types"
+#    name: "cell_type_description"
+#    type: "multiplets"
+#    revision: "hard_negatives"
 
 #test_datasets:
 #  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"

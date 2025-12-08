@@ -1,0 +1,11 @@
+- source: Qwen/Qwen3-Embedding-0.6B
+  name: Qwen3-Embedding-0.6B
+  text_only: true
+
+- source: sentence-transformers/all-MiniLM-L6-v2
+  name: all-MiniLM-L6-v2
+  text_only: true
+
+- source: NeuML/pubmedbert-base-embeddings
+  name: pubmedbert-base-embeddings
+  text_only: true

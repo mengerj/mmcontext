@@ -2,7 +2,7 @@
 # Combined configuration for embedding + evaluation pipeline
 defaults:
   - datasets: dataset_list.yaml
-  - models: model_list_omics_enc_dim2048_4.yaml
+  - models: model_list_cxg_geo_all.yaml
   - _self_
 
 # All pipeline and output settings
@@ -13,8 +13,8 @@ settings:
   task_timeout: 7200 # Maximum time (seconds) per dataset/model combination
 
   # Processing mode
-  skip_existing_embeddings: false # Skip embedding if files already exist
-  skip_existing_evaluations: false # Skip evaluation if eval directory already exists
+  skip_existing_embeddings: true # Skip embedding if files already exist
+  skip_existing_evaluations: true # Skip evaluation if eval directory already exists
 
   # CellWhisperer integration
   run_cellwhisperer: true # Enable CellWhisperer model processing alongside other models
@@ -32,10 +32,9 @@ settings:
 # Embedding-specific settings
 embed:
   seed: 42
-  n_rows: 50_000 # rows per dataset split
+  n_rows: 100_000 # rows per dataset split (subsetted if dataset size is larger)
   batch_size: 128
-  num_workers: 2
-  overwrite: false # if true, overwrite existing embeddings; if false, skip if files exist
+  num_workers: 0
 
 # Evaluation-specific settings
 eval:
@@ -52,7 +51,7 @@ eval:
   logit_scale: null # Ignored for standard models, auto-extracted for CellWhisperer
 
   # Evaluation mode settings
-  skip_plotting: true # If true, skip plotting
+  skip_plotting: true # If true, skip plotting (metrics will be combined and analysed later)
   plot_only: false # If true, skip computation and only regenerate plots from cached data
   skip_missing_cache: false # If true, skip datasets/models without cache when plot_only=true
 

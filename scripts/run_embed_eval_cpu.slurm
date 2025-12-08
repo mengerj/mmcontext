@@ -1,17 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=embed_array
+#SBATCH --job-name=combined_array
 #SBATCH --partition=slurm
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
-#SBATCH --time=48:00:00         # Max job time
-#SBATCH --array=1           # Array job: 1-2 with max 1 concurrent job (adjust %N for more parallel jobs)
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --time=72:00:00         # Max job time (3 days for combined pipeline)
+#SBATCH --array=1-3%3           # Array job
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_6")  # Add more model configs here as needed
-###!!! Adjust array size to the number of model configs!!!
+MODEL_CONFIGS=("model_list_cxg_geo_5")  # Add more model configs here as needed
+run_cellwhisperer=false
+final_root="/scratch/global/menger/mmcontext_out/2411_results"
 
 # Validate array task ID
 if [[ ${SLURM_ARRAY_TASK_ID} -gt ${#MODEL_CONFIGS[@]} ]]; then
@@ -46,41 +47,81 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # 1) Prepare output directory and log redirects
 # ─────────────────────────────────────────────────────────────────────────────
-BASE_OUT="outputs/$(date +%Y-%m-%d)/embeddings/${RUN_ID}"
+BASE_OUT="outputs/$(date +%Y-%m-%d)/combined/${RUN_ID}"
 mkdir -p "$BASE_OUT"
 
 # Redirect logs to the output directory (include model config in log names)
-exec 1>"$BASE_OUT"/embed_${MODEL_CONFIG}.out
-exec 2>"$BASE_OUT"/embed_${MODEL_CONFIG}.err
+exec 1>"$BASE_OUT"/combined_${MODEL_CONFIG}.out
+exec 2>"$BASE_OUT"/combined_${MODEL_CONFIG}.err
 
-###
-# 2. Set default overrides:
-#    These can be customized as needed
-#    Example: to force overwrite existing embeddings, add: run.overwrite=true
-###
+# ─────────────────────────────────────────────────────────────────────────────
+# 2) Path configuration will be handled by the configuration file
+# ─────────────────────────────────────────────────────────────────────────────
+
+echo "=== Path Configuration ==="
+echo "Paths will be determined by configuration file"
+echo "Base Output: $BASE_OUT"
 
 ###
 # 3. Activate environment
 ###
-echo "Starting embedding job with RUN_ID: $RUN_ID"
+echo "Starting combined embedding + evaluation job with RUN_ID: $RUN_ID"
 echo "Model Config: $MODEL_CONFIG"
 echo "Output directory: $BASE_OUT"
 source .venv/bin/activate
 echo "venv activated"
 
-#echo "installing flash-attn"#
+# Optional: Install flash-attn if needed (uncomment if required)
+#echo "installing flash-attn"
 #uv pip install ninja packaging wheel setuptools
 #uv pip install flash-attn==2.8.1 --no-build-isolation
 #echo "flash-attn installed"
 
 ###
-# 4. Run your training script with Hydra overrides
+# 4. Run the combined pipeline script with Hydra overrides
 ###
 
-python3 scripts/embed.py \
-    --config-path=../conf \
-    --config-name=embed_conf \
+python3 scripts/embed_eval.py \
+    --config-path=../conf/eval \
+    --config-name=embed_eval_conf \
     models=${MODEL_CONFIG} \
+    settings.run_cellwhisperer=${run_cellwhisperer} \
+    settings.final_root=${final_root} \
     ++hydra.run.dir="$BASE_OUT"
-    # Add run.overwrite=true to force overwrite existing embeddings
-    # Example: run.overwrite=true
+    # Add additional overrides as needed:
+    # settings.enable_parallel=true
+    # settings.max_workers=4
+    # embed.overwrite=true
+    # settings.skip_existing_evaluations=false
+
+###
+# 5. Cleanup: Remove computation directory if it's a temporary directory
+###
+
+# Extract computation root from the configuration
+COMPUTATION_ROOT=$(python3 -c "
+import sys
+sys.path.append('.')
+from hydra import compose, initialize_config_dir
+from pathlib import Path
+import os
+
+# Initialize Hydra with the config directory
+config_dir = Path.cwd() / 'conf'
+with initialize_config_dir(config_dir=str(config_dir), version_base=None):
+    cfg = compose(config_name='combined_conf', overrides=['models=${MODEL_CONFIG}'])
+    print(cfg.settings.computation_root)
+")
+
+echo "Computation root from config: $COMPUTATION_ROOT"
+
+# Only clean up if it's a local directory (contains /local/)
+if [[ "$COMPUTATION_ROOT" == */local/* ]]; then
+    echo "Cleaning up temporary computation directory: $COMPUTATION_ROOT"
+    rm -rf "$COMPUTATION_ROOT"
+    echo "Cleanup completed"
+else
+    echo "Computation directory is not temporary, skipping cleanup: $COMPUTATION_ROOT"
+fi
+
+echo "Combined pipeline job completed for model config: $MODEL_CONFIG"

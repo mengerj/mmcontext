@@ -472,7 +472,7 @@ def combined_pipeline(cfg: DictConfig) -> None:
     print("\n=== Combined pipeline completed ===")
 
 
-@hydra.main(config_path="../conf", config_name="combined_conf")
+@hydra.main(config_path="../conf/eval", config_name="embed_eval_conf")
 def main(cfg: DictConfig) -> None:
     """Entry point launched by Hydra."""
     combined_pipeline(cfg)
