@@ -1,0 +1,29 @@
+- source: jo-mengr/mmcontext-pubmedbert-geneformer
+  name: geneformer
+  text_only: false
+  layer_key: X_geneformer
+
+- source: jo-mengr/mmcontext-pubmedbert-geneformer-v1
+  name: geneformer-v1
+  text_only: false
+  layer_key: X_geneformer-v1
+
+- source: jo-mengr/mmcontext-pubmedbert-scvi_fm
+  name: scvi_fm
+  text_only: false
+  layer_key: X_scvi_fm
+
+- source: jo-mengr/mmcontext-pubmedbert-pca
+  name: pca
+  text_only: false
+  layer_key: X_pca
+
+- source: jo-mengr/mmcontext-pubmedbert-gs10k
+  name: gs10k
+  text_only: false
+  layer_key: X_gs10k
+
+- source: jo-mengr/mmcontext-pubmedbert-cell_sentences
+  name: cell_sentences
+  text_only: true
+  layer_key: null

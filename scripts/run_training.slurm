@@ -42,7 +42,7 @@ venv_path="/scratch/local/menger/mmcontext_venv/"
 # Optional command-line overrides
 # These can be set as environment variables to override config file values
 MODEL=null
-EMBEDDING_METHOD=cw-geneformer
+EMBEDDING_METHOD=scvi_fm
 TEXT_ENCODER_NAME="${TEXT_ENCODER_NAME:-}"
 
 # Validate that config file exists

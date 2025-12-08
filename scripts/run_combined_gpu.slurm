@@ -10,8 +10,8 @@
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_cxg_geo_1")  # Add more model configs here as needed
-run_cellwhisperer=true
+MODEL_CONFIGS=("model_list_cxg_geo_6")  # Add more model configs here as needed
+run_cellwhisperer=false
 final_root="/scratch/global/menger/mmcontext_out/2411_results"
 
 # Validate array task ID

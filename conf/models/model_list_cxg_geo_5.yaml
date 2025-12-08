@@ -1,0 +1,4 @@
+- source: jo-mengr/mmcontext-pubmedbert-gs10k
+  name: gs10k
+  text_only: false
+  layer_key: X_gs10k

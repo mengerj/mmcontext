@@ -10,7 +10,7 @@
 # Configuration: Model config files directory
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="conf/models"
-MODEL_CONFIGS=("model_list_cxg_geo_2" "model_list_cxg_geo_3" "model_list_cxg_geo_4")  # Add more model configs here as needed
+MODEL_CONFIGS=("model_list_cxg_geo_5")  # Add more model configs here as needed
 run_cellwhisperer=false
 final_root="/scratch/global/menger/mmcontext_out/2411_results"
 

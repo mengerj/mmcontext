@@ -1,4 +1,4 @@
-- source: jo-mengr/mmcontext-pubmedbert-pca-cxg_test
+- source: jo-mengr/mmcontext-pubmedbert-pca
   name: pca
   text_only: false
   layer_key: X_pca

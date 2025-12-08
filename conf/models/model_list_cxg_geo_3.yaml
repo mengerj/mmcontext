@@ -1,4 +1,4 @@
-- source: jo-mengr/mmcontext-pubmedbert-scvi_fm-cxg_test
+- source: jo-mengr/mmcontext-pubmedbert-scvi_fm
   name: scvi_fm
   text_only: false
   layer_key: X_scvi_fm
