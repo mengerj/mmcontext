@@ -106,4 +106,3 @@ echo "Source: $SOURCE_DIR"
 echo "Destination: ${REMOTE_HOST}:${REMOTE_TARGET_DIR}/$(basename "$SOURCE_DIR")"
 echo "Finished: $(date)"
 echo "=========================================="
-

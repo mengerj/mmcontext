@@ -41,18 +41,18 @@ auto_push_processed_datasets: true
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-#  - name: "cellxgene_pseudo_bulk_100k"
-#    type: "multiplets"
-#    caption: "natural_language_annotation"
-#    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
-#    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
-#   index_column: sample_idx
-#    keep_columns: [
-#        "cell_sentence_1",
-#        "positive",
-#        "negative_1_idx",
-#        "negative_2_idx",
-#      ] # Columns to select from raw dataset
+  #  - name: "cellxgene_pseudo_bulk_100k"
+  #    type: "multiplets"
+  #    caption: "natural_language_annotation"
+  #    text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
+  #    layer_axis: "obs" # "obs" for cell-based embeddings, "var" for gene-based embeddings (default: "obs")
+  #   index_column: sample_idx
+  #    keep_columns: [
+  #        "cell_sentence_1",
+  #        "positive",
+  #        "negative_1_idx",
+  #        "negative_2_idx",
+  #      ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
   - name: "cellxgene_pseudo_bulk_100k"
     type: "multiplets"
@@ -66,31 +66,31 @@ omics_datasets:
     keep_columns:
       ["cell_sentence_3", "cell_sentence_4", "negative_1_idx", "negative_2_idx"]
     positive_col: "cell_sentence_4"
- # - name: "geo_70k"
- #   type: "multiplets"
- #   caption: "natural_language_annotation"
- #   text_only: true  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
- #   layer_axis: "var"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
- #   gene_filter_strings: ["RPS", "RPL", "MT"]
+  # - name: "geo_70k"
+  #   type: "multiplets"
+  #   caption: "natural_language_annotation"
+  #   text_only: true  # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+  #   layer_axis: "var"  # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+  #   gene_filter_strings: ["RPS", "RPL", "MT"]
   #  cs_length: 64 # Truncate cell sentences to 50 tokens
   #  cs_col: "cell_sentence_2" # Column to truncate
   #  index_column: sample_idx
- #   keep_columns: 
- #     ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
+  #   keep_columns:
+  #     ["cell_sentence_2", "positive", "negative_1_idx", "negative_2_idx"]
 
 # Bio datasets - biological background knowledge datasets (always processed as text-only)
 # - These do NOT have enc.prefix_ds applied (different data format)
 # - These do NOT get cell sentence truncation
 # - Use keep_columns to specify which columns to retain from the raw dataset
 bio_datasets:
- # - id: "jo-mengr/descriptions_genes"
- #   name: "gene_description"
- #   type: "multiplets"
- #   revision: "hard_negatives"
- # - id: "jo-mengr/descriptions_cell_types"
- #   name: "cell_type_description"
- #   type: "multiplets"
- #   revision: "hard_negatives"
+  # - id: "jo-mengr/descriptions_genes"
+  #   name: "gene_description"
+  #   type: "multiplets"
+  #   revision: "hard_negatives"
+  # - id: "jo-mengr/descriptions_cell_types"
+  #   name: "cell_type_description"
+  #   type: "multiplets"
+  #   revision: "hard_negatives"
 
 #test_datasets:
 #  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"
