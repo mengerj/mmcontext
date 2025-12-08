@@ -717,6 +717,7 @@ def create_model_legend(
     plot_format: str = "png",
     font_size: int = 12,
     ncol: int = 1,
+    model_order: list = None,
 ) -> None:
     """
     Create a separate legend image for models.
@@ -733,9 +734,22 @@ def create_model_legend(
         Font size for legend text
     ncol : int
         Number of columns in the legend (1 = vertical, >1 = horizontal)
+    model_order : list, optional
+        List of model names in desired order. Models not in this list will be
+        sorted alphabetically and appended at the end.
     """
     # Create a new figure just for the legend
-    unique_models = sorted(model_color_dict.keys())
+    # Apply model order if provided, otherwise sort alphabetically
+    if model_order is not None and len(model_order) > 0:
+        # Create order dict for efficient lookup
+        order_dict = {model: i for i, model in enumerate(model_order)}
+
+        # Sort models based on model_order
+        unique_models = sorted(
+            model_color_dict.keys(), key=lambda m: (order_dict[m], "") if m in order_dict else (9999, m)
+        )
+    else:
+        unique_models = sorted(model_color_dict.keys())
 
     # Adjust figure size based on orientation
     if ncol == 1:
@@ -790,6 +804,7 @@ def create_dataset_pair_scatter_plots(
     legend_ncol: int = 1,
     point_size: float = 150,
     scatter_plot_metrics: list = None,
+    model_order: list = None,
 ) -> None:
     """
     Create scatter plots comparing accuracy between pairs of datasets.
@@ -822,6 +837,9 @@ def create_dataset_pair_scatter_plots(
     scatter_plot_metrics : list, optional
         List of metrics to create scatter plots for. If None, creates plots for all metrics.
         Can specify either base metric names (e.g., "accuracy") or combined metric names (e.g., "accuracy_bio").
+    model_order : list, optional
+        List of model names in desired order. Models not in this list will be
+        sorted alphabetically and appended at the end.
     """
     if accuracy_data.empty:
         print("No accuracy data available for scatter plots")
@@ -890,7 +908,19 @@ def create_dataset_pair_scatter_plots(
     # Only create color mapping and legend if show_labels is True
     model_color_dict = {}
     if show_labels:
-        all_models = sorted(accuracy_data["model_name"].unique())
+        # Apply model order if provided, otherwise sort alphabetically
+        if model_order is not None and len(model_order) > 0:
+            # Create order dict for efficient lookup
+            order_dict = {model: i for i, model in enumerate(model_order)}
+
+            # Sort models based on model_order
+            all_models = sorted(
+                accuracy_data["model_name"].unique(),
+                key=lambda m: (order_dict[m], "") if m in order_dict else (9999, m),
+            )
+        else:
+            all_models = sorted(accuracy_data["model_name"].unique())
+
         # Use Set2 palette - distinct colors different from typical UMAP colors
         # Set2 works well for up to 8 categories, cycles for more
         # This avoids colors like yellow, grey, red, brown, green, orange, cyan, blue, purple, pink
@@ -904,7 +934,7 @@ def create_dataset_pair_scatter_plots(
         model_color_dict = dict(zip(all_models, model_colors, strict=False))
 
         # Create separate legend file for models (save in main output_dir, will be shared across metrics)
-        create_model_legend(model_color_dict, output_dir, plot_format, font_size, legend_ncol)
+        create_model_legend(model_color_dict, output_dir, plot_format, font_size, legend_ncol, model_order)
 
     # Process each combined metric separately (this handles different label_kinds)
     for combined_metric in unique_combined_metrics:
@@ -1010,11 +1040,11 @@ def create_dataset_pair_scatter_plots(
             if baseline_value2 is not None:
                 ax.axhline(
                     y=baseline_value2,
-                    color="gray",
+                    color="black",
                     linestyle="--",
                     linewidth=2,
-                    alpha=0.6,
-                    zorder=1,
+                    alpha=0.8,
+                    zorder=2,
                     label=f"{dataset2} baseline",
                 )
 
@@ -1022,11 +1052,11 @@ def create_dataset_pair_scatter_plots(
             if baseline_value1 is not None:
                 ax.axvline(
                     x=baseline_value1,
-                    color="gray",
+                    color="black",
                     linestyle="--",
                     linewidth=2,
-                    alpha=0.6,
-                    zorder=1,
+                    alpha=0.8,
+                    zorder=2,
                     label=f"{dataset1} baseline",
                 )
 
@@ -1048,8 +1078,8 @@ def create_dataset_pair_scatter_plots(
             safe_name2 = dataset2.replace(" ", "_").replace("/", "_")
             # safe_metric = combined_metric.replace(" ", "_").replace("/", "_")
 
-            # Add grid
-            ax.grid(True, alpha=0.3, zorder=0)
+            # Add grid at tick positions (grey, behind everything else)
+            ax.grid(True, color="grey", alpha=0.3, linestyle="-", linewidth=1.0, zorder=0, which="both")
 
             # Set equal aspect ratio (1:1) so diagonal comparisons are fair
             # But allow for different axis ranges
@@ -1312,6 +1342,7 @@ def plot_metrics(
             scatter_legend_ncol,
             scatter_point_size,
             scatter_plot_metrics,
+            model_order,
         )
     else:
         print("\nNo data available for scatter plots (scatter_plot_metrics may not match any available metrics)")

@@ -529,8 +529,6 @@ def download_and_extract_links(
         # Handle local paths directly
         if _is_local_path(link):
             local_path = Path(link).resolve()
-            # replace /global with /local #quick fix
-            local_path = local_path.replace("/global/", "/local/")
             logger.info(f"Using local path: {local_path}")
             out_map[link] = local_path
             continue

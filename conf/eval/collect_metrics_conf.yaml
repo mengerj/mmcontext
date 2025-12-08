@@ -11,11 +11,13 @@ collect_metrics:
   output_dir: "${hydra:runtime.cwd}/out/2411_results_collected_metrics"
 
   model_order:
-    - "geneformer-v1"
-    - "geneformer" # First model
-    - "scvi" # Second model
-    - "pca" # Third model
-    - "gs10k" #
+    - "gs10k"
+    - "pca" # First model
+    - "scvi_fm" # Second model
+    - "geneformer" # Third model
+    - "geneformer-v1" #
+    - "cell sentences"
+    - "cellwhisperer"
 
   # Visualization settings
   plot_format: "svg" # Options: "png", "pdf", "svg"

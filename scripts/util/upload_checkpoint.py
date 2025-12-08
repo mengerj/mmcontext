@@ -26,9 +26,8 @@ load_dotenv()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Load a model from a checkpoint and upload it to Hugging Face Hub"
-    )
+    """Helper function to upload a model from a checkpoint to Hugging Face Hub."""
+    parser = argparse.ArgumentParser(description="Load a model from a checkpoint and upload it to Hugging Face Hub")
     parser.add_argument(
         "--load-dir",
         type=str,
@@ -165,8 +164,8 @@ def main():
         logger.error(f"Failed to upload model to Hub: {e}")
         logger.error(f"Model has been prepared locally at: {prepared_model_dir}")
         logger.error("You can push it manually using:")
-        logger.error(f"  from huggingface_hub import HfApi")
-        logger.error(f"  api = HfApi()")
+        logger.error("  from huggingface_hub import HfApi")
+        logger.error("  api = HfApi()")
         logger.error(f"  api.create_repo(repo_id='{args.repo_id}', private={private}, exist_ok=True)")
         logger.error(f"  api.upload_folder(folder_path='{prepared_model_dir}', repo_id='{args.repo_id}')")
         sys.exit(1)
@@ -174,4 +173,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
