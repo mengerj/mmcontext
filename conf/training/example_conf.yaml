@@ -9,7 +9,7 @@
 
 # Model identification
 model: #if huggingface repo is provided, this model will be loaded and fine-tuned directly
-tag: cxg_test # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
+tag: cxg_geo_tiny # Optional custom tag to append to model name (e.g., "experiment1", "ablation_study")
 
 # Here are some defaults:
 embedding_method: scvi_fm #This refers to the precomputed "embeddings" in .obsm of the anndata object accessible throgh the sharelink in the dataset
@@ -50,7 +50,8 @@ push_to_hub: false
 # - If text_only=true: cell sentences are truncated (if cs_length and cs_col specified) and processed as text, no prefixes added
 # - If text_only=false: numeric embeddings are loaded FIRST (needs raw dataset), then prefixes are added to specified columns
 omics_datasets:
-  - name: "cellxgene_pseudo_bulk_10k"
+  - id: "jo-mengr/cxg_schaefer_tiny"
+    name: "cxg_tiny"
     type: "multiplets"
     caption: "natural_language_annotation"
     text_only: false # If true, process this dataset as text-only (cell sentences); if false, use numeric embeddings
@@ -63,22 +64,15 @@ omics_datasets:
         "negative_2_idx",
       ] # Columns to select from raw dataset
   # cs_length and cs_col not needed for non-text_only datasets
-  # - name: "cellxgene_pseudo_bulk_10k"
-  #   type: "multiplets"
-  #   caption: "natural_language_annotation"
-  #   text_only: false # Text-only dataset with truncation
-  #   layer_axis: "obs" #needed to use gene names and not sample ids
-  #    index_column: sample_idx
-  #    keep_columns:
-  #      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
-  #- name: "geo_7k"
-  #  type: "multiplets"
-  # caption: "natural_language_annotation"
-  # text_only: false # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
-  # layer_axis: "obs" # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
-  # index_column: sample_idx
-  # keep_columns:
-  #   ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
+  - id: "jo-mengr/geo_schaefer_tiny"
+    name: "geo_tiny"
+    type: "multiplets"
+    caption: "natural_language_annotation"
+    text_only: false # This dataset would use numeric embeddings (e.g., geneformer, pca, etc.)
+    layer_axis: "obs" # Use "var" for gene-based embeddings (cell_sentence_2 contains gene names, but these also need to be the indices in adata.var.index for this to work)
+    index_column: sample_idx
+    keep_columns:
+      ["cell_sentence_1", "positive", "negative_1_idx", "negative_2_idx"]
 
 # Bio datasets - biological background knowledge datasets (always processed as text-only)
 # - These do NOT have enc.prefix_ds applied (different data format)
@@ -97,11 +91,6 @@ bio_datasets:
 #    name: "ncbi"
 #    type: "multiplets"
 #    revision: "main" #also contains hard negatives
-
-#test_datasets:
-#  - name: "jo-mengr/human_pancreas_norm_complexBatch_single_no_caption"
-#    type: "single"
-# Add more test datasets as needed
 
 text_encoder:
   name: "NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings" #"NeuML/pubmedbert-base-embeddings"
@@ -122,7 +111,7 @@ text_encoder:
 adapter: #each output of both models parts is passed through a separate adapter
   omics_input_dim: #this will be overwritten by the embedding_dim_map
   hidden_dim: null
-  output_dim: 2048
+  output_dim: 512
   use_text_adapter: true # Whether to create an adapter for the text encoder. If false, text encoder output dimension must match adapter_output_dim
 
 joint_adapter: #if desired, the outputs of both models parts are passed through a joint adapter after the seperate adapters.
@@ -140,11 +129,11 @@ trainer:
   fp16: false
   bf16: false
   eval_strategy: "steps"
-  eval_steps: 100
+  eval_steps: 200
   save_strategy: "steps"
   save_steps: 2000
   save_total_limit: 2
-  logging_steps: 10
+  logging_steps: 50
   logging_first_step: True
   dataloader_num_workers: 0
   max_grad_norm: 1.0
