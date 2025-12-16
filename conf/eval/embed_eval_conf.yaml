@@ -17,13 +17,13 @@ settings:
   skip_existing_evaluations: true # Skip evaluation if eval directory already exists
 
   # CellWhisperer integration
-  run_cellwhisperer: true # Enable CellWhisperer model processing alongside other models
-  cellwhisperer_modules_dir: /home/menger/git/mmcontext/modules # Directory where CellWhisperer will be installed
+  run_cellwhisperer: false # Enable CellWhisperer model processing alongside other models
+  cellwhisperer_modules_dir: modules # Directory where CellWhisperer will be installed
   # Output paths
-  computation_root: /scratch/local/menger/mmcontext_out/0411_computation # Fast/local storage for embeddings (will be cleaned up)
-  final_root: /scratch/global/menger/mmcontext_out/0411_results # Long-term storage for evaluation results
-  adata_cache: /scratch/local/menger/data/from_nxtcloud # AnnData cache directory
-  hf_cache: /scratch/local/menger/cache/huggingface # HuggingFace cache directory
+  computation_root: mmcontext_out/0411_computation # Fast/local storage for embeddings (will be cleaned up)
+  final_root: mmcontext_out/0411_results # Long-term storage for evaluation results
+  adata_cache: data/from_nxtcloud # AnnData cache directory
+  hf_cache: cache/huggingface # HuggingFace cache directory
   output_format: parquet # csv | parquet
 
   # SLURM settings
@@ -35,6 +35,7 @@ embed:
   n_rows: 100_000 # rows per dataset split (subsetted if dataset size is larger)
   batch_size: 128
   num_workers: 0
+  overwrite: false # Overwrite existing embeddings
 
 # Evaluation-specific settings
 eval:
