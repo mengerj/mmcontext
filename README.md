@@ -71,10 +71,12 @@ To reproduce results from the paper, clone the repository and install in editabl
 git clone https://github.com/mengerj/mmcontext.git
 cd mmcontext
 
-# Using uv (recommended)
-uv pip install -e .
+# Create a virtual environment (however you like)
+# eg. with venv
+python -m venv mmcontext
+source mmcontext/bin/activate
 
-# Or using pip
+# And install the package with pip
 pip install -e .
 ```
 
