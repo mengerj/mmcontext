@@ -120,15 +120,21 @@ Once training is complete, the finished models will be automatically uploaded to
 
 Figure 1D of the paper investigates the latent space of one model in detail. This can be recreated with the [`evaluate_model.ipynb`](tutorials/evaluate_model.ipynb) notebook.
 
-For Figure 1E, we evaluate several models on multiple datasets, with the [`scripts/embed_eval.py`](scripts/combined_pipeline.py) script. This runs both inference and evaluation pipelines in sequence.
+For Figure 1E, we evaluate several models on multiple datasets, with the [`scripts/embed_eval.py`](scripts/embed_eval.py) script. This runs both inference and evaluation pipelines in sequence.
 
-The combined pipeline is configured using [`embed_eval_conf.yaml`](conf/eval/combined_conf.yaml), which inherits from dataset and model configuration files that list the datasets and models to be evaluated. The configuration file contains additional parameters that are explained in the comments within the file itself.
-The models and datasets evaluated in the paper are referenced in [model_list_cxg_geo_all.yaml](conf/models/model_list_cxg_geo_all.yaml) and [dataset_list.yaml](conf/datasets/dataset_list.yaml). These configs are imported in [embed_eval_conf.yaml](conf/eval/combined_conf.yaml). To jointly embed data and evaluate with CellWhisperer, set `run_cellwhisperer: true`. It is highly recommended to use CUDA for CellWhisperer. The mmcontext models also run in reasonable time on MPS or CPU.
+The combined pipeline is configured using [`embed_eval_conf.yaml`](conf/eval/embed_eval_conf.yaml), which inherits from dataset and model configuration files that list the datasets and models to be evaluated. The configuration file contains additional parameters that are explained in the comments within the file itself.
+The models and datasets evaluated in the paper are referenced in [model_list_cxg_geo_all.yaml](conf/models/model_list_cxg_geo_all.yaml) and [dataset_list.yaml](conf/datasets/dataset_list.yaml). These configs are imported in [embed_eval_conf.yaml](conf/eval/embed_eval_conf.yaml). To jointly embed data and evaluate with CellWhisperer, set `run_cellwhisperer: true`. It is highly recommended to use CUDA for CellWhisperer. The mmcontext models also run in reasonable time on MPS or CPU.
 
-For HPC systems, you can run the combined pipeline as array jobs using [`scripts/run_combined_cpu.slurm`](scripts/run_combined_cpu.slurm):
+Run it locally with
 
 ```bash
-sbatch scripts/run_combined_cpu.slurm
+python scripts/embed_eval.py
+```
+
+For HPC systems, you can run the combined pipeline as array jobs using [`scripts/run_combined_cpu.slurm`](scripts/run_embed_eval_cpu.slurm):
+
+```bash
+sbatch scripts/run_embed_eval_cpu.slurm
 ```
 
 This allows you to process multiple model configurations in parallel across different array job tasks, by spreading the models across several config files and passing them as a list to the array job.
