@@ -87,7 +87,7 @@ Try a small training run with
 python scripts/train.py --config-name example_conf
 ```
 
-Inspect the config at [`example_conf.yaml`](conf/training/example_conf). The configs to train the models presented in the paper, are [`basebert_numeric`](conf/training/basebert_numeric.yaml), for all models using numeric initial representations and [`basebert_text.yaml`](conf/training/basebert_text.yaml) for the model using cell_sentences (text only). All datasets used in training are hosted publically on the huggingface hub (with references to zenodo), therefore the training scripts can be launched without manually downloading any data.
+Inspect the config at [`example_conf.yaml`](conf/training/example_conf.yaml). The configs to train the models presented in the paper, are [`basebert_numeric`](conf/training/basebert_numeric.yaml), for all models using numeric initial representations and [`basebert_text.yaml`](conf/training/basebert_text.yaml) for the model using cell_sentences (text only). All datasets used in training are hosted publically on the huggingface hub (with references to zenodo), therefore the training scripts can be launched without manually downloading any data.
 
 For HPC systems with CUDA support, the recommended approach is to use the [`scripts/run_training.slurm`](scripts/run_training.slurm) SLURM script to launch training jobs. Training also works on CPU or MPS devices if CUDA is not available.
 
