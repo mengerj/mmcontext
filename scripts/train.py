@@ -39,6 +39,77 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
+def get_hf_token() -> str | None:
+    """
+    Get HuggingFace token from environment variables or cached credentials.
+
+    Returns
+    -------
+    str | None
+        The HuggingFace token if found, None otherwise.
+    """
+    # Try environment variables first
+    token = os.getenv("HF_TOKEN_UPLOAD") or os.getenv("HF_TOKEN")
+    if token:
+        return token
+
+    # Fall back to cached token from CLI login
+    try:
+        return HfFolder.get_token()
+    except Exception:
+        return None
+
+
+def get_hf_username() -> str:
+    """
+    Auto-detect HuggingFace username from token or CLI login.
+
+    Tries the following in order:
+    1. HF_TOKEN_UPLOAD environment variable
+    2. HF_TOKEN environment variable
+    3. Cached credentials from `huggingface-cli login`
+
+    Returns
+    -------
+    str
+        The username associated with the authenticated HuggingFace account.
+
+    Raises
+    ------
+    ValueError
+        If no valid authentication is found or the token is invalid.
+    """
+    from huggingface_hub.errors import LocalTokenNotFoundError
+
+    api = HfApi()
+    token = get_hf_token()
+
+    try:
+        # whoami() will use the provided token, or fall back to cached credentials
+        user_info = api.whoami(token=token)
+        # user_info can be a dict with 'name' key for user accounts
+        # or 'name' for organization tokens
+        if isinstance(user_info, dict):
+            username = user_info.get("name")
+            if username:
+                logger.info(f"Auto-detected HuggingFace username: {username}")
+                return username
+            else:
+                raise ValueError(f"Could not extract username from HuggingFace API response. Response: {user_info}")
+        else:
+            raise ValueError(f"Unexpected response type from whoami(): {type(user_info)}")
+    except LocalTokenNotFoundError:
+        raise ValueError(
+            "No HuggingFace authentication found. Please either:\n"
+            "1. Set HF_TOKEN or HF_TOKEN_UPLOAD environment variable, or\n"
+            "2. Run 'huggingface-cli login' to authenticate"
+        ) from None
+    except Exception as e:
+        raise ValueError(
+            f"Failed to get HuggingFace username: {e}\nPlease check your HuggingFace token is valid."
+        ) from e
+
+
 def resolve_torch_dtype_strings(kwargs_dict: dict) -> dict:
     """
     Resolve string representations of torch dtypes to actual torch objects.
@@ -84,7 +155,7 @@ def resolve_torch_dtype_strings(kwargs_dict: dict) -> dict:
     return resolved
 
 
-def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
+def check_model_exists(model_name: str, username: str | None = None) -> bool:
     """
     Check if a model already exists on Hugging Face Hub.
 
@@ -93,7 +164,8 @@ def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
     model_name : str
         Name of the model to check
     username : str, optional
-        Username/organization on Hugging Face Hub (default: "jo-mengr")
+        Username/organization on Hugging Face Hub. If None, auto-detects from
+        HF_TOKEN_UPLOAD, HF_TOKEN environment variables, or cached credentials.
 
     Returns
     -------
@@ -101,6 +173,8 @@ def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
         True if the model exists, False otherwise
     """
     try:
+        if username is None:
+            username = get_hf_username()
         api = HfApi()
         full_model_name = f"{username}/{model_name}"
         # Try to get model info - if it exists, this won't raise an error
@@ -113,7 +187,7 @@ def check_model_exists(model_name: str, username: str = "jo-mengr") -> bool:
 
 def generate_unique_model_name(
     cfg: DictConfig,
-    username: str = "jo-mengr",
+    username: str | None = None,
 ) -> str:
     """
     Generate a unique model name, appending version numbers if needed.
@@ -123,7 +197,8 @@ def generate_unique_model_name(
     cfg : DictConfig
         Configuration object containing model settings
     username : str, optional
-        Username/organization on Hugging Face Hub (default: "jo-mengr")
+        Username/organization on Hugging Face Hub. If None, auto-detects from
+        HF_TOKEN_UPLOAD, HF_TOKEN environment variables, or cached credentials.
 
     Returns
     -------
@@ -132,6 +207,10 @@ def generate_unique_model_name(
     """
     # Generate base model name
     base_name = generate_model_name(cfg)
+
+    # Get username (auto-detect if not provided)
+    if username is None:
+        username = get_hf_username()
 
     # Check if base name is available
     if not check_model_exists(base_name, username):
@@ -1113,7 +1192,9 @@ def main(cfg: DictConfig):
             tutorial_notebook_path = Path("templates/usage_tutorial.ipynb")
             notebook_path = tutorial_notebook_path if tutorial_notebook_path.exists() else None
 
-            repo_id = f"jo-mengr/{unique_model_name}"
+            # Get HuggingFace username (auto-detected from token or CLI login)
+            hf_username = get_hf_username()
+            repo_id = f"{hf_username}/{unique_model_name}"
 
             # Always prepare the model locally first (with all metadata, model card, etc.)
             logger.info("Preparing model for Hub upload (creating model card, metadata, etc.)...")
