@@ -20,10 +20,10 @@ settings:
   run_cellwhisperer: false # Enable CellWhisperer model processing alongside other models
   cellwhisperer_modules_dir: modules # Directory where CellWhisperer will be installed
   # Output paths
-  computation_root: mmcontext_out/0411_computation # Fast/local storage for embeddings (will be cleaned up)
-  final_root: mmcontext_out/0411_results # Long-term storage for evaluation results
-  adata_cache: data/from_nxtcloud # AnnData cache directory
-  hf_cache: cache/huggingface # HuggingFace cache directory
+  computation_root: ${hydra:runtime.cwd}/mmcontext_out/0411_computation # Fast/local storage for embeddings (will be cleaned up)
+  final_root: ${hydra:runtime.cwd}/mmcontext_out/0411_results # Long-term storage for evaluation results
+  adata_cache: ${hydra:runtime.cwd}/data/from_nxtcloud # AnnData cache directory
+  hf_cache: ${hydra:runtime.cwd}/cache/huggingface # HuggingFace cache directory
   output_format: parquet # csv | parquet
 
   # SLURM settings
