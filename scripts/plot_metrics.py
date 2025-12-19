@@ -1511,7 +1511,7 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
     print(f"\nPlotting completed! Check output directory: {plots_output_dir}")
 
 
-@hydra.main(version_base=None, config_path="../conf", config_name="collect_metrics_conf")
+@hydra.main(version_base=None, config_path="../conf/eval", config_name="collect_metrics_conf")
 def main(cfg: DictConfig) -> None:
     """Main function using Hydra configuration."""
     plot_metrics_from_config(cfg)
