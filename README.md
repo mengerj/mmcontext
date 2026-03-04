@@ -10,7 +10,9 @@ Align embeddings across multiple modalities using context-aware embeddings at th
 
 ## Paper
 
-**mmcontext** is described in detail in our paper (citation to be added upon publication). If you use **mmcontext** in your research, please cite our work.
+**mmcontext** is described in detail in our paper: 
+Menger, Jonatan, Sonia Maria Krissmer, Clemens Kreutz, Harald Binder, and Maren Hackenberg. "mmContext: an open framework for multimodal contrastive learning of omics and text data." bioRxiv (2025): 2025-12.
+If you use **mmcontext** in your research, please cite our work.
 
 ## Overview
 
