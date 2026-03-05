@@ -44,11 +44,19 @@ collect_metrics:
     - "LabelSimilarity/random_baseline_accuracy"
     - "LabelSimilarity/accuracy"
     - "LabelSimilarity/balanced_accuracy"
+    - "LabelSimilarity/macro_f1"
+    - "LabelSimilarity/topk_accuracy@1"
+    - "LabelSimilarity/topk_accuracy@3"
+    - "LabelSimilarity/topk_accuracy@5"
+    - "LabelSimilarity/mrr"
     # Add more as needed
 
   # Accuracy metrics that should be plotted with baseline overlay
   accuracy_metrics:
     - "LabelSimilarity/accuracy"
+    - "LabelSimilarity/topk_accuracy@1"
+    - "LabelSimilarity/topk_accuracy@3"
+    - "LabelSimilarity/topk_accuracy@5"
     # Add more accuracy metrics as needed
 
   # Baseline accuracy metric name (will be overlaid as dotted lines on accuracy plots)
