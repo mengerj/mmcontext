@@ -302,6 +302,8 @@ def run_cellwhisperer_processing(
 
         # Setup device
         pl_model, model, logit_scale, device, recommended_batch_size = setup_device(pl_model)
+        logit_scale_value = float(logit_scale.detach().cpu().item())
+        logger.info(f"✓ Extracted logit_scale: {logit_scale_value}")
 
         # Use provided batch size or recommended
         final_batch_size = batch_size if batch_size > 0 else recommended_batch_size
@@ -364,6 +366,7 @@ def run_cellwhisperer_processing(
             "embeddings_df": embeddings_df,
             "similarity_results": similarity_results,
             "label_embeddings_results": label_embeddings_results,
+            "logit_scale": logit_scale_value,
             "success": True,
             "error": None,
             "device": str(device),

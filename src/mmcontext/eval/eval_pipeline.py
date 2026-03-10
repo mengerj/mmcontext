@@ -23,14 +23,65 @@ for m in pkgutil.walk_packages(ev_pkg.__path__, prefix=ev_pkg.__name__ + "."):
 logger = logging.getLogger(__name__)
 
 
-def _extract_cellwhisperer_logit_scale(modules_dir: Path, hf_cache: str = None) -> float | None:
+def _find_project_root(marker_name: str = "mmcontext") -> Path | None:
     """
-    Extract logit_scale from CellWhisperer model.
+    Best-effort project root discovery.
+
+    This is used to locate default cache directories when Hydra changes CWD.
+    """
+    try:
+        cur = Path.cwd().resolve()
+        while True:
+            if cur.name == marker_name:
+                return cur
+            if cur.parent == cur:
+                return None
+            cur = cur.parent
+    except Exception:
+        return None
+
+
+def _default_hf_cache_dir() -> Path | None:
+    """
+    Default HF cache path used by this repo: <project_root>/cache/huggingface.
+    """
+    root = _find_project_root()
+    if root is None:
+        return None
+    return root / "cache" / "huggingface"
+
+
+def _read_cellwhisperer_logit_scale_from_emb_dir(emb_dir: Path) -> float | None:
+    """
+    Read logit_scale persisted during CellWhisperer embedding generation.
+
+    Expected file: emb_dir/cellwhisperer_meta.json with {"logit_scale": <float>}.
+    """
+    meta_path = emb_dir / "cellwhisperer_meta.json"
+    if not meta_path.exists():
+        return None
+
+    try:
+        import json
+
+        payload = json.loads(meta_path.read_text())
+        val = payload.get("logit_scale")
+        if val is None:
+            return None
+        return float(val)
+    except Exception as e:
+        logger.warning(f"Failed reading {meta_path} for logit_scale: {e}")
+        return None
+
+
+def _extract_cellwhisperer_logit_scale(modules_dir: Path, hf_cache: str | None = None) -> float | None:
+    """
+    Extract logit_scale from CellWhisperer checkpoint **without** importing CellWhisperer.
 
     Parameters
     ----------
     modules_dir : Path
-        Directory containing CellWhisperer installation
+        Directory containing CellWhisperer installation (kept for backward compatibility)
     hf_cache : str, optional
         HuggingFace cache directory
 
@@ -40,44 +91,64 @@ def _extract_cellwhisperer_logit_scale(modules_dir: Path, hf_cache: str = None) 
         Extracted logit_scale value, or None if extraction fails
     """
     try:
-        # Import CellWhisperer utilities
-        import sys
+        import torch
 
-        cellwhisperer_path = modules_dir / "CellWhisperer"
-        if cellwhisperer_path.exists():
-            sys.path.insert(0, str(cellwhisperer_path))
+        # Preferred location: HF cache (matches CellWhisperer standalone runner behavior)
+        cache_dir = Path(hf_cache) if hf_cache else _default_hf_cache_dir()
 
-        from cellwhisperer.utils.model_io import load_cellwhisperer_model
+        ckpt_candidates: list[Path] = []
+        if cache_dir is not None:
+            ckpt_candidates.extend(
+                [
+                    cache_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt",
+                    cache_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt",
+                ]
+            )
 
-        # Determine checkpoint path
-        # Checkpoint is typically in cache_dir/cellwhisperer_emb/, where cache_dir is parent of modules_dir
-        if modules_dir.name == "modules":
-            cache_dir = modules_dir.parent
-        else:
-            # If modules_dir doesn't end with "modules", assume it's the cache root
-            cache_dir = modules_dir
+        # Backward-compatible fallbacks (older layouts)
+        ckpt_candidates.extend(
+            [
+                modules_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt",
+                modules_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt",
+            ]
+        )
 
-        # Try both possible checkpoint names
-        ckpt_path = cache_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt"
-        if not ckpt_path.exists():
-            ckpt_path = cache_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt"
-
-        # Also try in modules_dir itself
-        if not ckpt_path.exists():
-            ckpt_path = modules_dir / "cellwhisperer_emb" / "cellwhisperer_jointemb_v1.ckpt"
-        if not ckpt_path.exists():
-            ckpt_path = modules_dir / "cellwhisperer_emb" / "cellwhisperer_clip_v1.ckpt"
-
-        if not ckpt_path.exists():
-            logger.warning(f"CellWhisperer checkpoint not found at {ckpt_path}, cannot extract logit_scale")
+        ckpt_path = next((p for p in ckpt_candidates if p.exists()), None)
+        if ckpt_path is None:
+            logger.warning(
+                "CellWhisperer checkpoint not found in any expected location, cannot extract logit_scale. "
+                f"Tried: {[str(p) for p in ckpt_candidates]}"
+            )
             return None
 
-        # Load model to extract logit_scale
-        logger.info(f"Loading CellWhisperer model to extract logit_scale from {ckpt_path}")
-        pl_model, _, _ = load_cellwhisperer_model(ckpt_path, eval=True, cache=False)
+        logger.info(f"Loading CellWhisperer checkpoint to extract logit_scale from {ckpt_path}")
 
-        # Extract logit_scale
-        logit_scale = float(pl_model.model.discriminator.temperature.exp().item())
+        try:
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        except TypeError:
+            ckpt = torch.load(ckpt_path, map_location="cpu")
+
+        state_dict = ckpt.get("state_dict", ckpt) if isinstance(ckpt, dict) else None
+        if not isinstance(state_dict, dict):
+            logger.warning("CellWhisperer checkpoint format unexpected (no dict state_dict), cannot extract logit_scale")
+            return None
+
+        # Try to find the discriminator temperature parameter
+        temp_key = None
+        for k in state_dict.keys():
+            if "discriminator.temperature" in k:
+                temp_key = k
+                break
+        if temp_key is None:
+            logger.warning("Could not find discriminator.temperature in checkpoint state_dict")
+            return None
+
+        temperature = state_dict[temp_key]
+        if not isinstance(temperature, torch.Tensor):
+            logger.warning(f"Checkpoint key {temp_key} is not a tensor, cannot extract logit_scale")
+            return None
+
+        logit_scale = float(torch.exp(temperature).item())
         logger.info(f"✓ Extracted CellWhisperer logit_scale: {logit_scale}")
 
         return logit_scale
@@ -341,20 +412,30 @@ def process_single_dataset_model(
         # Get logit_scale from eval_cfg, or extract it if None
         logit_scale = eval_cfg.get("logit_scale")
         if logit_scale is None:
-            if modules_dir is not None and modules_dir.exists():
-                extracted_scale = _extract_cellwhisperer_logit_scale(modules_dir)
-                if extracted_scale is not None:
-                    logit_scale = extracted_scale
-                    logger.info(f"Using extracted CellWhisperer logit_scale: {logit_scale}")
-                    eval_cfg["logit_scale"] = logit_scale
-                else:
-                    logger.warning("Could not extract CellWhisperer logit_scale, using default (1.0)")
-                    eval_cfg["logit_scale"] = 1.0
+            # Prefer persisted metadata produced during CellWhisperer embedding generation
+            persisted_scale = _read_cellwhisperer_logit_scale_from_emb_dir(emb_dir)
+            if persisted_scale is not None:
+                logit_scale = persisted_scale
+                logger.info(f"Using persisted CellWhisperer logit_scale from embeddings dir: {logit_scale}")
+                eval_cfg["logit_scale"] = logit_scale
             else:
-                logger.warning(
-                    f"modules_dir not provided or doesn't exist: {modules_dir}, using default logit_scale (1.0)"
-                )
-                eval_cfg["logit_scale"] = 1.0
+                # Backward-compatible fallback for older runs: read from checkpoint without importing cellwhisperer
+                if modules_dir is not None and modules_dir.exists():
+                    extracted_scale = _extract_cellwhisperer_logit_scale(
+                        modules_dir, hf_cache=eval_cfg.get("hf_cache")
+                    )
+                    if extracted_scale is not None:
+                        logit_scale = extracted_scale
+                        logger.info(f"Using extracted CellWhisperer logit_scale from checkpoint: {logit_scale}")
+                        eval_cfg["logit_scale"] = logit_scale
+                    else:
+                        logger.warning("Could not extract CellWhisperer logit_scale, using default (1.0)")
+                        eval_cfg["logit_scale"] = 1.0
+                else:
+                    logger.warning(
+                        f"modules_dir not provided or doesn't exist: {modules_dir}, using default logit_scale (1.0)"
+                    )
+                    eval_cfg["logit_scale"] = 1.0
     else:
         # For all other models: use cosine similarity + no normalization + no logit_scale
         logger.info("Detected standard model - using cosine similarity + no normalization")

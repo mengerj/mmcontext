@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import anndata as ad
+import json
 import numpy as np
 import pandas as pd
 import torch
@@ -172,7 +173,7 @@ def create_label_embeddings(labels, model, tokenizer, batch_size):
 
 def create_cellwhisperer_embeddings_venv(
     adata_path: Path, modules_dir: Path, cache_dir: Path, batch_size: int = 32, annotation_keys: list[str] = None
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict, float | None]:
     """
     Create embeddings using CellWhisperer model running in separate venv.
 
@@ -191,8 +192,8 @@ def create_cellwhisperer_embeddings_venv(
 
     Returns
     -------
-    tuple[pd.DataFrame, dict]
-        (embeddings_df, similarity_results)
+    tuple[pd.DataFrame, dict, float | None]
+        (embeddings_df, similarity_results, logit_scale)
     """
     import pickle
     import tempfile
@@ -272,13 +273,21 @@ def create_cellwhisperer_embeddings_venv(
                 logger.info(
                     f"Processed {results['n_cells']} cells with {results['n_genes']} genes on {results['device']}"
                 )
-                return results["embeddings_df"], results["similarity_results"]
+                logit_scale = results.get("logit_scale")
+                if logit_scale is not None:
+                    try:
+                        logit_scale = float(logit_scale)
+                        logger.info(f"✓ Received logit_scale from CellWhisperer run: {logit_scale}")
+                    except Exception:
+                        logger.warning(f"CellWhisperer returned non-numeric logit_scale={logit_scale!r}")
+                        logit_scale = None
+                return results["embeddings_df"], results["similarity_results"], logit_scale
             else:
                 raise RuntimeError(f"CellWhisperer processing failed: {results['error']}")
         else:
             raise RuntimeError("CellWhisperer results file not found")
 
-    return pd.DataFrame(), {}
+    return pd.DataFrame(), {}, None
 
 
 def process_cellwhisperer_dataset_model(
@@ -389,7 +398,7 @@ def process_cellwhisperer_dataset_model(
                 annotation_keys.extend(ds_cfg.bio_label_list)
 
             # Create embeddings using CellWhisperer in separate venv
-            embeddings_df, similarity_results = create_cellwhisperer_embeddings_venv(
+            embeddings_df, similarity_results, logit_scale = create_cellwhisperer_embeddings_venv(
                 temp_adata_path,
                 modules_dir,
                 Path(cache_dir) if cache_dir else Path.cwd(),
@@ -399,6 +408,13 @@ def process_cellwhisperer_dataset_model(
 
             # Create output directory
             out_dir.mkdir(parents=True, exist_ok=True)
+
+            # Persist CellWhisperer metadata for downstream eval (no cellwhisperer dependency)
+            if logit_scale is not None:
+                meta_path = out_dir / "cellwhisperer_meta.json"
+                meta_payload = {"logit_scale": float(logit_scale)}
+                meta_path.write_text(json.dumps(meta_payload, indent=2, sort_keys=True) + "\n")
+                logger.info(f"Wrote CellWhisperer metadata → {meta_path}")
 
             # Copy label embeddings to output directory if they were generated
             if annotation_keys:
@@ -456,8 +472,6 @@ def process_cellwhisperer_dataset_model(
 
         # Save similarity results if available
         if similarity_results:
-            import json
-
             for annotation_key, results in similarity_results.items():
                 # Save predictions as CSV (separate from label embeddings)
                 predictions_df = pd.DataFrame(
