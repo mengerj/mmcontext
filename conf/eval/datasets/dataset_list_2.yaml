@@ -1,0 +1,11 @@
+- name: human_disease
+  source: jo-mengr/human_disease_schaefer
+  cs_length: 64
+  gene_filter_strings: ["RPS", "RPL", "MT"]
+  split: test
+  format: hub # hub | hf_disk | csv
+  index_col: sample_idx
+  bio_label_list:
+    - Disease
+  batch_label_list:
+    - "sra_study_acc"
