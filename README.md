@@ -141,6 +141,42 @@ sbatch scripts/run_embed_eval_cpu.slurm
 
 This allows you to process multiple model configurations in parallel across different array job tasks, by spreading the models across several config files and passing them as a list to the array job.
 
+### SCSA Baseline
+
+[SCSA](https://github.com/bioinfo-ibms-pumc/SCSA) (Single-Cell RNA-seq Annotation) is included as a non-embedding baseline. Unlike the mmcontext models, SCSA annotates cell types by clustering cells, detecting marker genes per cluster, and matching them against the CellMarker database using Z-scores. It runs as a standalone script on the same datasets.
+
+SCSA requires `numpy<2.0` and therefore needs its own virtual environment:
+
+```bash
+# 1. Clone the SCSA repository
+bash modules/prepare_scsa.sh
+
+# 2. Create a dedicated venv for SCSA and install its dependencies
+python -m venv modules/scsa_venv
+modules/scsa_venv/bin/pip install -r modules/requirements_scsa.txt
+
+# 3. (Optional) Create a dedicated venv for calmate label harmonisation
+#    This maps SCSA's predicted labels and ground-truth labels to Cell Ontology
+#    terms so that metrics are computed on normalised names.
+python -m venv modules/calmate_venv
+modules/calmate_venv/bin/pip install -r modules/requirements_calmate.txt
+
+# 4. Run SCSA on all datasets (venvs are auto-detected from modules/)
+python scripts/run_scsa.py
+
+# 5. (Optional) After reviewing calmate mappings, you can recompute\n#    metrics without re-running SCSA itself by using:\n+#    python scripts/run_scsa.py scsa.remap_only=true settings.skip_existing=false
+```
+
+When calmate is available, the pipeline runs label harmonisation automatically. On the first run, many labels will need manual review. The script prints instructions at the end — run `modules/calmate_venv/bin/calmate --store modules/.calmate/mappings.csv review` to interactively approve the suggested ontology mappings, then re-run with `settings.skip_existing=false`. If you only want to redo the mapping/metrics step and reuse existing SCSA predictions, set `scsa.remap_only=true`; in that mode `settings.skip_existing` is ignored for SCSA and only controls whether other datasets are skipped.
+
+SCSA is configured via [`scsa_conf.yaml`](conf/eval/scsa_conf.yaml), which shares the same dataset list as the embedding pipeline. Key parameters (fold-change threshold, p-value, clustering resolution, species) can be overridden from the command line. If the SCSA venv is in a non-default location, pass it explicitly: `python scripts/run_scsa.py scsa.scsa_python=/path/to/scsa_venv/bin/python`. Results are written to the same output directory tree as the other models, so `collect_metrics.py` picks them up automatically.
+
+For HPC systems:
+
+```bash
+sbatch scripts/run_scsa.slurm
+```
+
 Figure Panel 1E is created by collecting the metrics from the big evaluation run. The config [`collect_metrics_conf.yaml`](conf/eval/collect_metrics_conf.yaml) has to point to the directory where the results from all datasets/models were stored. Then to collect and plot the metrics, run
 
 ```bash

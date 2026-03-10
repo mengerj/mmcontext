@@ -1,0 +1,5 @@
+# SCSA dependencies — requires numpy<2.0 due to use of numpy.asfarray
+numpy<2.0
+pandas<2.0
+scipy
+louvain
