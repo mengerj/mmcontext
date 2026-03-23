@@ -42,9 +42,7 @@ def _find_project_root(marker_name: str = "mmcontext") -> Path | None:
 
 
 def _default_hf_cache_dir() -> Path | None:
-    """
-    Default HF cache path used by this repo: <project_root>/cache/huggingface.
-    """
+    """Default HF cache path used by this repo: <project_root>/cache/huggingface."""
     root = _find_project_root()
     if root is None:
         return None
