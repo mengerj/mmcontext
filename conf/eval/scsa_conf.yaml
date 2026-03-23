@@ -2,7 +2,7 @@
 # Standalone configuration for the SCSA baseline evaluation pipeline.
 # Shares the same dataset list as the embedding pipeline.
 defaults:
-  - datasets: dataset_list_2.yaml
+  - datasets: dataset_list_scsa.yaml
   - _self_
 
 settings:
@@ -17,18 +17,18 @@ settings:
 
 # SCSA-specific parameters
 scsa:
-  scsa_python: null            # Path to Python in SCSA venv (auto-detected from modules/scsa_venv if null)
-  cluster_col: louvain        # Clustering method / column name
-  resolution: 1.0             # Resolution for Louvain clustering
-  n_top_genes: 2000           # Highly variable genes for preprocessing
-  remap_only: false           # If true, reuse existing SCSA predictions and only re-run calmate + metrics
-  foldchange: 1.5             # Minimum log fold-change threshold for SCSA
-  pvalue: 0.01                # Maximum p-value threshold for SCSA
-  species: Human              # Species for CellMarker database lookup
-  tissue: All                 # Tissue filter for CellMarker database lookup
-  gensymbol: true             # Use gene symbols (not Ensembl IDs)
+  scsa_python: null # Path to Python in SCSA venv (auto-detected from modules/scsa_venv if null)
+  cluster_col: louvain # Clustering method / column name
+  resolution: 1.0 # Resolution for Louvain clustering
+  n_top_genes: 2000 # Highly variable genes for preprocessing
+  remap_only: false # If true, reuse existing SCSA predictions and only re-run calmate + metrics
+  foldchange: 1.5 # Minimum log fold-change threshold for SCSA
+  pvalue: 0.01 # Maximum p-value threshold for SCSA
+  species: Human # Species for CellMarker database lookup
+  tissue: All # Tissue filter for CellMarker database lookup
+  gensymbol: true # Use gene symbols (not Ensembl IDs)
   # Calmate label-harmonisation settings
-  calmate_python: null         # Path to Python in calmate venv (auto-detected from modules/calmate_venv if null)
+  calmate_python: null # Path to Python in calmate venv (auto-detected from modules/calmate_venv if null)
   calmate_store: ${hydra:runtime.cwd}/modules/.calmate/mappings.csv
   calmate_cache: ${hydra:runtime.cwd}/modules/.calmate/cache
 

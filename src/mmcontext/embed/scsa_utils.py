@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
+from mmcontext.eval.utils import LabelKind
+
 logger = logging.getLogger(__name__)
 
 
@@ -273,17 +275,28 @@ def run_scsa(
     cmd = [
         scsa_python,
         str(scsa_dir / "SCSA.py"),
-        "-d", str(db_path),
-        "-i", str(csv_path),
-        "-s", "scanpy",
-        "-o", str(output_path),
-        "-f", str(foldchange),
-        "-p", str(pvalue),
-        "-g", species,
-        "-k", tissue,
-        "-T", "normal",
-        "-t", "cellmarker",
-        "-m", "txt",
+        "-d",
+        str(db_path),
+        "-i",
+        str(csv_path),
+        "-s",
+        "scanpy",
+        "-o",
+        str(output_path),
+        "-f",
+        str(foldchange),
+        "-p",
+        str(pvalue),
+        "-g",
+        species,
+        "-k",
+        tissue,
+        "-T",
+        "normal",
+        "-t",
+        "cellmarker",
+        "-m",
+        "txt",
     ]
 
     if gensymbol:
@@ -476,7 +489,7 @@ def compute_metrics(
                 "model": "scsa",
                 "model_name": "scsa",
                 "label": annotation_key,
-                "label_kind": "LabelKind.BIO",
+                "label_kind": LabelKind.BIO,
                 "metric": metric_name,
                 "value": value,
             }
@@ -589,7 +602,9 @@ def harmonize_labels(
     if out:
         diagnostics.append(f"[map predicted_labels] {out}")
     if not ok:
-        return HarmonizeResult(success=False, all_reviewed=False, messages=[f"calmate map predicted_labels failed: {out}"])
+        return HarmonizeResult(
+            success=False, all_reviewed=False, messages=[f"calmate map predicted_labels failed: {out}"]
+        )
 
     # --- 2. Map true labels ---
     map_true_args = [
@@ -637,10 +652,21 @@ def harmonize_labels(
 
     # --- 4. Apply mappings (predicted) ---
     intermediate_csv = predictions_csv.with_name(predictions_csv.stem + "_mapped_pred.csv")
-    apply_pred_args = [*store_arg, "apply", str(predictions_csv), "-c", "predicted_labels", "-o", str(intermediate_csv), "--all"]
+    apply_pred_args = [
+        *store_arg,
+        "apply",
+        str(predictions_csv),
+        "-c",
+        "predicted_labels",
+        "-o",
+        str(intermediate_csv),
+        "--all",
+    ]
     ok, out = _run_calmate(calmate_cli, apply_pred_args, "apply predicted_labels")
     if not ok:
-        return HarmonizeResult(success=False, all_reviewed=True, messages=[f"calmate apply predicted_labels failed: {out}"])
+        return HarmonizeResult(
+            success=False, all_reviewed=True, messages=[f"calmate apply predicted_labels failed: {out}"]
+        )
 
     # --- 5. Apply mappings (true) ---
     final_csv = predictions_csv.with_name(predictions_csv.stem + "_harmonized.csv")
@@ -780,13 +806,15 @@ def process_scsa_dataset(
                 mapped_df = _reorder_harmonized_columns(mapped_df)
                 mapped_df.to_csv(harm.mapped_csv, index=False)  # keep on disk in the same order
                 true_col = "true_labels_mapped" if "true_labels_mapped" in mapped_df.columns else "true_labels"
-                pred_col = "predicted_labels_mapped" if "predicted_labels_mapped" in mapped_df.columns else "predicted_labels"
+                pred_col = (
+                    "predicted_labels_mapped" if "predicted_labels_mapped" in mapped_df.columns else "predicted_labels"
+                )
                 logger.info("Harmonised CSV at %s (%d rows)", harm.mapped_csv, len(mapped_df))
 
                 # Store mapped true labels back into adata for downstream use
                 if adata is not None and true_col in mapped_df.columns:
                     ontology_col = f"{annotation_key}_ontology"
-                    label_map = dict(zip(mapped_df["true_labels"], mapped_df[true_col]))
+                    label_map = dict(zip(mapped_df["true_labels"], mapped_df[true_col], strict=False))
                     adata.obs[ontology_col] = adata.obs[annotation_key].map(label_map).fillna(adata.obs[annotation_key])
                     logger.info("Updated adata.obs['%s'] with ontology-mapped labels", ontology_col)
 
@@ -894,7 +922,9 @@ def process_scsa_dataset(
 
         for annotation_key in bio_labels:
             if annotation_key not in adata.obs.columns:
-                logger.warning("Annotation key '%s' not found in adata.obs for %s — skipping", annotation_key, dataset_name)
+                logger.warning(
+                    "Annotation key '%s' not found in adata.obs for %s — skipping", annotation_key, dataset_name
+                )
                 continue
 
             logger.info("Mapping SCSA predictions for label '%s'", annotation_key)
@@ -929,13 +959,15 @@ def process_scsa_dataset(
             mapped_df = _reorder_harmonized_columns(mapped_df)
             mapped_df.to_csv(harm.mapped_csv, index=False)
             true_col = "true_labels_mapped" if "true_labels_mapped" in mapped_df.columns else "true_labels"
-            pred_col = "predicted_labels_mapped" if "predicted_labels_mapped" in mapped_df.columns else "predicted_labels"
+            pred_col = (
+                "predicted_labels_mapped" if "predicted_labels_mapped" in mapped_df.columns else "predicted_labels"
+            )
             logger.info("Harmonised CSV at %s (%d rows)", harm.mapped_csv, len(mapped_df))
 
             # Store mapped true labels back into adata for downstream use
             ontology_col = f"{annotation_key}_ontology"
             if true_col in mapped_df.columns:
-                label_map = dict(zip(mapped_df["true_labels"], mapped_df[true_col]))
+                label_map = dict(zip(mapped_df["true_labels"], mapped_df[true_col], strict=False))
                 adata.obs[ontology_col] = adata.obs[annotation_key].map(label_map).fillna(adata.obs[annotation_key])
                 logger.info("Stored mapped true labels in adata.obs['%s']", ontology_col)
 
