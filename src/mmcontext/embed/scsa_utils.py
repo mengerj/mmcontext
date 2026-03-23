@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
+from mmcontext.eval.utils import LabelKind
+
 logger = logging.getLogger(__name__)
 
 
@@ -476,7 +478,7 @@ def compute_metrics(
                 "model": "scsa",
                 "model_name": "scsa",
                 "label": annotation_key,
-                "label_kind": "LabelKind.BIO",
+                "label_kind": LabelKind.BIO,
                 "metric": metric_name,
                 "value": value,
             }
