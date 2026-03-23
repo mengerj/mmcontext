@@ -2,7 +2,7 @@
 # Standalone configuration for the SCSA baseline evaluation pipeline.
 # Shares the same dataset list as the embedding pipeline.
 defaults:
-  - datasets: dataset_list_2.yaml
+  - datasets: dataset_list_scsa.yaml
   - _self_
 
 settings:
