@@ -104,6 +104,10 @@ poster_models/
 # modules
 modules/CellWhisperer/
 modules/cellwhisperer_venv/
+modules/SCSA/
+modules/scsa_venv/
+modules/calmate_venv/
+modules/.calmate/cache/
 cache/
 
 mmcontext_out/

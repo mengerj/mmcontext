@@ -184,6 +184,7 @@ class LabelSimilarity(BaseEvaluator):
         text_dot_fill_color: str = "label",
         text_dot_edge_color: str = "black",
         text_dot_alpha: float = 0.8,
+        topk_values: list[int] | None = None,
         skip_plotting: bool = False,
         save_labels: bool = True,
         output_sample_size: int = 100,
@@ -295,6 +296,7 @@ class LabelSimilarity(BaseEvaluator):
         self.text_dot_edge_color = text_dot_edge_color
         self.text_dot_alpha = text_dot_alpha
         self.skip_plotting = skip_plotting
+        self.topk_values = topk_values
         self.save_labels = save_labels
         self.output_sample_size = output_sample_size
         self.label_colors = label_colors
@@ -817,6 +819,167 @@ class LabelSimilarity(BaseEvaluator):
         random_accuracy = 1 / len(unique_labels)
         return random_accuracy
 
+    def _compute_topk_accuracies(
+        self,
+        similarity_matrix: np.ndarray,
+        true_labels: np.ndarray,
+        query_labels: np.ndarray,
+        ks: list[int],
+    ) -> dict[int, float]:
+        """
+        Compute top-k accuracies for a list of k values using the similarity matrix.
+
+        Parameters
+        ----------
+        similarity_matrix : np.ndarray
+            Similarity matrix (N_cells x N_labels)
+        true_labels : np.ndarray
+            True labels for each cell (N_cells,)
+        query_labels : np.ndarray
+            Query labels corresponding to similarity matrix columns (N_labels,)
+        ks : list[int]
+            List of k values for which to compute top-k accuracy
+
+        Returns
+        -------
+        dict[int, float]
+            Dictionary mapping each k to its top-k accuracy
+        """
+        if similarity_matrix.ndim != 2:
+            raise ValueError(f"similarity_matrix must be 2D, got shape {similarity_matrix.shape}")
+
+        n_cells, n_labels = similarity_matrix.shape
+        if n_labels == 0 or n_cells == 0:
+            return {k: 0.0 for k in ks}
+
+        # Sanitize ks: positive, <= n_labels, unique and sorted
+        valid_ks = sorted({int(k) for k in ks if int(k) > 0})
+        if not valid_ks:
+            return {}
+
+        max_k = min(valid_ks[-1], n_labels)
+
+        # Argsort in descending order of similarity for each cell
+        ranked_indices = np.argsort(-similarity_matrix, axis=1)
+        ranked_indices = ranked_indices[:, :max_k]
+
+        # Broadcast true labels for comparison
+        true_labels_expanded = true_labels.reshape(-1, 1)
+
+        topk_results: dict[int, float] = {}
+        for k in valid_ks:
+            k_eff = min(k, n_labels)
+            topk_indices = ranked_indices[:, :k_eff]
+            topk_labels = query_labels[topk_indices]
+            correct_any = (topk_labels == true_labels_expanded).any(axis=1)
+            topk_results[k] = float(np.mean(correct_any)) if n_cells > 0 else 0.0
+
+        return topk_results
+
+    @staticmethod
+    def _compute_macro_f1(true_labels: np.ndarray, predicted_labels: np.ndarray) -> float:
+        """
+        Compute macro-F1 over labels present in true_labels.
+
+        Parameters
+        ----------
+        true_labels : np.ndarray
+            Ground truth labels
+        predicted_labels : np.ndarray
+            Predicted labels
+
+        Returns
+        -------
+        float
+            Macro-F1 score
+        """
+        true_labels = np.asarray(true_labels)
+        predicted_labels = np.asarray(predicted_labels)
+
+        if true_labels.size == 0:
+            return 0.0
+
+        labels = np.unique(true_labels)
+        f1_scores: list[float] = []
+
+        for label in labels:
+            mask_true = true_labels == label
+            mask_pred = predicted_labels == label
+
+            tp = np.sum(mask_true & mask_pred)
+            fp = np.sum(~mask_true & mask_pred)
+            fn = np.sum(mask_true & ~mask_pred)
+
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
+            if precision + recall > 0:
+                f1 = 2 * precision * recall / (precision + recall)
+            else:
+                f1 = 0.0
+
+            f1_scores.append(f1)
+
+        if not f1_scores:
+            return 0.0
+
+        return float(np.mean(f1_scores))
+
+    @staticmethod
+    def _compute_mrr(
+        similarity_matrix: np.ndarray,
+        true_labels: np.ndarray,
+        query_labels: np.ndarray,
+    ) -> float:
+        """
+        Compute mean reciprocal rank (MRR) for the ranking of query_labels per cell.
+
+        Parameters
+        ----------
+        similarity_matrix : np.ndarray
+            Similarity matrix (N_cells x N_labels)
+        true_labels : np.ndarray
+            True labels for each cell (N_cells,)
+        query_labels : np.ndarray
+            Query labels corresponding to similarity matrix columns (N_labels,)
+
+        Returns
+        -------
+        float
+            Mean reciprocal rank
+        """
+        if similarity_matrix.ndim != 2:
+            raise ValueError(f"similarity_matrix must be 2D, got shape {similarity_matrix.shape}")
+
+        n_cells, n_labels = similarity_matrix.shape
+        if n_cells == 0 or n_labels == 0:
+            return 0.0
+
+        # Map label string to index for quick lookup
+        label_to_index = {str(lbl): idx for idx, lbl in enumerate(query_labels)}
+
+        true_indices = np.array([label_to_index.get(str(lbl), -1) for lbl in true_labels], dtype=int)
+
+        # Precompute ranking of labels per cell (descending similarity)
+        ranked_indices = np.argsort(-similarity_matrix, axis=1)
+
+        reciprocal_ranks = np.zeros(n_cells, dtype=float)
+
+        for i in range(n_cells):
+            true_idx = true_indices[i]
+            if true_idx < 0:
+                continue
+
+            # Find position of the true label in the ranked list
+            positions = np.where(ranked_indices[i] == true_idx)[0]
+            if positions.size == 0:
+                continue
+
+            rank = int(positions[0]) + 1  # 1-based rank
+            reciprocal_ranks[i] = 1.0 / rank
+
+        return float(np.mean(reciprocal_ranks)) if n_cells > 0 else 0.0
+
     def _save_label_predictions(
         self,
         out_dir: Path,
@@ -1014,6 +1177,29 @@ class LabelSimilarity(BaseEvaluator):
         out["random_baseline_accuracy"] = float(random_baseline)
         out["accuracy_over_random"] = float(accuracy / random_baseline) if random_baseline > 0 else 0.0
         out["n_labels"] = len(unique_labels)
+
+        # Compute additional ranking-based metrics
+        # Top-k accuracies (use configured list or sensible defaults)
+        topk_values = self.topk_values if self.topk_values is not None else [1, 3, 5]
+        if topk_values:
+            topk_results = self._compute_topk_accuracies(
+                similarity_matrix=similarity_matrix,
+                true_labels=true_labels,
+                query_labels=query_labels,
+                ks=topk_values,
+            )
+            for k, value in topk_results.items():
+                out[f"topk_accuracy@{k}"] = float(value)
+
+        # Macro-F1 over labels present in true_labels
+        out["macro_f1"] = self._compute_macro_f1(true_labels=true_labels, predicted_labels=predicted_labels)
+
+        # Mean reciprocal rank (MRR)
+        out["mrr"] = self._compute_mrr(
+            similarity_matrix=similarity_matrix,
+            true_labels=true_labels,
+            query_labels=query_labels,
+        )
 
         # Save label predictions if enabled and output directory is provided
         if out_dir is not None:

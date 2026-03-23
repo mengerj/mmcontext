@@ -1,26 +1,27 @@
 # conf/collect_metrics_conf.yaml
 defaults:
   - datasets: dataset_list
-  - models: model_list_cellwhisp_2411.yaml
+  - models: model_list_all_with_baselines.yaml
 
 collect_metrics:
   # Directory containing evaluation results
-  eval_root: "${hydra:runtime.cwd}/out/2411_results"
+  eval_root: "${hydra:runtime.cwd}/mmcontext_out/first_revision_results"
 
   # Output directory for collected metrics
-  output_dir: "${hydra:runtime.cwd}/out/2411_results_collected_metrics"
+  output_dir: "${hydra:runtime.cwd}/mmcontext_out/first_revision_results_collected_metrics"
 
   model_order:
     - "gs10k"
-    - "pca" # First model
-    - "scvi_fm" # Second model
-    - "geneformer" # Third model
-    - "geneformer-v1" #
-    - "cell sentences"
+    - "pca"
+    - "scvi_fm"
+    - "geneformer"
+    - "geneformer-v1"
+    - "cell_sentences"
     - "cellwhisperer"
+    - "scsa"
 
   # Visualization settings
-  plot_format: "svg" # Options: "png", "pdf", "svg"
+  plot_format: "pdf" # Options: "png", "pdf", "svg"
 
   # Plot appearance settings
   vertical_plots: true # Use vertical orientation (model names on y-axis)
@@ -44,11 +45,17 @@ collect_metrics:
     - "LabelSimilarity/random_baseline_accuracy"
     - "LabelSimilarity/accuracy"
     - "LabelSimilarity/balanced_accuracy"
+    - "LabelSimilarity/macro_f1"
+    - "LabelSimilarity/topk_accuracy@1"
+    - "LabelSimilarity/topk_accuracy@3"
+    - "LabelSimilarity/topk_accuracy@5"
+    - "LabelSimilarity/mrr"
     # Add more as needed
 
   # Accuracy metrics that should be plotted with baseline overlay
   accuracy_metrics:
     - "LabelSimilarity/accuracy"
+    - "LabelSimilarity/balanced_accuracy"
     # Add more accuracy metrics as needed
 
   # Baseline accuracy metric name (will be overlaid as dotted lines on accuracy plots)
@@ -91,3 +98,47 @@ collect_metrics:
   # Label configurations to include
   #bio_labels: ["celltype", "cell_type"] # Can be overridden per dataset
   #batch_labels: ["tech", "batch", "donor"] # Can be overridden per dataset
+
+  # LaTeX table generation
+  latex_tables:
+    enabled: true
+    decimal_places: 3
+    bold_best: true
+    label_kind_filter: bio # null = all, or "bio" / "batch"
+    metrics:
+      - "LabelSimilarity/balanced_accuracy"
+      - "LabelSimilarity/macro_f1"
+      - "LabelSimilarity/mean_auc"
+      - "LabelSimilarity/mrr"
+      - "LabelSimilarity/topk_accuracy@1"
+      - "LabelSimilarity/topk_accuracy@3"
+      - "LabelSimilarity/topk_accuracy@5"
+    metric_display_names:
+      "LabelSimilarity/balanced_accuracy": "Bal.\\ Acc."
+      "LabelSimilarity/macro_f1": "Macro F1"
+      "LabelSimilarity/mean_auc": "Mean AUC"
+      "LabelSimilarity/mrr": "MRR"
+      "LabelSimilarity/topk_accuracy@1": "Top-1 Acc."
+      "LabelSimilarity/topk_accuracy@3": "Top-3 Acc."
+      "LabelSimilarity/topk_accuracy@5": "Top-5 Acc."
+
+  # Rank-based plots
+  rank_plots:
+    enabled: true
+    label_kind_filter: "bio"
+    metrics:
+      - "LabelSimilarity/balanced_accuracy"
+      - "LabelSimilarity/macro_f1"
+      - "LabelSimilarity/mean_auc"
+      - "LabelSimilarity/mrr"
+      - "LabelSimilarity/topk_accuracy@1"
+      - "LabelSimilarity/topk_accuracy@3"
+      - "LabelSimilarity/topk_accuracy@5"
+    metric_display_names:
+      "LabelSimilarity/balanced_accuracy": "Bal. Acc."
+      "LabelSimilarity/macro_f1": "Macro F1"
+      "LabelSimilarity/mean_auc": "Mean AUC"
+      "LabelSimilarity/mrr": "MRR"
+      "LabelSimilarity/topk_accuracy@1": "Top-1"
+      "LabelSimilarity/topk_accuracy@3": "Top-3"
+      "LabelSimilarity/topk_accuracy@5": "Top-5"

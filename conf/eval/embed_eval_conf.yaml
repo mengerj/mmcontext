@@ -13,12 +13,12 @@ settings:
   task_timeout: 7200 # Maximum time (seconds) per dataset/model combination
 
   # Processing mode
-  skip_existing_embeddings: true # Skip embedding if files already exist
-  skip_existing_evaluations: true # Skip evaluation if eval directory already exists
+  skip_existing_embeddings: false # Skip embedding if files already exist
+  skip_existing_evaluations: false # Skip evaluation if eval directory already exists
 
   # CellWhisperer integration
   run_cellwhisperer: false # Enable CellWhisperer model processing alongside other models
-  cellwhisperer_modules_dir: modules # Directory where CellWhisperer will be installed
+  cellwhisperer_modules_dir: ${hydra:runtime.cwd}/modules # Directory where CellWhisperer will be installed
   # Output paths
   computation_root: ${hydra:runtime.cwd}/mmcontext_out/0411_computation # Fast/local storage for embeddings (will be cleaned up)
   final_root: ${hydra:runtime.cwd}/mmcontext_out/0411_results # Long-term storage for evaluation results

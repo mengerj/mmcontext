@@ -42,9 +42,7 @@ def _find_project_root(marker_name: str = "mmcontext") -> Path | None:
 
 
 def _default_hf_cache_dir() -> Path | None:
-    """
-    Default HF cache path used by this repo: <project_root>/cache/huggingface.
-    """
+    """Default HF cache path used by this repo: <project_root>/cache/huggingface."""
     root = _find_project_root()
     if root is None:
         return None
@@ -130,7 +128,9 @@ def _extract_cellwhisperer_logit_scale(modules_dir: Path, hf_cache: str | None =
 
         state_dict = ckpt.get("state_dict", ckpt) if isinstance(ckpt, dict) else None
         if not isinstance(state_dict, dict):
-            logger.warning("CellWhisperer checkpoint format unexpected (no dict state_dict), cannot extract logit_scale")
+            logger.warning(
+                "CellWhisperer checkpoint format unexpected (no dict state_dict), cannot extract logit_scale"
+            )
             return None
 
         # Try to find the discriminator temperature parameter
@@ -421,9 +421,7 @@ def process_single_dataset_model(
             else:
                 # Backward-compatible fallback for older runs: read from checkpoint without importing cellwhisperer
                 if modules_dir is not None and modules_dir.exists():
-                    extracted_scale = _extract_cellwhisperer_logit_scale(
-                        modules_dir, hf_cache=eval_cfg.get("hf_cache")
-                    )
+                    extracted_scale = _extract_cellwhisperer_logit_scale(modules_dir, hf_cache=eval_cfg.get("hf_cache"))
                     if extracted_scale is not None:
                         logit_scale = extracted_scale
                         logger.info(f"Using extracted CellWhisperer logit_scale from checkpoint: {logit_scale}")
