@@ -218,11 +218,14 @@ def create_accuracy_plot_with_baseline(
         # Filter data for this metric
         metric_data = accuracy_data[accuracy_data["combined_metric"] == metric]
 
-        # For baseline data, we need to match based on the same label_kind pattern
-        # Extract the label_kind suffix from the accuracy metric (e.g., "accuracy_bio" -> "_bio")
-        if "_" in metric:
-            label_suffix = "_" + metric.split("_", 1)[1]  # Get everything after first underscore
-            baseline_combined_metric = f"random_baseline_accuracy{label_suffix}"
+        # Match baseline using the label_kind from the data rather than
+        # parsing the combined metric string (which breaks for metrics
+        # whose own name contains underscores, e.g. "balanced_accuracy_bio").
+        metric_label_kinds = metric_data["label_kind"].dropna().unique()
+        if len(metric_label_kinds) == 1:
+            baseline_combined_metric = f"random_baseline_accuracy_{metric_label_kinds[0]}"
+        elif "_" in metric:
+            baseline_combined_metric = f"random_baseline_accuracy_{metric.rsplit('_', 1)[-1]}"
         else:
             baseline_combined_metric = "random_baseline_accuracy"
 
@@ -949,11 +952,13 @@ def create_dataset_pair_scatter_plots(
         # Get the base metric name (before label_kind suffix)
         base_metric = metric_data["metric"].iloc[0] if not metric_data.empty else ""
 
-        # Extract label_kind suffix from combined_metric
-        if "_" in combined_metric and combined_metric != base_metric:
-            # combined_metric is like "accuracy_bio", extract suffix
-            label_suffix = "_" + combined_metric.split("_", 1)[1]
-            baseline_combined_metric = f"random_baseline_accuracy{label_suffix}"
+        # Match baseline using label_kind from the data rather than
+        # parsing the combined metric string.
+        metric_label_kinds = metric_data["label_kind"].dropna().unique()
+        if len(metric_label_kinds) == 1:
+            baseline_combined_metric = f"random_baseline_accuracy_{metric_label_kinds[0]}"
+        elif "_" in combined_metric and combined_metric != base_metric:
+            baseline_combined_metric = f"random_baseline_accuracy_{combined_metric.rsplit('_', 1)[-1]}"
         else:
             baseline_combined_metric = "random_baseline_accuracy"
 
@@ -1113,6 +1118,192 @@ def create_dataset_pair_scatter_plots(
             plt.close()
 
 
+def _compute_rank_table(
+    df: pd.DataFrame,
+    selected_metrics: list[str],
+    model_order: list[str] | None,
+    label_kind_filter: str | None,
+) -> pd.DataFrame:
+    """Build a long-form rank table from *df*.
+
+    Returns a DataFrame with columns:
+    ``dataset_label, model_name, metric, value, rank``.
+    Rank 1 = best (highest value).  NaN values are left unranked.
+    """
+    work = df.copy()
+    if label_kind_filter:
+        work = work[work["label_kind"] == label_kind_filter]
+    work = work[work["metric"].isin(selected_metrics)]
+    work["value"] = pd.to_numeric(work["value"], errors="coerce")
+
+    ranked_parts: list[pd.DataFrame] = []
+    for (ds_label, metric), grp in work.groupby(["dataset_label", "metric"]):
+        grp = grp.copy()
+        grp["rank"] = grp["value"].rank(ascending=False, method="average")
+        n_models = grp["model_name"].nunique()
+        grp["score"] = n_models + 1 - grp["rank"]
+        ranked_parts.append(grp)
+
+    if not ranked_parts:
+        return pd.DataFrame()
+
+    ranked = pd.concat(ranked_parts, ignore_index=True)
+
+    if model_order:
+        order_map = {m: i for i, m in enumerate(model_order)}
+        ranked["_sort"] = ranked["model_name"].map(order_map).fillna(9999)
+        ranked = ranked.sort_values("_sort").drop(columns="_sort")
+
+    return ranked
+
+
+def create_rank_heatmaps(
+    df: pd.DataFrame,
+    selected_metrics: list[str],
+    metric_display: dict[str, str],
+    model_order: list[str] | None,
+    label_kind_filter: str | None,
+    output_dir: Path,
+    plot_format: str = "png",
+    font_size: int = 12,
+    fig_width: int = 6,
+    fig_height: int = 5,
+) -> None:
+    """Create one rank-heatmap per dataset_label (models x metrics)."""
+    ranked = _compute_rank_table(df, selected_metrics, model_order, label_kind_filter)
+    if ranked.empty:
+        print("Rank heatmaps: no data after filtering.")
+        return
+
+    for ds_label, grp in ranked.groupby("dataset_label"):
+        pivot = grp.pivot_table(index="model_name", columns="metric", values="score", aggfunc="first")
+        pivot = pivot.reindex(columns=[m for m in selected_metrics if m in pivot.columns])
+
+        if model_order:
+            ordered = [m for m in model_order if m in pivot.index]
+            ordered += sorted(set(pivot.index) - set(ordered))
+            pivot = pivot.reindex(ordered)
+
+        display_cols = [metric_display.get(m, m) for m in pivot.columns]
+
+        n_models = int(ranked["model_name"].nunique())
+
+        cell_w = max(1.2, fig_width * 0.6)
+        cell_h = max(0.6, fig_height * 0.35)
+        fig_w = cell_w * len(display_cols) + 3
+        fig_h = cell_h * len(pivot) + 2
+
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+        sns.heatmap(
+            pivot.values.astype(float),
+            annot=False,
+            cmap="YlOrRd",
+            vmin=1,
+            vmax=n_models,
+            linewidths=0.5,
+            linecolor="white",
+            cbar_kws={"label": "Score (higher = better)", "ticks": range(1, n_models + 1)},
+            xticklabels=display_cols,
+            yticklabels=list(pivot.index),
+            ax=ax,
+            mask=pivot.isna().values,
+        )
+
+        cbar = ax.collections[0].colorbar
+        cbar.ax.tick_params(labelsize=font_size - 2)
+        cbar.set_label("Score (higher = better)", size=font_size - 2)
+
+        ax.set_title(f"Model scores — {ds_label}", fontsize=font_size, fontweight="bold", pad=12)
+        ax.tick_params(axis="x", labelsize=font_size - 4, rotation=45)
+        ax.tick_params(axis="y", labelsize=font_size - 4, rotation=0)
+
+        safe = ds_label.replace(" ", "_").replace("/", "_")
+        out = output_dir / f"rank_heatmap_{safe}.{plot_format}"
+        plt.savefig(out, dpi=300, bbox_inches="tight")
+        print(f"  Saved rank heatmap: {out}")
+        plt.close()
+
+
+def create_mean_rank_barplot(
+    df: pd.DataFrame,
+    selected_metrics: list[str],
+    model_order: list[str] | None,
+    label_kind_filter: str | None,
+    dataset_colors: dict[str, Any],
+    output_dir: Path,
+    plot_format: str = "png",
+    font_size: int = 12,
+    fig_width: int = 6,
+    fig_height: int = 5,
+) -> None:
+    """Create a grouped bar plot of mean rank across metrics (models x datasets)."""
+    ranked = _compute_rank_table(df, selected_metrics, model_order, label_kind_filter)
+    if ranked.empty:
+        print("Mean rank bar plot: no data after filtering.")
+        return
+
+    mean_score = ranked.groupby(["model_name", "dataset_label"])["score"].mean().reset_index()
+    mean_score.columns = ["model_name", "dataset_label", "mean_score"]
+
+    if model_order:
+        order_map = {m: i for i, m in enumerate(model_order)}
+        mean_score["_sort"] = mean_score["model_name"].map(order_map).fillna(9999)
+        mean_score = mean_score.sort_values("_sort").drop(columns="_sort")
+
+    n_models = mean_score["model_name"].nunique()
+    n_datasets = mean_score["dataset_label"].nunique()
+
+    fig_w = max(fig_width, 5)
+    fig_h = max(fig_height, n_models * 0.9)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    sns.barplot(
+        data=mean_score,
+        x="mean_score",
+        y="model_name",
+        hue="dataset_label",
+        palette=dataset_colors,
+        orient="h",
+        ax=ax,
+    )
+
+    ax.set_ylabel("Model", fontsize=font_size)
+    ax.set_xlabel("Mean Score", fontsize=font_size)
+    ax.set_title("Mean score across metrics (higher is better)", fontsize=font_size, fontweight="bold", pad=12)
+    ax.tick_params(axis="x", labelsize=font_size - 4)
+    ax.tick_params(axis="y", labelsize=font_size - 4)
+
+    legend = ax.get_legend()
+    if legend is not None:
+        legend.remove()
+
+    out = output_dir / f"mean_rank_barplot.{plot_format}"
+    plt.savefig(out, dpi=300, bbox_inches="tight")
+    print(f"  Saved mean rank bar plot: {out}")
+    plt.close()
+
+    datasets_in_plot = sorted(mean_score["dataset_label"].unique())
+    fig_leg = plt.figure(figsize=(6, 1.2))
+    handles = [Patch(color=dataset_colors.get(d, "grey")) for d in datasets_in_plot]
+    fig_leg.legend(
+        handles,
+        datasets_in_plot,
+        title="Dataset",
+        loc="center",
+        frameon=True,
+        fancybox=True,
+        shadow=True,
+        ncol=3,
+        fontsize=font_size - 6,
+        title_fontsize=font_size - 4,
+    )
+    fig_leg.gca().set_axis_off()
+    leg_out = output_dir / f"mean_rank_barplot_legend.{plot_format}"
+    plt.savefig(leg_out, dpi=300, bbox_inches="tight")
+    print(f"  Saved mean rank bar plot legend: {leg_out}")
+    plt.close(fig_leg)
+
+
 def plot_metrics(
     metrics_file: Path,
     output_dir: Path,
@@ -1138,6 +1329,8 @@ def plot_metrics(
     scatter_legend_ncol: int = 1,
     scatter_point_size: float = 150,
     scatter_plot_metrics: list = None,
+    rank_plots_cfg: dict = None,
+    dataset_display_names: dict[str, str] | None = None,
 ) -> None:
     """Main plotting function."""
     # Load the metrics data
@@ -1175,6 +1368,18 @@ def plot_metrics(
             return dataset
 
     df_clean["dataset_label"] = df_clean.apply(create_dataset_label_name, axis=1)
+
+    if dataset_display_names:
+        def _apply_dataset_display(val: str) -> str:
+            for internal, display in dataset_display_names.items():
+                if val == internal:
+                    return display
+                if val.startswith(internal + "_"):
+                    suffix = val[len(internal) + 1:]
+                    return f"{display} {suffix}"
+            return val
+
+        df_clean["dataset_label"] = df_clean["dataset_label"].map(_apply_dataset_display)
 
     # Group model repetitions if requested
     if group_repetitions:
@@ -1394,6 +1599,42 @@ def plot_metrics(
                     accuracy_over_random_y_max,
                 )
 
+    # Rank-based plots
+    if rank_plots_cfg and rank_plots_cfg.get("enabled", False):
+        print("\nCreating rank-based plots...")
+        rp_metrics_raw = list(rank_plots_cfg.get("metrics", []))
+        rp_metric_display_raw = dict(rank_plots_cfg.get("metric_display_names", {}))
+        rp_label_kind = rank_plots_cfg.get("label_kind_filter", None)
+
+        rp_metrics = [m.replace("LabelSimilarity/", "") for m in rp_metrics_raw]
+        rp_display = {m.replace("LabelSimilarity/", ""): v for m, v in rp_metric_display_raw.items()}
+
+        create_rank_heatmaps(
+            df_clean,
+            rp_metrics,
+            rp_display,
+            model_order,
+            rp_label_kind,
+            output_dir,
+            plot_format,
+            font_size,
+            fig_width,
+            fig_height,
+        )
+
+        create_mean_rank_barplot(
+            df_clean,
+            rp_metrics,
+            model_order,
+            rp_label_kind,
+            dataset_colors,
+            output_dir,
+            plot_format,
+            font_size,
+            fig_width,
+            fig_height,
+        )
+
     # Print summary for debugging
     print("Data summary:")
     print(f"  Original datasets: {sorted(df_clean['dataset'].unique())}")
@@ -1411,6 +1652,45 @@ def plot_metrics(
         print(f"  Regular metrics being plotted: {sorted(regular_data['metric'].unique())}")
     if not baseline_data.empty:
         print(f"  Baseline metric: {sorted(baseline_data['metric'].unique())}")
+
+
+def resolve_dataset_display_names(cfg: DictConfig) -> dict[str, str]:
+    """Build a mapping from internal dataset ``name`` to ``displayed_name``.
+
+    Returns a dict like ``{"hiha": "HIHA", "human_pancreas": "Human Pancreas"}``.
+    Datasets without a ``displayed_name`` are omitted (identity mapping).
+    """
+    mapping: dict[str, str] = {}
+    for ds in cfg.get("datasets", []):
+        name = ds.get("name")
+        display = ds.get("displayed_name", None)
+        if name and display and name != display:
+            mapping[name] = display
+    return mapping
+
+
+def resolve_model_order(model_order: list[str], cfg: DictConfig) -> list[str]:
+    """Resolve model_order entries from config ``name`` to ``displayed_name``.
+
+    Users may specify the order using either the internal ``name`` or the
+    ``displayed_name``.  This function builds a name -> displayed_name map
+    from ``cfg.models`` and replaces any matching entries so that the
+    returned list uses the names that actually appear in the data.
+    """
+    if not model_order:
+        return model_order
+
+    name_to_display: dict[str, str] = {}
+    for m in cfg.get("models", []):
+        name = m.get("name", m.get("source"))
+        display = m.get("displayed_name", name)
+        if name and display:
+            name_to_display[name] = display
+
+    resolved: list[str] = []
+    for entry in model_order:
+        resolved.append(name_to_display.get(entry, entry))
+    return resolved
 
 
 def plot_metrics_from_config(cfg: DictConfig) -> None:
@@ -1441,11 +1721,11 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
     group_repetitions = cfg.collect_metrics.get("group_repetitions", True)
     show_error_bars = cfg.collect_metrics.get("show_error_bars", True)
 
-    # Get model order configuration
+    # Get model order configuration and resolve name -> displayed_name
     model_order = cfg.collect_metrics.get("model_order", None)
-    if model_order is not None and isinstance(model_order, list):
-        # Convert OmegaConf list to Python list
+    if model_order is not None:
         model_order = list(model_order)
+        model_order = resolve_model_order(model_order, cfg)
 
     # Get y-axis max configuration
     y_axis_max = cfg.collect_metrics.get("y_axis_max", None)
@@ -1456,9 +1736,18 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
     scatter_legend_ncol = cfg.collect_metrics.get("scatter_legend_ncol", 1)
     scatter_point_size = cfg.collect_metrics.get("scatter_point_size", 150)
     scatter_plot_metrics = cfg.collect_metrics.get("scatter_plot_metrics", None)
-    if scatter_plot_metrics is not None and isinstance(scatter_plot_metrics, list):
-        # Convert OmegaConf list to Python list
+    if scatter_plot_metrics is not None:
         scatter_plot_metrics = list(scatter_plot_metrics)
+
+    # Build dataset display name mapping
+    dataset_display_names = resolve_dataset_display_names(cfg)
+
+    # Get rank plots configuration
+    rank_plots_cfg = cfg.collect_metrics.get("rank_plots", None)
+    if rank_plots_cfg is not None:
+        from omegaconf import OmegaConf
+
+        rank_plots_cfg = OmegaConf.to_container(rank_plots_cfg, resolve=True)
 
     # Default skip options (can be overridden by command line)
     skip_scib = True  # Default to skipping scib since it has issues
@@ -1506,6 +1795,8 @@ def plot_metrics_from_config(cfg: DictConfig) -> None:
         scatter_legend_ncol,
         scatter_point_size,
         scatter_plot_metrics,
+        rank_plots_cfg,
+        dataset_display_names,
     )
 
     print(f"\nPlotting completed! Check output directory: {plots_output_dir}")
