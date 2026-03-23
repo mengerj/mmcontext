@@ -295,10 +295,10 @@ def _render_latex_table(
 
 
 def generate_latex_tables(df: pd.DataFrame, cfg: DictConfig) -> None:
-    """Generate LaTeX tables from the collected metrics DataFrame.
+    r"""Generate LaTeX tables from the collected metrics DataFrame.
 
     Produces one .tex file per (dataset, label, label_kind) group and a
-    combined ``all_tables.tex`` that ``\\input``-s every individual file.
+    combined ``all_tables.tex`` that ``\input``-s every individual file.
     """
     lt_cfg = cfg.collect_metrics.latex_tables
     output_dir = Path(cfg.collect_metrics.output_dir) / "tables"

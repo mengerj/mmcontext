@@ -1137,7 +1137,7 @@ def _compute_rank_table(
     work["value"] = pd.to_numeric(work["value"], errors="coerce")
 
     ranked_parts: list[pd.DataFrame] = []
-    for (ds_label, metric), grp in work.groupby(["dataset_label", "metric"]):
+    for (_ds_label, _metric), grp in work.groupby(["dataset_label", "metric"]):
         grp = grp.copy()
         grp["rank"] = grp["value"].rank(ascending=False, method="average")
         n_models = grp["model_name"].nunique()
@@ -1251,7 +1251,6 @@ def create_mean_rank_barplot(
         mean_score = mean_score.sort_values("_sort").drop(columns="_sort")
 
     n_models = mean_score["model_name"].nunique()
-    n_datasets = mean_score["dataset_label"].nunique()
 
     fig_w = max(fig_width, 5)
     fig_h = max(fig_height, n_models * 0.9)
