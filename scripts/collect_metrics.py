@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Script to collect and fuse metrics from evaluation results."""
 
+import math
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -181,6 +183,174 @@ def clean_metric_names(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _resolve_model_order(model_order: list[str], cfg: DictConfig) -> list[str]:
+    """Resolve model_order entries from config ``name`` to ``displayed_name``.
+
+    Users may specify the order using either the internal ``name`` or the
+    ``displayed_name``.  This builds a name -> displayed_name map from
+    ``cfg.models`` and replaces any matching entries so the returned list
+    uses the names that actually appear in the data.
+    """
+    if not model_order:
+        return model_order
+
+    name_to_display: dict[str, str] = {}
+    for m in cfg.get("models", []):
+        name = m.get("name", m.get("source"))
+        display = m.get("displayed_name", name)
+        if name and display:
+            name_to_display[name] = display
+
+    return [name_to_display.get(entry, entry) for entry in model_order]
+
+
+def _latex_escape(text: str) -> str:
+    """Escape special LaTeX characters in plain text."""
+    replacements = [
+        ("\\", "\\textbackslash{}"),
+        ("&", "\\&"),
+        ("%", "\\%"),
+        ("$", "\\$"),
+        ("#", "\\#"),
+        ("_", "\\_"),
+        ("{", "\\{"),
+        ("}", "\\}"),
+        ("~", "\\textasciitilde{}"),
+        ("^", "\\textasciicircum{}"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def _format_cell(value: float, decimals: int, is_best: bool, bold_best: bool) -> str:
+    """Format a single table cell value."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "--"
+    formatted = f"{value:.{decimals}f}"
+    if is_best and bold_best:
+        return f"\\textbf{{{formatted}}}"
+    return formatted
+
+
+def _render_latex_table(
+    pivot: pd.DataFrame,
+    metric_display: dict[str, str],
+    dataset: str,
+    label: str,
+    label_kind: str,
+    decimals: int,
+    bold_best: bool,
+) -> str:
+    """Render a single (dataset, label) pivot table as a LaTeX table string."""
+    metrics = list(pivot.columns)
+    n_metrics = len(metrics)
+    col_spec = "l" + "c" * n_metrics
+
+    col_maxes: dict[str, float] = {}
+    for m in metrics:
+        numeric = pd.to_numeric(pivot[m], errors="coerce")
+        if numeric.notna().any():
+            col_maxes[m] = numeric.max()
+
+    header_names = [metric_display.get(m, _latex_escape(m)) for m in metrics]
+    header_line = "Model & " + " & ".join(header_names) + " \\\\"
+
+    body_lines: list[str] = []
+    for model_name, row in pivot.iterrows():
+        cells: list[str] = [_latex_escape(str(model_name))]
+        for m in metrics:
+            val = row[m]
+            numeric_val = float(val) if pd.notna(val) else float("nan")
+            is_best = (
+                not math.isnan(numeric_val)
+                and m in col_maxes
+                and abs(numeric_val - col_maxes[m]) < 1e-12
+            )
+            cells.append(_format_cell(numeric_val, decimals, is_best, bold_best))
+        body_lines.append(" & ".join(cells) + " \\\\")
+
+    safe_dataset = _latex_escape(dataset)
+    safe_label_name = _latex_escape(label)
+    safe_kind = _latex_escape(label_kind)
+    caption = (
+        f"Evaluation results on the \\textit{{{safe_dataset}}} dataset "
+        f"for the \\textit{{{safe_label_name}}} label ({safe_kind})."
+    )
+    tab_label = re.sub(r"[^a-zA-Z0-9_]", "_", f"{dataset}_{label}_{label_kind}")
+
+    lines = [
+        "\\begin{table}[ht]",
+        "\\centering",
+        f"\\caption{{{caption}}}",
+        f"\\label{{tab:{tab_label}}}",
+        "\\resizebox{\\textwidth}{!}{%",
+        f"\\begin{{tabular}}{{{col_spec}}}",
+        "\\toprule",
+        header_line,
+        "\\midrule",
+        *body_lines,
+        "\\bottomrule",
+        "\\end{tabular}%",
+        "}",
+        "\\end{table}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def generate_latex_tables(df: pd.DataFrame, cfg: DictConfig) -> None:
+    """Generate LaTeX tables from the collected metrics DataFrame.
+
+    Produces one .tex file per (dataset, label, label_kind) group and a
+    combined ``all_tables.tex`` that ``\\input``-s every individual file.
+    """
+    lt_cfg = cfg.collect_metrics.latex_tables
+    output_dir = Path(cfg.collect_metrics.output_dir) / "tables"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    selected_metrics: list[str] = list(lt_cfg.metrics)
+    metric_display: dict[str, str] = dict(lt_cfg.metric_display_names) if lt_cfg.metric_display_names else {}
+    decimals: int = int(lt_cfg.decimal_places)
+    bold_best: bool = bool(lt_cfg.bold_best)
+    label_kind_filter: str | None = lt_cfg.get("label_kind_filter", None)
+    model_order: list[str] = list(cfg.collect_metrics.model_order) if cfg.collect_metrics.get("model_order") else []
+    model_order = _resolve_model_order(model_order, cfg)
+
+    work = df[df["metric"].isin(selected_metrics)].copy()
+    if label_kind_filter:
+        work = work[work["label_kind"] == label_kind_filter]
+
+    if work.empty:
+        print("LaTeX tables: no data after filtering – nothing to write.")
+        return
+
+    tex_files: list[str] = []
+
+    for (dataset, label, label_kind), grp in work.groupby(["dataset", "label", "label_kind"]):
+        pivot = grp.pivot_table(index="model_name", columns="metric", values="value", aggfunc="first")
+        pivot = pivot.reindex(columns=[m for m in selected_metrics if m in pivot.columns])
+
+        ordered_models: list[str] = []
+        remaining = set(pivot.index)
+        for m in model_order:
+            if m in remaining:
+                ordered_models.append(m)
+                remaining.discard(m)
+        ordered_models.extend(sorted(remaining))
+        pivot = pivot.reindex(ordered_models)
+
+        tex = _render_latex_table(pivot, metric_display, dataset, label, label_kind, decimals, bold_best)
+        fname = f"{dataset}_{label}_{label_kind}.tex"
+        (output_dir / fname).write_text(tex)
+        tex_files.append(fname)
+        print(f"  Wrote {output_dir / fname}")
+
+    combined = "\n".join(f"\\input{{tables/{f}}}" for f in sorted(tex_files)) + "\n"
+    combined_path = output_dir / "all_tables.tex"
+    combined_path.write_text(combined)
+    print(f"  Wrote combined file: {combined_path}")
+
+
 # Plotting functions have been moved to scripts/plot_metrics.py
 
 
@@ -208,6 +378,11 @@ def main(cfg: DictConfig) -> None:
     print(f"Total rows: {len(metrics_df)}")
 
     # Note: Use scripts/plot_metrics.py to create visualizations from the saved CSV
+
+    # Generate LaTeX tables if enabled
+    if cfg.collect_metrics.get("latex_tables", {}).get("enabled", False):
+        print("\nGenerating LaTeX tables...")
+        generate_latex_tables(metrics_df, cfg)
 
     # Save a copy of the configuration
     config_file = output_dir / "config.yaml"
