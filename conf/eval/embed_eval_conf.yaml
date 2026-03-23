@@ -1,7 +1,7 @@
 # conf/combined_conf.yaml
 # Combined configuration for embedding + evaluation pipeline
 defaults:
-  - datasets: dataset_list_red.yaml
+  - datasets: dataset_list.yaml
   - models: model_list_cxg_geo_all.yaml
   - _self_
 
