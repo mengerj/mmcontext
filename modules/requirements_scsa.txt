@@ -1,4 +1,5 @@
 # SCSA dependencies — requires numpy<2.0 due to use of numpy.asfarray
+# Python 3.10
 numpy<2.0
 pandas<2.0
 scipy
