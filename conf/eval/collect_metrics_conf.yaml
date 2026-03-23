@@ -104,7 +104,7 @@ collect_metrics:
     enabled: true
     decimal_places: 3
     bold_best: true
-    label_kind_filter: bio  # null = all, or "bio" / "batch"
+    label_kind_filter: bio # null = all, or "bio" / "batch"
     metrics:
       - "LabelSimilarity/balanced_accuracy"
       - "LabelSimilarity/macro_f1"

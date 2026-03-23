@@ -99,7 +99,7 @@ def main(cfg: DictConfig) -> None:
         calmate_store = cfg.scsa.get("calmate_store", "modules/.calmate/mappings.csv")
         calmate_cli = "modules/calmate_venv/bin/calmate"
         print(f"\n{'=' * 60}")
-        print(f"  LABEL MAPPING REVIEW REQUIRED")
+        print("  LABEL MAPPING REVIEW REQUIRED")
         print(f"{'=' * 60}")
         print(f"\n{needs_review} dataset(s) have unreviewed or missing label mappings.")
         print("\nDetails:")

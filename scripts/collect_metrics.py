@@ -262,11 +262,7 @@ def _render_latex_table(
         for m in metrics:
             val = row[m]
             numeric_val = float(val) if pd.notna(val) else float("nan")
-            is_best = (
-                not math.isnan(numeric_val)
-                and m in col_maxes
-                and abs(numeric_val - col_maxes[m]) < 1e-12
-            )
+            is_best = not math.isnan(numeric_val) and m in col_maxes and abs(numeric_val - col_maxes[m]) < 1e-12
             cells.append(_format_cell(numeric_val, decimals, is_best, bold_best))
         body_lines.append(" & ".join(cells) + " \\\\")
 

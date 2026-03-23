@@ -1370,12 +1370,13 @@ def plot_metrics(
     df_clean["dataset_label"] = df_clean.apply(create_dataset_label_name, axis=1)
 
     if dataset_display_names:
+
         def _apply_dataset_display(val: str) -> str:
             for internal, display in dataset_display_names.items():
                 if val == internal:
                     return display
                 if val.startswith(internal + "_"):
-                    suffix = val[len(internal) + 1:]
+                    suffix = val[len(internal) + 1 :]
                     return f"{display} {suffix}"
             return val
 
