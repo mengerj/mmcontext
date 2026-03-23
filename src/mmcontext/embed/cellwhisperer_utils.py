@@ -5,6 +5,7 @@ This module provides functions to generate embeddings using CellWhisperer models
 and integrate them into the mmcontext embedding/evaluation pipeline.
 """
 
+import json
 import logging
 import os
 import subprocess
@@ -13,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import anndata as ad
-import json
 import numpy as np
 import pandas as pd
 import torch
