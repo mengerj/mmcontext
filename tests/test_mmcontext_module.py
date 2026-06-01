@@ -115,10 +115,10 @@ class TestPreprocessOmicsViaStore:
         inputs = ["omics:cell_A", "omics:cell_B"]
         features = module_with_store.preprocess(inputs)
 
-        assert "token_embeddings" in features
+        assert "input_values" in features
         assert features["modality"] == "omics"
         # Each cell maps to a single vector → (B, 1, D)
-        assert features["token_embeddings"].shape == (2, 1, 8)
+        assert features["input_values"].shape == (2, 1, 8)
 
     def test_preprocess_omics_ids_values_match_store(self, module_with_store, omics_store):
         """Resolved vectors match the VectorStore content."""
@@ -126,7 +126,7 @@ class TestPreprocessOmicsViaStore:
         features = module_with_store.preprocess(inputs)
 
         expected = omics_store["cell_C"]
-        actual = features["token_embeddings"][0, 0].numpy()
+        actual = features["input_values"][0, 0].numpy()
         np.testing.assert_array_almost_equal(actual, expected)
 
     def test_preprocess_omics_ids_attention_mask(self, module_with_store):
@@ -159,15 +159,15 @@ class TestPreprocessOmicsDirect:
         features = module.preprocess(inputs)
 
         assert features["modality"] == "omics"
-        assert features["token_embeddings"].shape == (2, 1, 3)
+        assert features["input_values"].shape == (2, 1, 3)
         assert features["attention_mask"].shape == (2, 1)
 
     def test_preprocess_direct_values_preserved(self, module):
-        """Direct vectors appear unchanged in token_embeddings."""
+        """Direct vectors appear unchanged in input_values."""
         vec = np.array([1.5, -2.5, 3.5], dtype=np.float32)
         features = module.preprocess([{"omics_values": vec}])
 
-        actual = features["token_embeddings"][0, 0].numpy()
+        actual = features["input_values"][0, 0].numpy()
         np.testing.assert_array_almost_equal(actual, vec)
 
     def test_preprocess_direct_var_multiple_vectors(self, module):
@@ -188,7 +188,7 @@ class TestPreprocessOmicsDirect:
         features = module.preprocess(inputs)
 
         # Padded to max length in batch → (2, 3, 2)
-        assert features["token_embeddings"].shape == (2, 3, 2)
+        assert features["input_values"].shape == (2, 3, 2)
         # Attention mask reflects real vs padded tokens
         assert features["attention_mask"][0].tolist() == [1, 1, 1]
         assert features["attention_mask"][1].tolist() == [1, 1, 0]
@@ -247,9 +247,9 @@ class TestForward:
         assert (result["modality_ids"] == 0).all()
 
     def test_forward_omics_passthrough(self, module_with_store):
-        """Omics forward: token_embeddings pass through unchanged."""
+        """Omics forward: input_values pass through to token_embeddings unchanged."""
         features = module_with_store.preprocess(["omics:cell_A"])
-        input_embeddings = features["token_embeddings"].clone()
+        input_embeddings = features["input_values"].clone()
         result = module_with_store.forward(features)
 
         assert "token_embeddings" in result

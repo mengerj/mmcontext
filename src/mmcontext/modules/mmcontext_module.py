@@ -17,7 +17,8 @@ The module operates in two modes depending on the input modality:
 **Omics mode** (``modality="omics"``):
     Omics vectors are either looked up from an attached :class:`VectorStore`
     (using prefixed string IDs) or provided directly as numpy arrays (via dict
-    inputs). These vectors pass through to ``token_embeddings`` without any
+    inputs). These vectors are stored as ``input_values`` and passed through to
+    ``token_embeddings`` in the forward output without any
     learned transformation — the downstream AdapterModule handles projection.
 
 Features dict contract (after ``forward()``)::
@@ -197,7 +198,7 @@ class MMContextModule(InputModule):
         -------
         dict[str, Tensor | Any]
             Features dict. For text: ``{input_ids, attention_mask, modality}``.
-            For omics: ``{token_embeddings, attention_mask, modality}``.
+            For omics: ``{input_values, attention_mask, modality}``.
 
         Raises
         ------
@@ -258,11 +259,11 @@ class MMContextModule(InputModule):
             vectors.append(torch.from_numpy(vec).unsqueeze(0))  # (1, D)
 
         # Stack into (B, 1, D) — each sample is a single obs-level vector
-        token_embeddings = torch.stack(vectors, dim=0)  # (B, 1, D)
+        input_values = torch.stack(vectors, dim=0)  # (B, 1, D)
         attention_mask = torch.ones(len(texts), 1, dtype=torch.long)
 
         return {
-            "token_embeddings": token_embeddings,
+            "input_values": input_values,
             "attention_mask": attention_mask,
             "modality": "omics",
         }
@@ -305,15 +306,15 @@ class MMContextModule(InputModule):
         dim = all_embeddings[0].shape[-1]
         batch_size = len(inputs)
 
-        token_embeddings = torch.zeros(batch_size, max_len, dim)
+        input_values = torch.zeros(batch_size, max_len, dim)
         attention_mask = torch.zeros(batch_size, max_len, dtype=torch.long)
 
         for i, (emb, length) in enumerate(zip(all_embeddings, lengths)):
-            token_embeddings[i, :length] = emb
+            input_values[i, :length] = emb
             attention_mask[i, :length] = 1
 
         return {
-            "token_embeddings": token_embeddings,
+            "input_values": input_values,
             "attention_mask": attention_mask,
             "modality": "omics",
         }
@@ -332,7 +333,7 @@ class MMContextModule(InputModule):
         ----------
         features : dict
             Features dict from :meth:`preprocess`. Must contain either
-            ``input_ids`` (text) or ``token_embeddings`` (omics), plus
+            ``input_ids`` (text) or ``input_values`` (omics), plus
             ``attention_mask`` and ``modality``.
 
         Returns
@@ -375,14 +376,21 @@ class MMContextModule(InputModule):
     def _forward_omics(
         self, features: dict[str, torch.Tensor | Any]
     ) -> dict[str, torch.Tensor | Any]:
-        """Pass omics embeddings through unchanged."""
-        token_embeddings = features["token_embeddings"]  # (B, L, D)
+        """Pass omics embeddings through unchanged.
+
+        Reads from ``input_values`` (set by preprocess) and writes to
+        ``token_embeddings`` (the standard key consumed by downstream modules).
+        Using ``input_values`` as the preprocess key ensures compatibility with
+        the ST training collator's ``collect_features`` suffix matching.
+        """
+        token_embeddings = features["input_values"]  # (B, L, D)
 
         B, L = token_embeddings.shape[:2]
         modality_ids = torch.full(
             (B, L), MODALITY_OMICS, dtype=torch.long, device=token_embeddings.device
         )
 
+        features["token_embeddings"] = token_embeddings
         features["modality_ids"] = modality_ids
         return features
 
