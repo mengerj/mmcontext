@@ -44,8 +44,8 @@ from transformers import AutoModel, AutoTokenizer
 
 from .adapters import AdapterModule
 
-# Import local dependencies using relative imports (works with package structure)
-from .file_utils import (
+# file_utils remains at the package root (not moved to _legacy)
+from mmcontext.file_utils import (
     build_embedding_df,
     collect_unique_links,
     download_and_extract_links,

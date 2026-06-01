@@ -1,7 +1,7 @@
 from importlib.metadata import version
 
-from . import embed, eval, models, pl
+from . import embed, eval, io, modules, pl
 
-__all__ = ["models", "eval", "pl", "embed"]
+__all__ = ["modules", "io", "eval", "pl", "embed"]
 
 __version__ = version("mmcontext")

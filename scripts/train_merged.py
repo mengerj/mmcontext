@@ -32,7 +32,7 @@ from transformers.integrations import WandbCallback
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
 from mmcontext.eval import SystemMonitor
 from mmcontext.hub_utils import get_model_info_from_config, upload_model_to_hub
-from mmcontext.mmcontextencoder import MMContextEncoder
+from mmcontext._legacy.mmcontextencoder import MMContextEncoder
 from mmcontext.utils import (
     get_evaluator,
     get_loss,

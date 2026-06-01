@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mmcontext.mmcontextencoder import MMContextEncoder
+from mmcontext._legacy.mmcontextencoder import MMContextEncoder
 
 
 # --- helper that builds a text-only encoder cheaply (no real BERT) --------
