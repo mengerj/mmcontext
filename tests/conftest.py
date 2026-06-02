@@ -13,7 +13,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.models.auto import configuration_auto, modeling_auto
 
-from mmcontext.mmcontextencoder import MMContextEncoder, MMContextProcessor
+from mmcontext._legacy.mmcontextencoder import MMContextEncoder, MMContextProcessor
 
 # -----------------------------------------------------------------------------
 # Logging

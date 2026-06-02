@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from mmcontext.mmcontextencoder import AdapterModule, MMContextEncoder
+from mmcontext._legacy.mmcontextencoder import AdapterModule, MMContextEncoder
 
 
 # --------------------------------------------------------------------- #

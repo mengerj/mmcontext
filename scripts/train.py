@@ -19,11 +19,11 @@ from sentence_transformers import (
 from sentence_transformers.evaluation import SequentialEvaluator
 from transformers.integrations import WandbCallback
 
+from mmcontext._legacy.mmcontextencoder import MMContextEncoder
 from mmcontext.callback import UnfreezeAdapterCallback, UnfreezeTextEncoderCallback
 
 # from mmcontext.eval import SystemMonitor
 from mmcontext.hub_utils import prepare_model_for_hub, upload_model_to_hub
-from mmcontext.mmcontextencoder import MMContextEncoder
 
 # from mmcontext.pp.utils import consolidate_low_frequency_categories
 from mmcontext.utils import (  # , load_test_adata_from_hf_dataset
