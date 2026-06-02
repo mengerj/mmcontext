@@ -850,7 +850,7 @@ class LabelSimilarity(BaseEvaluator):
 
         n_cells, n_labels = similarity_matrix.shape
         if n_labels == 0 or n_cells == 0:
-            return {k: 0.0 for k in ks}
+            return dict.fromkeys(ks, 0.0)
 
         # Sanitize ks: positive, <= n_labels, unique and sorted
         valid_ks = sorted({int(k) for k in ks if int(k) > 0})
