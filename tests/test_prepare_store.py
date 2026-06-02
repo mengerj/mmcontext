@@ -142,6 +142,7 @@ class TestReadObsm:
 class TestOpenZarr:
     def test_open_directory(self, synthetic_zarr):
         from pathlib import Path
+
         zarr_path, *_ = synthetic_zarr
         root = _open_zarr(Path(zarr_path))
         assert "obs" in root
@@ -149,6 +150,7 @@ class TestOpenZarr:
 
     def test_nonexistent_raises(self, tmp_dir):
         from pathlib import Path
+
         with pytest.raises(FileNotFoundError):
             _open_zarr(Path(tmp_dir) / "nope.zarr")
 
@@ -166,10 +168,12 @@ class TestPrepareVectorStore:
         zarr_path, obs_names, n_obs, d_pca, _ = synthetic_zarr
 
         # Simulate a dataset where all samples come from one zarr file
-        ds = Dataset.from_dict({
-            "sample_idx": obs_names[:5],  # use first 5
-            "adata_link": [zarr_path] * 5,
-        })
+        ds = Dataset.from_dict(
+            {
+                "sample_idx": obs_names[:5],  # use first 5
+                "adata_link": [zarr_path] * 5,
+            }
+        )
 
         output_path = os.path.join(tmp_dir, "test_store.mmap")
         store = prepare_vector_store(
@@ -190,10 +194,12 @@ class TestPrepareVectorStore:
 
         zarr_path, obs_names, *_ = synthetic_zarr
 
-        ds = Dataset.from_dict({
-            "sample_idx": [obs_names[3]],
-            "adata_link": [zarr_path],
-        })
+        ds = Dataset.from_dict(
+            {
+                "sample_idx": [obs_names[3]],
+                "adata_link": [zarr_path],
+            }
+        )
 
         output_path = os.path.join(tmp_dir, "val_store.mmap")
         store = prepare_vector_store(ds, obsm_key="X_pca", output_path=output_path)
@@ -209,10 +215,12 @@ class TestPrepareVectorStore:
 
         zarr_path, *_ = synthetic_zarr
 
-        ds = Dataset.from_dict({
-            "sample_idx": ["nonexistent_cell"],
-            "adata_link": [zarr_path],
-        })
+        ds = Dataset.from_dict(
+            {
+                "sample_idx": ["nonexistent_cell"],
+                "adata_link": [zarr_path],
+            }
+        )
 
         output_path = os.path.join(tmp_dir, "err_store.mmap")
         with pytest.raises(KeyError, match="nonexistent_cell"):
@@ -224,10 +232,12 @@ class TestPrepareVectorStore:
 
         zarr_path, obs_names, *_ = synthetic_zarr
 
-        ds = Dataset.from_dict({
-            "sample_idx": obs_names[:3],
-            "adata_link": [zarr_path] * 3,
-        })
+        ds = Dataset.from_dict(
+            {
+                "sample_idx": obs_names[:3],
+                "adata_link": [zarr_path] * 3,
+            }
+        )
 
         output_path = os.path.join(tmp_dir, "cached_store.mmap")
 
@@ -244,17 +254,21 @@ class TestPrepareVectorStore:
 
         zarr_path, obs_names, _, d_pca, d_scvi = synthetic_zarr
 
-        ds = Dataset.from_dict({
-            "sample_idx": obs_names[:2],
-            "adata_link": [zarr_path] * 2,
-        })
+        ds = Dataset.from_dict(
+            {
+                "sample_idx": obs_names[:2],
+                "adata_link": [zarr_path] * 2,
+            }
+        )
 
         pca_store = prepare_vector_store(
-            ds, obsm_key="X_pca",
+            ds,
+            obsm_key="X_pca",
             output_path=os.path.join(tmp_dir, "pca.mmap"),
         )
         scvi_store = prepare_vector_store(
-            ds, obsm_key="X_scvi",
+            ds,
+            obsm_key="X_scvi",
             output_path=os.path.join(tmp_dir, "scvi.mmap"),
         )
 

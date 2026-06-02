@@ -23,7 +23,6 @@ import tempfile
 import numpy as np
 import pytest
 import torch
-
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.sentence_transformer.modules import Normalize, Pooling
 
@@ -44,12 +43,13 @@ def tmp_dir():
 def real_safetensors():
     """Undo the global safetensors.torch.load_model patch for persistence tests."""
     import safetensors.torch
+
     importlib.reload(safetensors.torch)
     yield
 
 
 # -- Shared dims used across all fixtures -----------------------------------
-TEXT_DIM = 32     # matches _TextEncStub hidden_size
+TEXT_DIM = 32  # matches _TextEncStub hidden_size
 OMICS_DIM = 8
 SHARED_DIM = 16
 
@@ -98,24 +98,28 @@ def attention_module():
 @pytest.fixture
 def obs_pipeline(mmcontext_module, adapter_module):
     """Obs pipeline: MMContext → Adapter → Pooling → Normalize."""
-    return SentenceTransformer(modules=[
-        mmcontext_module,
-        adapter_module,
-        Pooling(embedding_dimension=SHARED_DIM, pooling_mode="mean"),
-        Normalize(),
-    ])
+    return SentenceTransformer(
+        modules=[
+            mmcontext_module,
+            adapter_module,
+            Pooling(embedding_dimension=SHARED_DIM, pooling_mode="mean"),
+            Normalize(),
+        ]
+    )
 
 
 @pytest.fixture
 def var_pipeline(mmcontext_module, attention_module, adapter_module):
     """Var pipeline: MMContext → OmicsAttention → Adapter → Pooling → Normalize."""
-    return SentenceTransformer(modules=[
-        mmcontext_module,
-        attention_module,
-        adapter_module,
-        Pooling(embedding_dimension=SHARED_DIM, pooling_mode="mean"),
-        Normalize(),
-    ])
+    return SentenceTransformer(
+        modules=[
+            mmcontext_module,
+            attention_module,
+            adapter_module,
+            Pooling(embedding_dimension=SHARED_DIM, pooling_mode="mean"),
+            Normalize(),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -173,10 +177,7 @@ class TestEncodeOmicsDirect:
 
     def test_encode_omics_direct_var(self, var_pipeline):
         """Encoding var-level (multiple gene vectors) produces correct shape."""
-        genes = [
-            np.random.randn(OMICS_DIM).astype(np.float32)
-            for _ in range(5)
-        ]
+        genes = [np.random.randn(OMICS_DIM).astype(np.float32) for _ in range(5)]
         embedding = var_pipeline.encode([{"omics_values": genes}])
         assert isinstance(embedding, np.ndarray)
         assert embedding.shape == (1, SHARED_DIM)
@@ -241,9 +242,7 @@ class TestObsPipeline:
     def test_obs_text_and_omics_same_output_dim(self, obs_pipeline):
         """Text and omics inputs produce same dimensionality."""
         text_emb = obs_pipeline.encode(["Some text"])
-        omics_emb = obs_pipeline.encode([{
-            "omics_values": np.random.randn(OMICS_DIM).astype(np.float32)
-        }])
+        omics_emb = obs_pipeline.encode([{"omics_values": np.random.randn(OMICS_DIM).astype(np.float32)}])
         assert text_emb.shape[-1] == omics_emb.shape[-1] == SHARED_DIM
 
     def test_obs_deterministic(self, obs_pipeline):
@@ -267,10 +266,7 @@ class TestVarPipeline:
 
     def test_var_multiple_genes(self, var_pipeline):
         """Multiple gene vectors are attended and pooled."""
-        genes = [
-            np.random.randn(OMICS_DIM).astype(np.float32)
-            for _ in range(10)
-        ]
+        genes = [np.random.randn(OMICS_DIM).astype(np.float32) for _ in range(10)]
         embedding = var_pipeline.encode([{"omics_values": genes}])
         assert embedding.shape == (1, SHARED_DIM)
 
@@ -349,19 +345,19 @@ class TestPrecisionConversion:
 
     def test_precision_conversion_parameters(self, mmcontext_module, adapter_module):
         """Pipeline modules can be converted to fp16."""
-        pipeline = SentenceTransformer(modules=[
-            mmcontext_module,
-            adapter_module,
-            Pooling(embedding_dimension=SHARED_DIM, pooling_mode="mean"),
-            Normalize(),
-        ])
+        pipeline = SentenceTransformer(
+            modules=[
+                mmcontext_module,
+                adapter_module,
+                Pooling(embedding_dimension=SHARED_DIM, pooling_mode="mean"),
+                Normalize(),
+            ]
+        )
         pipeline.half()
 
         # All learnable parameters should now be fp16
         for name, param in pipeline.named_parameters():
-            assert param.dtype == torch.float16, (
-                f"Parameter {name} is {param.dtype}, expected float16"
-            )
+            assert param.dtype == torch.float16, f"Parameter {name} is {param.dtype}, expected float16"
 
         # Restore to fp32 — the session-scoped _TextEncStub (from conftest)
         # is shared across all tests; leaving it in fp16 would pollute
@@ -399,20 +395,22 @@ class TestTraining:
         from sentence_transformers import SentenceTransformerTrainer, SentenceTransformerTrainingArguments
         from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
 
-        ds = Dataset.from_dict({
-            "anchor": [
-                "A neuron from the thalamus.",
-                "An epithelial cell from the lung.",
-                "A B cell from peripheral blood.",
-                "A fibroblast from skin tissue.",
-            ],
-            "positive": [
-                "Thalamic neuron expressing SYT1 and GNAS.",
-                "Lung epithelial cell with high EPCAM.",
-                "CD19-positive B lymphocyte.",
-                "Dermal fibroblast with COL1A1 expression.",
-            ],
-        })
+        ds = Dataset.from_dict(
+            {
+                "anchor": [
+                    "A neuron from the thalamus.",
+                    "An epithelial cell from the lung.",
+                    "A B cell from peripheral blood.",
+                    "A fibroblast from skin tissue.",
+                ],
+                "positive": [
+                    "Thalamic neuron expressing SYT1 and GNAS.",
+                    "Lung epithelial cell with high EPCAM.",
+                    "CD19-positive B lymphocyte.",
+                    "Dermal fibroblast with COL1A1 expression.",
+                ],
+            }
+        )
 
         loss = MultipleNegativesRankingLoss(obs_pipeline)
         args = SentenceTransformerTrainingArguments(
@@ -437,9 +435,7 @@ class TestTraining:
 
         # At least some parameters should have changed
         total_delta = sum(
-            (p - params_before[n]).abs().sum().item()
-            for n, p in obs_pipeline.named_parameters()
-            if n in params_before
+            (p - params_before[n]).abs().sum().item() for n, p in obs_pipeline.named_parameters() if n in params_before
         )
         assert total_delta > 0, "No parameters changed during text-only training"
 
@@ -457,20 +453,22 @@ class TestTraining:
         first_module = list(obs_pipeline.children())[0]
         first_module.set_vector_store(obs_store)
 
-        ds = Dataset.from_dict({
-            "anchor": [
-                "omics:cell_0",
-                "omics:cell_1",
-                "omics:cell_2",
-                "omics:cell_3",
-            ],
-            "positive": [
-                "Thalamic neuron expressing SYT1.",
-                "Lung epithelial cell with EPCAM.",
-                "CD19-positive B lymphocyte.",
-                "Dermal fibroblast with COL1A1.",
-            ],
-        })
+        ds = Dataset.from_dict(
+            {
+                "anchor": [
+                    "omics:cell_0",
+                    "omics:cell_1",
+                    "omics:cell_2",
+                    "omics:cell_3",
+                ],
+                "positive": [
+                    "Thalamic neuron expressing SYT1.",
+                    "Lung epithelial cell with EPCAM.",
+                    "CD19-positive B lymphocyte.",
+                    "Dermal fibroblast with COL1A1.",
+                ],
+            }
+        )
 
         loss = MultipleNegativesRankingLoss(obs_pipeline)
         args = SentenceTransformerTrainingArguments(
@@ -493,9 +491,7 @@ class TestTraining:
         trainer.train()
 
         total_delta = sum(
-            (p - params_before[n]).abs().sum().item()
-            for n, p in obs_pipeline.named_parameters()
-            if n in params_before
+            (p - params_before[n]).abs().sum().item() for n, p in obs_pipeline.named_parameters() if n in params_before
         )
         assert total_delta > 0, "No parameters changed during bimodal training"
 
@@ -511,20 +507,22 @@ class TestTraining:
         from sentence_transformers import SentenceTransformerTrainer, SentenceTransformerTrainingArguments
         from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
 
-        ds = Dataset.from_dict({
-            "anchor": [
-                "MALAT1 MT-CO3 GNAS SYT1 CALM1",
-                "EPCAM KRT8 KRT18 MUC1",
-                "CD19 MS4A1 CD79A PAX5",
-                "COL1A1 COL3A1 FN1 VIM",
-            ],
-            "positive": [
-                "Thalamic neuron expressing SYT1.",
-                "Lung epithelial cell with EPCAM.",
-                "CD19-positive B lymphocyte.",
-                "Dermal fibroblast with COL1A1.",
-            ],
-        })
+        ds = Dataset.from_dict(
+            {
+                "anchor": [
+                    "MALAT1 MT-CO3 GNAS SYT1 CALM1",
+                    "EPCAM KRT8 KRT18 MUC1",
+                    "CD19 MS4A1 CD79A PAX5",
+                    "COL1A1 COL3A1 FN1 VIM",
+                ],
+                "positive": [
+                    "Thalamic neuron expressing SYT1.",
+                    "Lung epithelial cell with EPCAM.",
+                    "CD19-positive B lymphocyte.",
+                    "Dermal fibroblast with COL1A1.",
+                ],
+            }
+        )
 
         loss = MultipleNegativesRankingLoss(obs_pipeline)
         args = SentenceTransformerTrainingArguments(
@@ -547,9 +545,7 @@ class TestTraining:
         trainer.train()
 
         total_delta = sum(
-            (p - params_before[n]).abs().sum().item()
-            for n, p in obs_pipeline.named_parameters()
-            if n in params_before
+            (p - params_before[n]).abs().sum().item() for n, p in obs_pipeline.named_parameters() if n in params_before
         )
         assert total_delta > 0, "No parameters changed during gene-list training"
 
@@ -559,20 +555,22 @@ class TestTraining:
         from sentence_transformers import SentenceTransformerTrainer, SentenceTransformerTrainingArguments
         from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
 
-        ds = Dataset.from_dict({
-            "anchor": [
-                "MALAT1 MT-CO3 GNAS SYT1",
-                "EPCAM KRT8 KRT18 MUC1",
-                "CD19 MS4A1 CD79A PAX5",
-                "COL1A1 COL3A1 FN1 VIM",
-            ],
-            "positive": [
-                "Thalamic neuron expressing SYT1.",
-                "Lung epithelial cell with EPCAM.",
-                "CD19-positive B lymphocyte.",
-                "Dermal fibroblast with COL1A1.",
-            ],
-        })
+        ds = Dataset.from_dict(
+            {
+                "anchor": [
+                    "MALAT1 MT-CO3 GNAS SYT1",
+                    "EPCAM KRT8 KRT18 MUC1",
+                    "CD19 MS4A1 CD79A PAX5",
+                    "COL1A1 COL3A1 FN1 VIM",
+                ],
+                "positive": [
+                    "Thalamic neuron expressing SYT1.",
+                    "Lung epithelial cell with EPCAM.",
+                    "CD19-positive B lymphocyte.",
+                    "Dermal fibroblast with COL1A1.",
+                ],
+            }
+        )
 
         loss = MultipleNegativesRankingLoss(obs_pipeline)
         save_path = os.path.join(tmp_dir, "trained_model")
