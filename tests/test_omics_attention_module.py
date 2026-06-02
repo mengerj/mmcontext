@@ -33,7 +33,9 @@ def tmp_dir():
 def real_safetensors():
     """Undo the global safetensors.torch.load_model patch for persistence tests."""
     import importlib
+
     import safetensors.torch
+
     importlib.reload(safetensors.torch)
     yield
 
@@ -107,9 +109,7 @@ class TestTextPassthrough:
         result = module(features)
 
         # Text tokens (first 3) should be unchanged
-        torch.testing.assert_close(
-            result["token_embeddings"][:, :3, :], x[:, :3, :]
-        )
+        torch.testing.assert_close(result["token_embeddings"][:, :3, :], x[:, :3, :])
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +131,9 @@ class TestOmicsTransformed:
         result = module(features)
 
         # Output should differ from input (attention mixes information)
-        assert not torch.allclose(
-            result["token_embeddings"], x, atol=1e-6
-        ), "Omics tokens should be transformed by self-attention"
+        assert not torch.allclose(result["token_embeddings"], x, atol=1e-6), (
+            "Omics tokens should be transformed by self-attention"
+        )
 
     def test_omics_transformed_in_mixed_batch(self, module):
         """Omics tokens in a mixed batch are modified."""
@@ -149,9 +149,9 @@ class TestOmicsTransformed:
         result = module(features)
 
         # Omics tokens (last 3) should be modified
-        assert not torch.allclose(
-            result["token_embeddings"][:, 3:, :], x[:, 3:, :], atol=1e-6
-        ), "Omics tokens should be transformed by self-attention"
+        assert not torch.allclose(result["token_embeddings"][:, 3:, :], x[:, 3:, :], atol=1e-6), (
+            "Omics tokens should be transformed by self-attention"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -212,14 +212,20 @@ class TestVariableLengthSequences:
 
         # Sample 0: 3 omics tokens + 2 pad
         # Sample 1: 5 omics tokens + 0 pad
-        modality_ids = torch.tensor([
-            [1, 1, 1, 2, 2],
-            [1, 1, 1, 1, 1],
-        ], dtype=torch.long)
-        attention_mask = torch.tensor([
-            [1, 1, 1, 0, 0],
-            [1, 1, 1, 1, 1],
-        ], dtype=torch.long)
+        modality_ids = torch.tensor(
+            [
+                [1, 1, 1, 2, 2],
+                [1, 1, 1, 1, 1],
+            ],
+            dtype=torch.long,
+        )
+        attention_mask = torch.tensor(
+            [
+                [1, 1, 1, 0, 0],
+                [1, 1, 1, 1, 1],
+            ],
+            dtype=torch.long,
+        )
 
         features = _make_features(
             token_embeddings=x.clone(),
@@ -233,8 +239,9 @@ class TestVariableLengthSequences:
 
         # Pad positions should remain zero (or unchanged)
         # The module should not produce non-zero values for pad positions
-        assert torch.all(result["token_embeddings"][0, 3:, :] == 0) or \
-               torch.allclose(result["token_embeddings"][0, 3:, :], x[0, 3:, :])
+        assert torch.all(result["token_embeddings"][0, 3:, :] == 0) or torch.allclose(
+            result["token_embeddings"][0, 3:, :], x[0, 3:, :]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -351,10 +358,7 @@ class TestGradientFlow:
         loss.backward()
         optimizer.step()
 
-        total_delta = sum(
-            (p - params_before[n]).abs().sum().item()
-            for n, p in module.named_parameters()
-        )
+        total_delta = sum((p - params_before[n]).abs().sum().item() for n, p in module.named_parameters())
         assert total_delta > 0, "Parameters did not change after optimizer step"
 
 
@@ -455,4 +459,4 @@ class TestProperties:
         """repr contains key config info."""
         r = repr(module)
         assert "16" in r  # input_dim
-        assert "2" in r   # num_heads
+        assert "2" in r  # num_heads

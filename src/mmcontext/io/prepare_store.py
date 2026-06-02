@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 # Zarr helpers — read obs_names and obsm without loading full AnnData
 # ---------------------------------------------------------------------------
 
+
 def _read_obs_names_zarr(root: zarr.Group) -> list[str]:
     """Read observation names from a zarr-backed AnnData store.
 
@@ -95,6 +96,7 @@ def _get_obsm_zarr_array(root: zarr.Group, obsm_key: str) -> zarr.Array:
 # Download helper
 # ---------------------------------------------------------------------------
 
+
 def _url_to_cache_name(url: str) -> str:
     """Deterministic short name for a URL, used as cache directory name."""
     return hashlib.sha256(url.encode()).hexdigest()[:16]
@@ -138,9 +140,10 @@ def _download_zarr(url: str, cache_dir: Path) -> Path:
     with requests.get(download_url, stream=True, timeout=(30, 600), headers=headers) as r:
         r.raise_for_status()
         total = int(r.headers.get("content-length", 0))
-        with open(zip_path, "wb") as f, tqdm(
-            total=total, unit="B", unit_scale=True, desc="Downloading", leave=False
-        ) as pbar:
+        with (
+            open(zip_path, "wb") as f,
+            tqdm(total=total, unit="B", unit_scale=True, desc="Downloading", leave=False) as pbar,
+        ):
             for chunk in r.iter_content(chunk_size=8 * 1024 * 1024):
                 f.write(chunk)
                 pbar.update(len(chunk))
@@ -186,6 +189,7 @@ def _open_zarr(path: Path) -> zarr.Group:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def prepare_vector_store(
     dataset: Dataset,
@@ -279,8 +283,7 @@ def prepare_vector_store(
         for sid in sample_ids:
             if sid not in obs_name_to_idx:
                 raise KeyError(
-                    f"Sample ID '{sid}' not found in obs_names of {link}. "
-                    f"First 5 obs_names: {obs_names[:5]}"
+                    f"Sample ID '{sid}' not found in obs_names of {link}. First 5 obs_names: {obs_names[:5]}"
                 )
             needed_rows.append(obs_name_to_idx[sid])
             needed_ids.append(sid)
@@ -292,9 +295,9 @@ def prepare_vector_store(
         sorted_rows = np.array(needed_rows)[sort_order]
 
         obsm_array = _get_obsm_zarr_array(root, obsm_key)
-        selected = obsm_array.get_orthogonal_selection(
-            (sorted_rows, slice(None))
-        ).astype(np.float32)  # (len(needed_rows), D)
+        selected = obsm_array.get_orthogonal_selection((sorted_rows, slice(None))).astype(
+            np.float32
+        )  # (len(needed_rows), D)
 
         # Unsort back to original order
         unsort = np.argsort(sort_order)

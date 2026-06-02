@@ -7,18 +7,18 @@
 
 ### Current → New
 
-| Aspect | Current | Refactored |
-|--------|---------|------------|
-| Base class | `Module` | `InputModule` |
-| Tokenization | `tokenize()` | `preprocess()` |
-| Omics storage | `nn.Embedding` lookup | `VectorStore` (memory-mapped) |
-| Omics key | `pixel_values` | `omics_values` |
-| Adapters | Inside encoder | Separate `AdapterModule(Module)` |
-| Modality flag | `omics_text_info` | `modality_ids` |
-| OneHotTextEncoder | Included | Removed |
-| Data loading | Coupled to encoder | `mmcontext.io` module |
-| Pipeline | `[MMContextEncoder]` | `[MMContextModule, AdapterModule, Pooling, Normalize]` |
-| Var support | Same class, no attention | Optional `OmicsAttentionModule` |
+| Aspect            | Current                  | Refactored                                             |
+| ----------------- | ------------------------ | ------------------------------------------------------ |
+| Base class        | `Module`                 | `InputModule`                                          |
+| Tokenization      | `tokenize()`             | `preprocess()`                                         |
+| Omics storage     | `nn.Embedding` lookup    | `VectorStore` (memory-mapped)                          |
+| Omics key         | `pixel_values`           | `omics_values`                                         |
+| Adapters          | Inside encoder           | Separate `AdapterModule(Module)`                       |
+| Modality flag     | `omics_text_info`        | `modality_ids`                                         |
+| OneHotTextEncoder | Included                 | Removed                                                |
+| Data loading      | Coupled to encoder       | `mmcontext.io` module                                  |
+| Pipeline          | `[MMContextEncoder]`     | `[MMContextModule, AdapterModule, Pooling, Normalize]` |
+| Var support       | Same class, no attention | Optional `OmicsAttentionModule`                        |
 
 ### Module Pipeline
 
@@ -52,12 +52,14 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 ### Phase 1: Foundation — VectorStore + IO Module
 
 **Files created/modified:**
+
 - `src/mmcontext/io/__init__.py` (new)
 - `src/mmcontext/io/vector_store.py` (new)
 - `src/mmcontext/io/adata_utils.py` (new — extracted from mmcontextencoder.py + file_utils.py)
 - `tests/test_vector_store.py` (new)
 
 **VectorStore responsibilities:**
+
 - Create from AnnData (obsm/varm), DataFrame, dict, or numpy array
 - Write embeddings to numpy memmap file + JSON index
 - Batch lookup by sample IDs → numpy array
@@ -65,6 +67,7 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 - Support both obs (1 vector/sample) and var (N vectors/sample)
 
 **Tests (write FIRST):**
+
 1. `test_from_numpy` — round-trip: write memmap, read back, values match
 2. `test_from_adata_obs` — create from adata.obsm, lookup by obs index
 3. `test_from_adata_var` — create from adata.varm, lookup by var index
@@ -75,6 +78,7 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 8. `test_persistence` — store survives close/reopen cycle
 
 **adata_utils responsibilities:**
+
 - `load_embeddings_from_adata_link()` — extracted from `get_initial_embeddings_from_adata_link`
 - `create_token_dataframe_from_obsm()` — extracted from encoder
 - `build_embedding_df()` — extracted from file_utils
@@ -84,11 +88,13 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 ### Phase 2: Core Module — MMContextModule (InputModule)
 
 **Files created/modified:**
+
 - `src/mmcontext/modules/__init__.py` (new)
 - `src/mmcontext/modules/mmcontext_module.py` (new)
 - `tests/test_mmcontext_module.py` (new)
 
 **MMContextModule responsibilities:**
+
 - Extends `InputModule` from sentence-transformers
 - `modalities` property returns `["text", "omics"]`
 - `preprocess(inputs)` routes by input type:
@@ -103,6 +109,7 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 - Text encoder freezing/unfreezing logic
 
 **Tests (write FIRST):**
+
 1. `test_preprocess_text_only` — text strings → input_ids, attention_mask, modality_ids
 2. `test_preprocess_omics_direct_vector` — raw vectors → omics_values, attention_mask, modality_ids
 3. `test_preprocess_omics_via_store` — prefixed IDs + VectorStore → resolved vectors
@@ -124,10 +131,12 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 ### Phase 3: Modality-Aware AdapterModule
 
 **Files created/modified:**
+
 - `src/mmcontext/modules/adapter_module.py` (new — replaces adapters.py as pipeline Module)
 - `tests/test_adapter_module.py` (new)
 
 **AdapterModule responsibilities:**
+
 - Extends `Module` from sentence-transformers
 - Reads `modality_ids` from features dict
 - Maintains separate projection weights: `text_proj` and `omics_proj`
@@ -138,6 +147,7 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 - `get_sentence_embedding_dimension()` returns D_shared
 
 **Tests (write FIRST):**
+
 1. `test_forward_text_only` — text tokens projected correctly
 2. `test_forward_omics_only` — omics tokens projected correctly
 3. `test_forward_mixed_batch` — text and omics tokens get different projections
@@ -154,10 +164,12 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 ### Phase 4: OmicsAttentionModule (Optional, Var-only)
 
 **Files created/modified:**
+
 - `src/mmcontext/modules/omics_attention_module.py` (new)
 - `tests/test_omics_attention_module.py` (new)
 
 **OmicsAttentionModule responsibilities:**
+
 - Extends `Module` from sentence-transformers
 - Reads `modality_ids` from features dict
 - Applies multi-head self-attention ONLY to omics tokens (modality_id=1)
@@ -167,6 +179,7 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 - `save()` / `load()` for persistence
 
 **Tests (write FIRST):**
+
 1. `test_text_passthrough` — text tokens unchanged after module
 2. `test_omics_transformed` — omics tokens are modified by self-attention
 3. `test_attention_mask_respected` — padded positions don't influence real tokens
@@ -181,10 +194,12 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 ### Phase 5: SentenceTransformer Integration
 
 **Files created/modified:**
+
 - `tests/test_st_integration.py` (new — replaces test_sentence_transformer_integration.py)
 - Minor adjustments to modules for compatibility
 
 **Integration tests (write FIRST):**
+
 1. `test_pipeline_construction` — modules compose into SentenceTransformer
 2. `test_encode_text` — `model.encode(["text"])` produces correct shape
 3. `test_encode_omics_direct` — `model.encode([{"omics_values": vector}])` works
@@ -206,6 +221,7 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 ### Phase 6: Documentation + Cleanup
 
 **Files modified:**
+
 - `src/mmcontext/__init__.py` — update public API exports
 - `src/mmcontext/modules/__init__.py` — export all modules
 - `src/mmcontext/io/__init__.py` — export VectorStore and utilities
@@ -213,6 +229,7 @@ All modules communicate through a features dict. After `MMContextModule.forward(
 - `README.md` — update architecture description and usage examples
 
 **Cleanup:**
+
 - Remove `OneHotTextEncoder` (`onehot.py`)
 - Archive old `mmcontextencoder.py` (keep temporarily for reference, don't import)
 - Archive old `adapters.py` (replaced by modules/adapter_module.py)
@@ -240,6 +257,7 @@ Phase 6 (Docs + Cleanup)  ← final polish
 ## Test Strategy
 
 Each phase follows strict TDD:
+
 1. Write test file with all tests (they will fail)
 2. Implement the module until all tests pass
 3. Run full test suite to check for regressions
@@ -247,6 +265,7 @@ Each phase follows strict TDD:
 **Stub strategy:** Tests use lightweight stubs (similar to existing `_TokStub`, `_TextEncStub`) to avoid downloading real models. The existing `conftest.py` pattern is extended for new modules.
 
 **What's preserved from current tests:**
+
 - Core encoding shapes and correctness (text, omics, mixed)
 - Save/load round-trips
 - Gradient flow through adapters
@@ -255,6 +274,7 @@ Each phase follows strict TDD:
 - Freezing/unfreezing behavior
 
 **What's new:**
+
 - VectorStore tests (memmap, lookup, persistence)
 - Modality-aware adapter tests (separate projections)
 - OmicsAttentionModule tests (self-attention on omics only)
