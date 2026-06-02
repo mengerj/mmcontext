@@ -2,6 +2,9 @@ import logging
 
 from transformers import TrainerCallback
 
+from mmcontext.modules.adapter_module import AdapterModule
+from mmcontext.modules.mmcontext_module import MMContextModule
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,42 +32,48 @@ class UnfreezeTextEncoderCallback(TrainerCallback):
         """
         if not self.unfrozen and state.epoch >= self.unfreeze_epoch:
             model = kwargs["model"]
-            # Assuming model[0] is your MMContextEncoder containing a text_encoder attribute
-            if hasattr(model[0], "text_encoder"):
-                for param in model[0].text_encoder.parameters():
+            if isinstance(model[0], MMContextModule):
+                model[0].unfreeze_text_encoder()
+                self.unfrozen = True
+                logger.info(f"Text encoder unfrozen at epoch {state.epoch:.2f}")
+            elif hasattr(model[0], "auto_model"):
+                for param in model[0].auto_model.parameters():
                     param.requires_grad = True
                 self.unfrozen = True
                 logger.info(f"Text encoder unfrozen at epoch {state.epoch:.2f}")
             else:
-                logger.warning("Model does not have a 'text_encoder' attribute at model[0].")
+                logger.warning("Model does not have a compatible text encoder at model[0].")
         return control
 
 
 class UnfreezeAdapterCallback(TrainerCallback):
     """
-    A TrainerCallback to freeze/unfreeze text and omics adapters at specified epochs.
+    A TrainerCallback to freeze/unfreeze text and omics adapter projections at specified epochs.
 
     This callback provides fine-grained control over adapter training by allowing you to:
-    1. Start with frozen adapters and unfreeze them at specific epochs
-    2. Control text and omics adapters independently
-    3. Handle cases where only one type of adapter is present
+    1. Start with frozen adapter projection heads and unfreeze them at specific epochs
+    2. Control text and omics projections independently
+    3. Handle cases where the AdapterModule is at any position in the pipeline
+
+    The callback searches ``model.children()`` for an :class:`AdapterModule` instance,
+    so it works regardless of whether an OmicsAttentionModule is included in the pipeline.
 
     Parameters
     ----------
     freeze_text_adapter : bool, optional
-        Whether to start with the text adapter frozen. Defaults to False.
+        Whether to start with the text projection head frozen. Defaults to False.
     freeze_omics_adapter : bool, optional
-        Whether to start with the omics adapter frozen. Defaults to False.
+        Whether to start with the omics projection head frozen. Defaults to False.
     unfreeze_text_adapter_epoch : float, optional
-        The epoch at which to unfreeze the text adapter. If None and freeze_text_adapter
-        is True, the adapter remains frozen. Defaults to None.
+        The epoch at which to unfreeze the text projection head. If None and freeze_text_adapter
+        is True, the projection remains frozen. Defaults to None.
     unfreeze_omics_adapter_epoch : float, optional
-        The epoch at which to unfreeze the omics adapter. If None and freeze_omics_adapter
-        is True, the adapter remains frozen. Defaults to None.
+        The epoch at which to unfreeze the omics projection head. If None and freeze_omics_adapter
+        is True, the projection remains frozen. Defaults to None.
 
     Examples
     --------
-    >>> # Freeze both adapters initially, unfreeze text at epoch 1, omics at epoch 2
+    >>> # Freeze both projections initially, unfreeze text at epoch 1, omics at epoch 2
     >>> callback = UnfreezeAdapterCallback(
     ...     freeze_text_adapter=True,
     ...     freeze_omics_adapter=True,
@@ -72,7 +81,7 @@ class UnfreezeAdapterCallback(TrainerCallback):
     ...     unfreeze_omics_adapter_epoch=2.0,
     ... )
 
-    >>> # Only control omics adapter (useful for text-only datasets)
+    >>> # Only control omics projection (useful for text-only datasets)
     >>> callback = UnfreezeAdapterCallback(freeze_omics_adapter=True, unfreeze_omics_adapter_epoch=1.5)
     """
 
@@ -88,59 +97,37 @@ class UnfreezeAdapterCallback(TrainerCallback):
         self.unfreeze_text_adapter_epoch = unfreeze_text_adapter_epoch
         self.unfreeze_omics_adapter_epoch = unfreeze_omics_adapter_epoch
 
-        # Track unfreezing state
         self.text_adapter_unfrozen = False
         self.omics_adapter_unfrozen = False
-
-        # Track initialization state
         self.adapters_initialized = False
+        self._adapter: AdapterModule | None = None
 
-    def _freeze_adapter(self, adapter, adapter_name: str):
-        """Freeze all parameters in an adapter."""
-        if adapter is not None:
-            for param in adapter.parameters():
-                param.requires_grad = False
-            logger.info(f"{adapter_name} adapter frozen")
-        else:
-            logger.debug(f"{adapter_name} adapter not present, skipping freeze")
-
-    def _unfreeze_adapter(self, adapter, adapter_name: str):
-        """Unfreeze all parameters in an adapter."""
-        if adapter is not None:
-            for param in adapter.parameters():
-                param.requires_grad = True
-            logger.info(f"{adapter_name} adapter unfrozen")
-        else:
-            logger.debug(f"{adapter_name} adapter not present, skipping unfreeze")
+    def _find_adapter(self, model) -> AdapterModule | None:
+        """Find the AdapterModule by iterating model.children()."""
+        for m in model.children():
+            if isinstance(m, AdapterModule):
+                return m
+        return None
 
     def on_train_begin(self, args, state, control, **kwargs):
         """Called at the beginning of training to initialize adapter freezing state."""
         model = kwargs["model"]
 
-        # Check if we have MMContextEncoder at model[0]
-        if not hasattr(model[0], "text_adapter") and not hasattr(model[0], "omics_adapter"):
-            logger.warning("Model does not have adapter attributes. Adapter callback will have no effect.")
-            # Don't set adapters_initialized = True when no adapters are present
+        adapter = self._find_adapter(model)
+        if adapter is None:
+            logger.warning("No AdapterModule found in model. Adapter callback will have no effect.")
             return control
 
-        # Initialize freezing state for adapters
-        if self.freeze_text_adapter and hasattr(model[0], "text_adapter"):
-            self._freeze_adapter(model[0].text_adapter, "Text")
+        self._adapter = adapter
 
-        if self.freeze_omics_adapter and hasattr(model[0], "omics_adapter"):
-            self._freeze_adapter(model[0].omics_adapter, "Omics")
+        if self.freeze_text_adapter:
+            adapter.freeze_text_proj()
+
+        if self.freeze_omics_adapter:
+            adapter.freeze_omics_proj()
 
         self.adapters_initialized = True
-
-        # Log current adapter status
-        text_adapter_present = hasattr(model[0], "text_adapter") and model[0].text_adapter is not None
-        omics_adapter_present = hasattr(model[0], "omics_adapter") and model[0].omics_adapter is not None
-
-        logger.info(
-            f"Adapter callback initialized - Text adapter: {'present' if text_adapter_present else 'absent'}, "
-            f"Omics adapter: {'present' if omics_adapter_present else 'absent'}"
-        )
-
+        logger.info("Adapter callback initialized — AdapterModule found and freeze state applied.")
         return control
 
     def on_epoch_begin(self, args, state, control, **kwargs):
@@ -148,28 +135,22 @@ class UnfreezeAdapterCallback(TrainerCallback):
         if not self.adapters_initialized:
             return control
 
-        model = kwargs["model"]
-
-        # Check text adapter unfreezing
         if (
             not self.text_adapter_unfrozen
             and self.unfreeze_text_adapter_epoch is not None
             and state.epoch >= self.unfreeze_text_adapter_epoch
         ):
-            if hasattr(model[0], "text_adapter"):
-                self._unfreeze_adapter(model[0].text_adapter, "Text")
-                self.text_adapter_unfrozen = True
-                logger.info(f"Text adapter unfrozen at epoch {state.epoch:.2f}")
+            self._adapter.unfreeze_text_proj()
+            self.text_adapter_unfrozen = True
+            logger.info(f"Text adapter projection unfrozen at epoch {state.epoch:.2f}")
 
-        # Check omics adapter unfreezing
         if (
             not self.omics_adapter_unfrozen
             and self.unfreeze_omics_adapter_epoch is not None
             and state.epoch >= self.unfreeze_omics_adapter_epoch
         ):
-            if hasattr(model[0], "omics_adapter"):
-                self._unfreeze_adapter(model[0].omics_adapter, "Omics")
-                self.omics_adapter_unfrozen = True
-                logger.info(f"Omics adapter unfrozen at epoch {state.epoch:.2f}")
+            self._adapter.unfreeze_omics_proj()
+            self.omics_adapter_unfrozen = True
+            logger.info(f"Omics adapter projection unfrozen at epoch {state.epoch:.2f}")
 
         return control
