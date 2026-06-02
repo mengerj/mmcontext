@@ -179,8 +179,8 @@ class TestSeparateWeights:
 
     def test_separate_weights(self, adapter):
         """text_proj and omics_proj have independent parameter sets."""
-        text_params = set(id(p) for p in adapter.text_proj.parameters())
-        omics_params = set(id(p) for p in adapter.omics_proj.parameters())
+        text_params = {id(p) for p in adapter.text_proj.parameters()}
+        omics_params = {id(p) for p in adapter.omics_proj.parameters()}
 
         # No overlap
         assert text_params.isdisjoint(omics_params)

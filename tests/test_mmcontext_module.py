@@ -95,7 +95,7 @@ class TestPreprocessText:
 
     def test_preprocess_text_with_prompt(self, module):
         """Optional prompt is prepended to text inputs."""
-        features_no_prompt = module.preprocess(["Test."])
+        module.preprocess(["Test."])
         features_with_prompt = module.preprocess(["Test."], prompt="Query: ")
 
         # Both should produce valid features; the prompt version processes

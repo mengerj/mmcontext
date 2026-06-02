@@ -134,6 +134,7 @@ def build_pipeline(
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    """Train MMContext on cxg_schaefer_tiny dataset."""
     parser = argparse.ArgumentParser(description="Train MMContext on cxg_schaefer_tiny")
     parser.add_argument(
         "--mode",
