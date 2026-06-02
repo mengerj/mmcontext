@@ -40,9 +40,9 @@ from sentence_transformers import (
     SentenceTransformerTrainingArguments,
 )
 from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
-from sentence_transformers.sentence_transformer.modules import Pooling, Normalize
+from sentence_transformers.sentence_transformer.modules import Normalize, Pooling
 
-from mmcontext.modules import MMContextModule, AdapterModule
+from mmcontext.modules import AdapterModule, MMContextModule
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -74,6 +74,7 @@ def prepare_bimodal_dataset(ds):
 
     Returns a HF Dataset with columns ``anchor`` and ``positive``.
     """
+
     def prefix_omics(example):
         example["anchor"] = f"omics:{example['sample_idx']}"
         return example
@@ -149,14 +150,14 @@ def main():
         "--vector-store",
         default=None,
         help="Path to .mmap VectorStore file. For bimodal mode: if omitted, "
-             "the store is built automatically from adata_link + sample_idx "
-             "columns using --obsm-key.",
+        "the store is built automatically from adata_link + sample_idx "
+        "columns using --obsm-key.",
     )
     parser.add_argument(
         "--obsm-key",
         default="X_scvi_fm",
         help="obsm key to extract when building VectorStore (default: X_scvi_fm). "
-             "Other common choices: X_pca, X_geneformer, X_gs10k",
+        "Other common choices: X_pca, X_geneformer, X_gs10k",
     )
     parser.add_argument("--omics-dim", type=int, default=None, help="Omics vector dimension")
     parser.add_argument("--shared-dim", type=int, default=256, help="Shared embedding dim (default: 256)")
@@ -175,7 +176,7 @@ def main():
         "--wandb-project",
         default=None,
         help="Weights & Biases project name. Enables wandb logging when set. "
-             "You can also set WANDB_PROJECT env var instead.",
+        "You can also set WANDB_PROJECT env var instead.",
     )
     parser.add_argument(
         "--wandb-run-name",

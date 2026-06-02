@@ -2,19 +2,19 @@
 
 This document captures the state of the codebase after the sentence-transformers
 v5.4+ refactor (Phases 1–5), identifies remaining work, and provides context for
-future development.  It is structured as a reference for both human contributors
+future development. It is structured as a reference for both human contributors
 and AI-assisted editing sessions.
 
 ---
 
-## 1  Architecture overview (post-refactor)
+## 1 Architecture overview (post-refactor)
 
 The new pipeline lives in two packages:
 
-| Package | Role |
-|---------|------|
+| Package             | Role                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------- |
 | `mmcontext.modules` | ST pipeline modules: `MMContextModule` (InputModule), `AdapterModule`, `OmicsAttentionModule` |
-| `mmcontext.io` | `VectorStore` (mmap-backed lookup), `prepare_vector_store` (zarr → store builder) |
+| `mmcontext.io`      | `VectorStore` (mmap-backed lookup), `prepare_vector_store` (zarr → store builder)             |
 
 A trained model is a standard `SentenceTransformer` with this module chain:
 
@@ -30,9 +30,9 @@ embedding) inputs where it would degenerate to a feedforward layer.
 
 - **`input_values` preprocess key** — omics preprocess writes `input_values`
   (not `token_embeddings`) so the ST training collator's `collect_features`
-  suffix matching detects omics columns.  Forward reads `input_values` and
+  suffix matching detects omics columns. Forward reads `input_values` and
   writes `token_embeddings` for downstream modules.
-- **`modality_ids` tensor** — 0 = text, 1 = omics, 2 = pad.  The
+- **`modality_ids` tensor** — 0 = text, 1 = omics, 2 = pad. The
   `AdapterModule` uses this to route tokens through the correct projection head.
 - **No Trainer subclass** — training uses the standard
   `SentenceTransformerTrainer` + `MultipleNegativesRankingLoss` with
@@ -40,15 +40,15 @@ embedding) inputs where it would degenerate to a feedforward layer.
 
 ---
 
-## 2  What was completed (Phases 1–5)
+## 2 What was completed (Phases 1–5)
 
-| Phase | Deliverable | Tests |
-|-------|-------------|-------|
-| 1 | `VectorStore` — mmap-backed vector lookup with `from_numpy`, `from_adata`, `from_dict`, `load` | `tests/test_vector_store.py` (in mmcontext_module tests) |
-| 2 | `MMContextModule` — text encoding via AutoModel/AutoTokenizer, omics via VectorStore or direct vectors, `preprocess`/`forward` contract | `tests/test_mmcontext_module.py` |
-| 3 | `AdapterModule` — modality-aware projection (text head, omics head, shared dim), safetensors persistence | `tests/test_adapter_module.py` |
-| 4 | `OmicsAttentionModule` — optional self-attention over variable-length omics sequences | `tests/test_omics_attention_module.py` |
-| 5 | Full ST integration — pipeline construction, encode, save/load, training (text-only, bimodal, gene-list), `prepare_vector_store` | `tests/test_st_integration.py`, `tests/test_prepare_store.py` |
+| Phase | Deliverable                                                                                                                             | Tests                                                         |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 1     | `VectorStore` — mmap-backed vector lookup with `from_numpy`, `from_adata`, `from_dict`, `load`                                          | `tests/test_vector_store.py` (in mmcontext_module tests)      |
+| 2     | `MMContextModule` — text encoding via AutoModel/AutoTokenizer, omics via VectorStore or direct vectors, `preprocess`/`forward` contract | `tests/test_mmcontext_module.py`                              |
+| 3     | `AdapterModule` — modality-aware projection (text head, omics head, shared dim), safetensors persistence                                | `tests/test_adapter_module.py`                                |
+| 4     | `OmicsAttentionModule` — optional self-attention over variable-length omics sequences                                                   | `tests/test_omics_attention_module.py`                        |
+| 5     | Full ST integration — pipeline construction, encode, save/load, training (text-only, bimodal, gene-list), `prepare_vector_store`        | `tests/test_st_integration.py`, `tests/test_prepare_store.py` |
 
 ### Supporting files
 
@@ -57,22 +57,22 @@ embedding) inputs where it would degenerate to a feedforward layer.
 
 ---
 
-## 3  Legacy code (`_legacy/`)
+## 3 Legacy code (`_legacy/`)
 
 The following modules were moved to `src/mmcontext/_legacy/` and are preserved
 for backward compatibility with previously trained models:
 
-| File | What it was | Notes |
-|------|-------------|-------|
-| `mmcontextencoder.py` | Dual-tower encoder (text + omics), `MMContextProcessor` tokenizer | Central old architecture; `embed/model_utils.py` still imports `MMEnc.get_initial_embeddings_from_adata_link` from it |
-| `adapters.py` | MLP adapter with identity/linear/2-layer modes | Superseded by `modules/adapter_module.py` which adds modality-awareness |
-| `omicsencoder.py` | `MiniOmicsModel` — `nn.Embedding` lookup with HF `PreTrainedModel` interface | Superseded by `VectorStore` (no learnable embedding, just mmap lookup) |
-| `onehot.py` | `OneHotTextEncoder` — learnable embedding per unique sentence | Useful for ablation experiments; no new equivalent |
-| `cell_sentence_transformer.py` | `OmicsEncoder` — full transformer over omics tokens with cross-attention | Heavier than `OmicsAttentionModule`; cross-attention is not yet in new code |
+| File                           | What it was                                                                  | Notes                                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `mmcontextencoder.py`          | Dual-tower encoder (text + omics), `MMContextProcessor` tokenizer            | Central old architecture; `embed/model_utils.py` still imports `MMEnc.get_initial_embeddings_from_adata_link` from it |
+| `adapters.py`                  | MLP adapter with identity/linear/2-layer modes                               | Superseded by `modules/adapter_module.py` which adds modality-awareness                                               |
+| `omicsencoder.py`              | `MiniOmicsModel` — `nn.Embedding` lookup with HF `PreTrainedModel` interface | Superseded by `VectorStore` (no learnable embedding, just mmap lookup)                                                |
+| `onehot.py`                    | `OneHotTextEncoder` — learnable embedding per unique sentence                | Useful for ablation experiments; no new equivalent                                                                    |
+| `cell_sentence_transformer.py` | `OmicsEncoder` — full transformer over omics tokens with cross-attention     | Heavier than `OmicsAttentionModule`; cross-attention is not yet in new code                                           |
 
 ### Legacy tests (still functional)
 
-These test files import from `_legacy` and exercise the old architecture.  They
+These test files import from `_legacy` and exercise the old architecture. They
 should continue to pass for backward compatibility:
 
 - `test_mmcontext_encoder.py`
@@ -83,7 +83,7 @@ should continue to pass for backward compatibility:
 
 ---
 
-## 4  Active non-module code — status & required changes
+## 4 Active non-module code — status & required changes
 
 ### `callback.py` — trainer callbacks
 
@@ -110,9 +110,9 @@ should continue to pass for backward compatibility:
   Domain-specific and actively needed for dataset preprocessing.
 - `truncate_semantic_cell_sentences_dataset()` — semantic-aware truncation.
 - `resolve_negative_indices_and_rename()` — resolves `negative_*_idx` columns
-  to actual text values.  Needed for multiplet training with the real dataset.
+  to actual text values. Needed for multiplet training with the real dataset.
 - `get_evaluator()` — instantiates ST evaluators (BinaryClassification,
-  Triplet) from dataset columns.  Works with any ST model.
+  Triplet) from dataset columns. Works with any ST model.
 - `consolidate_low_frequency_categories()` — groups rare labels into "other".
 - `get_device()` — simple CUDA/MPS/CPU device selection.
 
@@ -126,7 +126,7 @@ should continue to pass for backward compatibility:
 
 ### `hub_utils.py` — HuggingFace Hub upload
 
-**Status:** Template body references old module names.  The upload logic
+**Status:** Template body references old module names. The upload logic
 (`HfApi` calls) is architecture-agnostic and works.
 
 **What needs to change:** Update the `MODEL_CARD_TEMPLATE` string to describe
@@ -139,7 +139,7 @@ the new pipeline modules.
 **Key functions:**
 
 - `download_and_extract_links()` — full-featured download with caching,
-  Zenodo support, resume, retries.  The new `io/prepare_store.py` has a
+  Zenodo support, resume, retries. The new `io/prepare_store.py` has a
   lighter `_download_zarr()` that doesn't support all features. Consider
   converging on one implementation eventually.
 - `remove_corrupted_null_arrays()` — zarr repair utility; used by
@@ -150,10 +150,10 @@ the new pipeline modules.
 
 ---
 
-## 5  Evaluation framework — analysis & adaptation needs
+## 5 Evaluation framework — analysis & adaptation needs
 
 The `eval/` package is a **self-contained evaluation framework** with a
-decorator-based registry pattern.  It is largely architecture-agnostic — most
+decorator-based registry pattern. It is largely architecture-agnostic — most
 evaluators work on AnnData `.obsm` embeddings, not on the model directly.
 
 ### Architecture
@@ -167,25 +167,25 @@ eval/utils.py         — LabelKind, LabelSpec helpers
 
 ### Evaluators
 
-| Evaluator | Registry name | What it measures | Architecture dependency |
-|-----------|--------------|------------------|----------------------|
-| `ARI` | `"ARI"` | Adjusted Rand Index (KMeans clustering vs labels) | None — operates on embeddings |
-| `LabelSimilarity` | (registered) | ROC-AUC of intra- vs inter-label cosine sim | None |
-| `ScibBundle` | `"scib"` | scIB benchmark metrics (batch/bio) | None |
-| `UmapPlotter` | (registered) | UMAP visualizations colored by labels | Uses `pl/plotting.py` |
-| `OmicsQueryAnnotator` | (not registered, standalone) | Zero-shot annotation via cosine similarity | Needs `model.encode()` — works with any ST model |
+| Evaluator             | Registry name                | What it measures                                  | Architecture dependency                          |
+| --------------------- | ---------------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| `ARI`                 | `"ARI"`                      | Adjusted Rand Index (KMeans clustering vs labels) | None — operates on embeddings                    |
+| `LabelSimilarity`     | (registered)                 | ROC-AUC of intra- vs inter-label cosine sim       | None                                             |
+| `ScibBundle`          | `"scib"`                     | scIB benchmark metrics (batch/bio)                | None                                             |
+| `UmapPlotter`         | (registered)                 | UMAP visualizations colored by labels             | Uses `pl/plotting.py`                            |
+| `OmicsQueryAnnotator` | (not registered, standalone) | Zero-shot annotation via cosine similarity        | Needs `model.encode()` — works with any ST model |
 
 ### `embedding_alignment.py`
 
 Standalone module (not registered as an evaluator) that computes cross-modal
-alignment scores.  Useful for measuring how well the shared space aligns
-text and omics embeddings.  Works on raw numpy arrays.
+alignment scores. Useful for measuring how well the shared space aligns
+text and omics embeddings. Works on raw numpy arrays.
 
 ### What needs to change for new architecture
 
 1. **Embedding pipeline (`embed/`)** — `embed/model_utils.py` imports
    `MMContextEncoder.get_initial_embeddings_from_adata_link` to register
-   omics vectors before embedding.  This needs a new path:
+   omics vectors before embedding. This needs a new path:
    - Load the ST model
    - Detect if it has an `MMContextModule` at position 0
    - Attach a `VectorStore` (built via `prepare_vector_store`) instead of
@@ -201,7 +201,7 @@ text and omics embeddings.  Works on raw numpy arrays.
 
 ---
 
-## 6  Missing features & test gaps
+## 6 Missing features & test gaps
 
 ### Features not yet covered by new modules
 
@@ -211,19 +211,19 @@ text and omics embeddings.  Works on raw numpy arrays.
 
 - [ ] **Cross-attention** — The old `OmicsEncoder` in
       `cell_sentence_transformer.py` supported cross-attention between text
-      and omics sequences.  The new `OmicsAttentionModule` only does
-      self-attention on omics tokens.  Cross-attention would enable richer
+      and omics sequences. The new `OmicsAttentionModule` only does
+      self-attention on omics tokens. Cross-attention would enable richer
       multimodal interaction but adds complexity.
 
 - [ ] **`OneHotTextEncoder` equivalent** — Useful for ablation experiments
-      (fast training without a real transformer).  Currently only in `_legacy/`.
+      (fast training without a real transformer). Currently only in `_legacy/`.
       Could be a simple fixture/utility rather than a full module.
 
 - [ ] **Negative mining / hard negatives** — The training script currently
       uses `(anchor, positive)` pairs with in-batch negatives (MNR loss).
       The dataset has `negative_1_idx` and `negative_2_idx` columns.
       `resolve_negative_indices_and_rename()` in `utils.py` handles
-      resolving these to actual text.  Supporting `(anchor, positive, negative)`
+      resolving these to actual text. Supporting `(anchor, positive, negative)`
       triplets would improve training quality.
 
 - [ ] **Hub upload for new architecture** — `hub_utils.py` model card
@@ -246,7 +246,7 @@ text and omics embeddings.  Works on raw numpy arrays.
 
 - [ ] **Mixed-modality batches** — No test currently sends a batch where
       some samples are text and some are omics through the full pipeline
-      in a single forward pass.  This is an important edge case for
+      in a single forward pass. This is an important edge case for
       training with heterogeneous datasets.
 
 - [ ] **Gradient flow end-to-end** — Training tests verify parameters change,
@@ -264,19 +264,19 @@ text and omics embeddings.  Works on raw numpy arrays.
 
 - [ ] **Converge download logic** — `file_utils.download_and_extract_links`
       and `io/prepare_store._download_zarr` both handle zarr downloads with
-      different feature sets.  Could share a common download backend.
+      different feature sets. Could share a common download backend.
 
 - [ ] **`simulator.py` integration** — The old `LOSS_PRESETS` dict and
       `make_cluster_sampler` are valuable for generating synthetic test
-      datasets.  Consider moving to a `testing/` subpackage.
+      datasets. Consider moving to a `testing/` subpackage.
 
 - [ ] **`sanity_helpers.py`** — Contains `plot_pca` and possibly other
-      debug helpers not in `pl/`.  Consider merging into `pl/` or a
+      debug helpers not in `pl/`. Consider merging into `pl/` or a
       `debug/` module.
 
 ---
 
-## 7  File map (post-cleanup)
+## 7 File map (post-cleanup)
 
 ```
 src/mmcontext/

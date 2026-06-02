@@ -110,18 +110,14 @@ class TestVectorStoreConstruction:
             }
         )
         path = os.path.join(tmp_dir, "test.mmap")
-        store = VectorStore.from_dataframe(
-            df, path=path, id_col="my_id", embedding_col="my_vec"
-        )
+        store = VectorStore.from_dataframe(df, path=path, id_col="my_id", embedding_col="my_vec")
         result = store["cell_A"]
         np.testing.assert_array_almost_equal(result, sample_matrix[0])
 
     def test_from_adata_obs(self, sample_adata_obs, tmp_dir):
         """Create from adata.obsm, lookup by obs index."""
         path = os.path.join(tmp_dir, "test.mmap")
-        store = VectorStore.from_adata(
-            sample_adata_obs, layer_key="X_scvi", axis="obs", path=path
-        )
+        store = VectorStore.from_adata(sample_adata_obs, layer_key="X_scvi", axis="obs", path=path)
         expected = sample_adata_obs.obsm["X_scvi"]
 
         for i, sid in enumerate(sample_adata_obs.obs.index):
@@ -131,9 +127,7 @@ class TestVectorStoreConstruction:
     def test_from_adata_var(self, sample_adata_var, tmp_dir):
         """Create from adata.varm, lookup by var index."""
         path = os.path.join(tmp_dir, "test.mmap")
-        store = VectorStore.from_adata(
-            sample_adata_var, layer_key="gene_emb", axis="var", path=path
-        )
+        store = VectorStore.from_adata(sample_adata_var, layer_key="gene_emb", axis="var", path=path)
         expected = sample_adata_var.varm["gene_emb"]
 
         for i, gid in enumerate(sample_adata_var.var.index):
