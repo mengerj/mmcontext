@@ -11,6 +11,7 @@ permissions:
   pull-requests: write
   issues: write
   actions: read
+  id-token: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.issue.number }}
