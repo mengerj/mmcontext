@@ -35,14 +35,32 @@ jobs:
           ref: dev-claude
           fetch-depth: 0
       - uses: anthropics/claude-code-action@v1
+        id: claude
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
           base_branch: dev-claude
           additional_permissions: |
             actions: read
           claude_args: |
             --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Task,WebSearch,WebFetch"
             --max-turns 30
+            --output-format stream-json
           # The CLAUDE.md in the repo root provides the plan-first protocol,
           # branch naming conventions, and PR linking instructions.
           # Claude reads it automatically on checkout.
+
+      - name: Archive Claude session log
+        if: always()
+        run: |
+          mkdir -p claude-logs
+          echo '${{ steps.claude.outputs.result }}' > claude-logs/session.json
+        shell: bash
+
+      - name: Upload session log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-implement-issue${{ github.event.issue.number }}-${{ github.run_number }}
+          path: claude-logs/
+          retention-days: 30
