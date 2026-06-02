@@ -30,7 +30,7 @@ jobs:
         contains(github.event.comment.body, '@claude')))
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: dev-claude
           fetch-depth: 0
