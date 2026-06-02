@@ -40,5 +40,5 @@ jobs:
           additional_permissions: |
             actions: read
           claude_args: |
-            --allowedTools "Bash(ruff check src/ tests/),Bash(ruff format --check src/ tests/),Bash(pytest -x -q --tb=short)"
-            --max-turns 20
+            --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Task"
+            --max-turns 30

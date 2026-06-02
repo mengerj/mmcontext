@@ -216,6 +216,33 @@ class AdapterModule(Module):
         return proj(tokens)
 
     # ------------------------------------------------------------------
+    # Freezing
+    # ------------------------------------------------------------------
+    def freeze_text_proj(self) -> None:
+        """Freeze all parameters in the text projection head."""
+        for param in self.text_proj.parameters():
+            param.requires_grad = False
+        logger.info("Froze text projection head")
+
+    def unfreeze_text_proj(self) -> None:
+        """Unfreeze all parameters in the text projection head."""
+        for param in self.text_proj.parameters():
+            param.requires_grad = True
+        logger.info("Unfroze text projection head")
+
+    def freeze_omics_proj(self) -> None:
+        """Freeze all parameters in the omics projection head."""
+        for param in self.omics_proj.parameters():
+            param.requires_grad = False
+        logger.info("Froze omics projection head")
+
+    def unfreeze_omics_proj(self) -> None:
+        """Unfreeze all parameters in the omics projection head."""
+        for param in self.omics_proj.parameters():
+            param.requires_grad = True
+        logger.info("Unfroze omics projection head")
+
+    # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
     def get_sentence_embedding_dimension(self) -> int:

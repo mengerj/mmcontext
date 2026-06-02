@@ -160,7 +160,6 @@ class OmicsAttentionModule(Module):
         attention_mask = features["attention_mask"]
 
         B, L, D = token_embeddings.shape
-        device = token_embeddings.device
 
         # Start with a copy of the input
         output = token_embeddings.clone()
@@ -172,9 +171,6 @@ class OmicsAttentionModule(Module):
 
         # Process each sample independently — omics sequences can have
         # different lengths across samples in the batch
-        attended_samples = []
-        sample_indices = []
-
         for b in range(B):
             omics_positions = omics_mask[b].nonzero(as_tuple=True)[0]  # positions of omics tokens
             if len(omics_positions) == 0:
