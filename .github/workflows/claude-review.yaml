@@ -1,9 +1,6 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize]
-    branches: [dev-claude, main]
   issue_comment:
     types: [created]
 
@@ -20,25 +17,40 @@ concurrency:
 
 jobs:
   review:
-    # Auto-review every PR, or respond to @claude in PR comments (owner only, ignore bots)
+    # Respond to @claude in PR comments (owner only, ignore bots)
     if: >
       github.event.sender.type != 'Bot' &&
-      ((github.event_name == 'pull_request' &&
-        github.actor == 'mengerj') ||
-       (github.event_name == 'issue_comment' &&
-        github.actor == 'mengerj' &&
-        github.event.issue.pull_request &&
-        contains(github.event.comment.body, '@claude')))
+      github.actor == 'mengerj' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: anthropics/claude-code-action@v1
+        id: claude
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
           additional_permissions: |
             actions: read
           claude_args: |
             --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Task"
             --max-turns 30
+            --output-format stream-json
+
+      - name: Archive Claude session log
+        if: always()
+        run: |
+          mkdir -p claude-logs
+          echo '${{ steps.claude.outputs.result }}' > claude-logs/session.json
+        shell: bash
+
+      - name: Upload session log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-review-pr${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.run_number }}
+          path: claude-logs/
+          retention-days: 30
