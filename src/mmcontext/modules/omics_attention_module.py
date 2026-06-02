@@ -24,15 +24,15 @@ Features dict contract::
     # Input (from MMContextModule.forward):
     {
         "token_embeddings": Tensor[B, L, D],
-        "attention_mask":   Tensor[B, L],
-        "modality_ids":     Tensor[B, L],  # 0=text, 1=omics, 2=pad
+        "attention_mask": Tensor[B, L],
+        "modality_ids": Tensor[B, L],  # 0=text, 1=omics, 2=pad
     }
 
     # Output (after OmicsAttentionModule.forward):
     {
-        "token_embeddings": Tensor[B, L, D],   # omics tokens attended
-        "attention_mask":   Tensor[B, L],       # unchanged
-        "modality_ids":     Tensor[B, L],       # unchanged
+        "token_embeddings": Tensor[B, L, D],  # omics tokens attended
+        "attention_mask": Tensor[B, L],  # unchanged
+        "modality_ids": Tensor[B, L],  # unchanged
     }
 
 Example
@@ -295,13 +295,9 @@ class OmicsAttentionModule(Module):
         if os.path.isfile(safetensors_path):
             load_safetensors_model(module, safetensors_path)
         elif os.path.isfile(bin_path):
-            module.load_state_dict(
-                torch.load(bin_path, map_location=torch.device("cpu"))
-            )
+            module.load_state_dict(torch.load(bin_path, map_location=torch.device("cpu")))
         else:
-            logger.warning(
-                "No weight files found in %s — module uses random init.", load_path
-            )
+            logger.warning("No weight files found in %s — module uses random init.", load_path)
 
         logger.info("Loaded OmicsAttentionModule from %s", model_name_or_path)
         return module

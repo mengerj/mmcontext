@@ -17,7 +17,7 @@ Typical usage
 
 **Lookup:**
 
->>> vec = store["cell_42"]           # single lookup → (D,)
+>>> vec = store["cell_42"]  # single lookup → (D,)
 >>> batch = store.batch_lookup(ids)  # batch lookup  → (N, D)
 
 **Persistence:**
@@ -29,8 +29,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
 import numpy as np
 
@@ -135,7 +136,7 @@ class VectorStore:
     @classmethod
     def from_dataframe(
         cls,
-        df: "pd.DataFrame",
+        df: pd.DataFrame,
         *,
         path: str | Path,
         id_col: str = "token",
@@ -190,7 +191,7 @@ class VectorStore:
     @classmethod
     def from_adata(
         cls,
-        adata: "ad.AnnData",
+        adata: ad.AnnData,
         *,
         layer_key: str,
         axis: Literal["obs", "var"] = "obs",
@@ -220,18 +221,12 @@ class VectorStore:
         """
         if axis == "obs":
             if layer_key not in adata.obsm:
-                raise KeyError(
-                    f"Key '{layer_key}' not found in adata.obsm. "
-                    f"Available keys: {list(adata.obsm.keys())}"
-                )
+                raise KeyError(f"Key '{layer_key}' not found in adata.obsm. Available keys: {list(adata.obsm.keys())}")
             matrix = np.asarray(adata.obsm[layer_key])
             ids = adata.obs.index.tolist()
         elif axis == "var":
             if layer_key not in adata.varm:
-                raise KeyError(
-                    f"Key '{layer_key}' not found in adata.varm. "
-                    f"Available keys: {list(adata.varm.keys())}"
-                )
+                raise KeyError(f"Key '{layer_key}' not found in adata.varm. Available keys: {list(adata.varm.keys())}")
             matrix = np.asarray(adata.varm[layer_key])
             ids = adata.var.index.tolist()
         else:
@@ -315,10 +310,7 @@ class VectorStore:
         try:
             idx = self._index[key]
         except KeyError:
-            raise KeyError(
-                f"ID '{key}' not found in VectorStore. "
-                f"Store contains {len(self._index)} entries."
-            ) from None
+            raise KeyError(f"ID '{key}' not found in VectorStore. Store contains {len(self._index)} entries.") from None
         return np.array(self._mmap[idx])
 
     def batch_lookup(self, ids: Sequence[str]) -> np.ndarray:
@@ -345,8 +337,7 @@ class VectorStore:
                 indices.append(self._index[sid])
             except KeyError:
                 raise KeyError(
-                    f"ID '{sid}' not found in VectorStore. "
-                    f"Store contains {len(self._index)} entries."
+                    f"ID '{sid}' not found in VectorStore. Store contains {len(self._index)} entries."
                 ) from None
         return np.array(self._mmap[indices])
 
@@ -372,10 +363,7 @@ class VectorStore:
         return key in self._index
 
     def __repr__(self) -> str:
-        return (
-            f"VectorStore(n={len(self)}, dim={self.dim}, "
-            f"dtype={self.dtype}, path='{self._path}')"
-        )
+        return f"VectorStore(n={len(self)}, dim={self.dim}, dtype={self.dtype}, path='{self._path}')"
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -386,19 +374,12 @@ class VectorStore:
         if len(ids) == 0:
             raise ValueError("Empty ID list: at least one vector is required.")
         if matrix.ndim != 2:
-            raise ValueError(
-                f"Expected 2-D matrix, got {matrix.ndim}-D array with shape {matrix.shape}."
-            )
+            raise ValueError(f"Expected 2-D matrix, got {matrix.ndim}-D array with shape {matrix.shape}.")
         if len(ids) != matrix.shape[0]:
-            raise ValueError(
-                f"Length mismatch: {len(ids)} IDs but matrix has {matrix.shape[0]} rows."
-            )
+            raise ValueError(f"Length mismatch: {len(ids)} IDs but matrix has {matrix.shape[0]} rows.")
         if len(set(ids)) != len(ids):
             duplicates = [x for x in ids if ids.count(x) > 1]
-            raise ValueError(
-                f"Duplicate IDs found: {sorted(set(duplicates))[:10]}. "
-                f"All IDs must be unique."
-            )
+            raise ValueError(f"Duplicate IDs found: {sorted(set(duplicates))[:10]}. All IDs must be unique.")
 
     @staticmethod
     def _write_index(
