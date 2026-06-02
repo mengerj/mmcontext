@@ -31,9 +31,13 @@ import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import anndata as ad
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 

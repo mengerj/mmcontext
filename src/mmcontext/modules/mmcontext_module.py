@@ -282,7 +282,7 @@ class MMContextModule(InputModule):
                 # Obs case: single vector → (1, D)
                 all_embeddings.append(torch.from_numpy(values).unsqueeze(0))
                 lengths.append(1)
-            elif isinstance(values, (list, tuple)):
+            elif isinstance(values, list | tuple):
                 # Var case: list of gene vectors → (N_genes, D)
                 gene_tensors = [torch.from_numpy(np.asarray(v)) for v in values]
                 all_embeddings.append(torch.stack(gene_tensors, dim=0))
