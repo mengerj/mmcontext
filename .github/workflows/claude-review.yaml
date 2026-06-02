@@ -1,0 +1,39 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [dev-claude, main]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Auto-review every PR, or respond to @claude in PR comments (owner only)
+    if: >
+      (github.event_name == 'pull_request' &&
+       github.actor == 'mengerj') ||
+      (github.event_name == 'issue_comment' &&
+       github.actor == 'mengerj' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          claude_args: |
+            --allowedTools "Bash(ruff check src/ tests/),Bash(ruff format --check src/ tests/),Bash(pytest -x -q --tb=short)"
+            --max-turns 20
