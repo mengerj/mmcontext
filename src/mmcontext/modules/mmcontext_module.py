@@ -25,8 +25,8 @@ Features dict contract (after ``forward()``)::
 
     {
         "token_embeddings": Tensor[B, L, D],  # per-token representations
-        "attention_mask":   Tensor[B, L],      # 1 = real, 0 = pad
-        "modality_ids":     Tensor[B, L],      # 0 = text, 1 = omics
+        "attention_mask": Tensor[B, L],  # 1 = real, 0 = pad
+        "modality_ids": Tensor[B, L],  # 0 = text, 1 = omics
     }
 
 Example
@@ -238,9 +238,7 @@ class MMContextModule(InputModule):
         encoded["modality"] = "text"
         return encoded
 
-    def _preprocess_omics_via_store(
-        self, texts: list[str]
-    ) -> dict[str, torch.Tensor | Any]:
+    def _preprocess_omics_via_store(self, texts: list[str]) -> dict[str, torch.Tensor | Any]:
         """Resolve prefixed omics IDs through VectorStore."""
         if self._vector_store is None:
             raise ValueError(
@@ -268,9 +266,7 @@ class MMContextModule(InputModule):
             "modality": "omics",
         }
 
-    def _preprocess_omics_direct(
-        self, inputs: list[dict[str, Any]]
-    ) -> dict[str, torch.Tensor | Any]:
+    def _preprocess_omics_direct(self, inputs: list[dict[str, Any]]) -> dict[str, torch.Tensor | Any]:
         """Package direct omics vectors into features dict.
 
         Handles both obs (single vector per sample) and var (list of gene
@@ -309,7 +305,7 @@ class MMContextModule(InputModule):
         input_values = torch.zeros(batch_size, max_len, dim)
         attention_mask = torch.zeros(batch_size, max_len, dtype=torch.long)
 
-        for i, (emb, length) in enumerate(zip(all_embeddings, lengths)):
+        for i, (emb, length) in enumerate(zip(all_embeddings, lengths, strict=False)):
             input_values[i, :length] = emb
             attention_mask[i, :length] = 1
 
@@ -349,9 +345,7 @@ class MMContextModule(InputModule):
         else:
             return self._forward_omics(features)
 
-    def _forward_text(
-        self, features: dict[str, torch.Tensor | Any]
-    ) -> dict[str, torch.Tensor | Any]:
+    def _forward_text(self, features: dict[str, torch.Tensor | Any]) -> dict[str, torch.Tensor | Any]:
         """Run text through the transformer encoder."""
         input_ids = features["input_ids"]
         attention_mask = features.get("attention_mask")
@@ -365,17 +359,13 @@ class MMContextModule(InputModule):
         token_embeddings = model_output.last_hidden_state  # (B, L, D)
 
         B, L = input_ids.shape
-        modality_ids = torch.full(
-            (B, L), MODALITY_TEXT, dtype=torch.long, device=input_ids.device
-        )
+        modality_ids = torch.full((B, L), MODALITY_TEXT, dtype=torch.long, device=input_ids.device)
 
         features["token_embeddings"] = token_embeddings
         features["modality_ids"] = modality_ids
         return features
 
-    def _forward_omics(
-        self, features: dict[str, torch.Tensor | Any]
-    ) -> dict[str, torch.Tensor | Any]:
+    def _forward_omics(self, features: dict[str, torch.Tensor | Any]) -> dict[str, torch.Tensor | Any]:
         """Pass omics embeddings through unchanged.
 
         Reads from ``input_values`` (set by preprocess) and writes to
@@ -386,9 +376,7 @@ class MMContextModule(InputModule):
         token_embeddings = features["input_values"]  # (B, L, D)
 
         B, L = token_embeddings.shape[:2]
-        modality_ids = torch.full(
-            (B, L), MODALITY_OMICS, dtype=torch.long, device=token_embeddings.device
-        )
+        modality_ids = torch.full((B, L), MODALITY_OMICS, dtype=torch.long, device=token_embeddings.device)
 
         features["token_embeddings"] = token_embeddings
         features["modality_ids"] = modality_ids
@@ -438,9 +426,7 @@ class MMContextModule(InputModule):
         (``roberta.encoder.layer``) architectures.
         """
         layers = None
-        if hasattr(self.auto_model, "encoder") and hasattr(
-            self.auto_model.encoder, "layer"
-        ):
+        if hasattr(self.auto_model, "encoder") and hasattr(self.auto_model.encoder, "layer"):
             layers = self.auto_model.encoder.layer
         elif hasattr(self.auto_model, "roberta"):
             layers = self.auto_model.roberta.encoder.layer
@@ -448,10 +434,7 @@ class MMContextModule(InputModule):
             layers = self.auto_model.bert.encoder.layer
 
         if layers is None:
-            logger.warning(
-                "Could not identify encoder layers for partial freezing. "
-                "Freezing all parameters instead."
-            )
+            logger.warning("Could not identify encoder layers for partial freezing. Freezing all parameters instead.")
             for param in self.auto_model.parameters():
                 param.requires_grad = False
             return

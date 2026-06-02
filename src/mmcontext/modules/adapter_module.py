@@ -23,15 +23,15 @@ Features dict contract::
     # Input (from MMContextModule.forward):
     {
         "token_embeddings": Tensor[B, L, D_text or D_omics],
-        "attention_mask":   Tensor[B, L],
-        "modality_ids":     Tensor[B, L],  # 0=text, 1=omics, 2=pad
+        "attention_mask": Tensor[B, L],
+        "modality_ids": Tensor[B, L],  # 0=text, 1=omics, 2=pad
     }
 
     # Output (after AdapterModule.forward):
     {
         "token_embeddings": Tensor[B, L, D_shared],  # projected
-        "attention_mask":   Tensor[B, L],             # unchanged
-        "modality_ids":     Tensor[B, L],             # unchanged
+        "attention_mask": Tensor[B, L],  # unchanged
+        "modality_ids": Tensor[B, L],  # unchanged
     }
 
 Example
@@ -154,12 +154,8 @@ class AdapterModule(Module):
         self.force_identity = force_identity
 
         # Build independent projection heads
-        self.text_proj = _build_projection(
-            text_input_dim, shared_dim, self.hidden_dim, force_identity
-        )
-        self.omics_proj = _build_projection(
-            omics_input_dim, shared_dim, self.hidden_dim, force_identity
-        )
+        self.text_proj = _build_projection(text_input_dim, shared_dim, self.hidden_dim, force_identity)
+        self.omics_proj = _build_projection(omics_input_dim, shared_dim, self.hidden_dim, force_identity)
 
     # ------------------------------------------------------------------
     # Forward (Module abstract method)
@@ -210,9 +206,7 @@ class AdapterModule(Module):
         features["token_embeddings"] = output
         return features
 
-    def _apply_projection(
-        self, proj: nn.Module, tokens: torch.Tensor
-    ) -> torch.Tensor:
+    def _apply_projection(self, proj: nn.Module, tokens: torch.Tensor) -> torch.Tensor:
         """Apply a projection head, handling BatchNorm's 2D requirement.
 
         BatchNorm1d expects (N, C) input. Since we gather tokens from
@@ -309,13 +303,9 @@ class AdapterModule(Module):
         if os.path.isfile(safetensors_path):
             load_safetensors_model(module, safetensors_path)
         elif os.path.isfile(bin_path):
-            module.load_state_dict(
-                torch.load(bin_path, map_location=torch.device("cpu"))
-            )
+            module.load_state_dict(torch.load(bin_path, map_location=torch.device("cpu")))
         else:
-            logger.warning(
-                "No weight files found in %s — module uses random init.", load_path
-            )
+            logger.warning("No weight files found in %s — module uses random init.", load_path)
 
         logger.info("Loaded AdapterModule from %s", model_name_or_path)
         return module

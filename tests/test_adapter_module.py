@@ -38,7 +38,9 @@ def real_safetensors():
     function for tests that need actual save/load roundtrips.
     """
     import importlib
+
     import safetensors.torch
+
     importlib.reload(safetensors.torch)
     yield
     # The session-scoped patch in conftest will reassert on the next test that needs it
@@ -140,9 +142,7 @@ class TestForwardMixedBatch:
     def test_forward_mixed_batch(self):
         """Mixed batch: text and omics tokens get different projections."""
         # Both modalities have same input dim for simplicity
-        adapter = AdapterModule(
-            text_input_dim=16, omics_input_dim=16, shared_dim=8, hidden_dim=32
-        )
+        adapter = AdapterModule(text_input_dim=16, omics_input_dim=16, shared_dim=8, hidden_dim=32)
         B, L = 1, 4
         features = _make_features(
             token_embeddings=torch.randn(B, L, 16),
@@ -190,9 +190,7 @@ class TestSeparateWeights:
 
     def test_text_omics_produce_different_outputs(self):
         """Same input through text vs omics projection gives different results."""
-        adapter = AdapterModule(
-            text_input_dim=16, omics_input_dim=16, shared_dim=8, hidden_dim=32
-        )
+        adapter = AdapterModule(text_input_dim=16, omics_input_dim=16, shared_dim=8, hidden_dim=32)
         x = torch.randn(1, 3, 16)
 
         text_features = _make_features(
@@ -210,9 +208,7 @@ class TestSeparateWeights:
         omics_result = adapter(omics_features)
 
         # Different projections should produce different outputs (with overwhelming probability)
-        assert not torch.allclose(
-            text_result["token_embeddings"], omics_result["token_embeddings"]
-        )
+        assert not torch.allclose(text_result["token_embeddings"], omics_result["token_embeddings"])
 
 
 # ---------------------------------------------------------------------------
@@ -286,14 +282,8 @@ class TestGradientFlow:
 
         # Both projections should have changed (check total param delta,
         # not per-parameter allclose, since some biases may get tiny gradients)
-        text_delta = sum(
-            (p - text_before[n]).abs().sum().item()
-            for n, p in adapter.text_proj.named_parameters()
-        )
-        omics_delta = sum(
-            (p - omics_before[n]).abs().sum().item()
-            for n, p in adapter.omics_proj.named_parameters()
-        )
+        text_delta = sum((p - text_before[n]).abs().sum().item() for n, p in adapter.text_proj.named_parameters())
+        omics_delta = sum((p - omics_before[n]).abs().sum().item() for n, p in adapter.omics_proj.named_parameters())
         assert text_delta > 0, "text_proj parameters did not change"
         assert omics_delta > 0, "omics_proj parameters did not change"
 
@@ -346,9 +336,7 @@ class TestProperties:
             modality_ids=mod_ids,
         )
         # Need same input dim for this test
-        adapter2 = AdapterModule(
-            text_input_dim=32, omics_input_dim=32, shared_dim=16, hidden_dim=64
-        )
+        adapter2 = AdapterModule(text_input_dim=32, omics_input_dim=32, shared_dim=16, hidden_dim=64)
         result = adapter2(features)
         torch.testing.assert_close(result["modality_ids"], mod_ids)
 
