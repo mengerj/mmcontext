@@ -19,9 +19,10 @@ concurrency:
 
 jobs:
   implement:
-    # Trigger on @claude mentions in issues — only by repo owner
+    # Trigger on @claude mentions in issues — only by repo owner, ignore bot comments
     if: >
       github.actor == 'mengerj' &&
+      github.event.sender.type != 'Bot' &&
       ((github.event_name == 'issues' &&
         contains(github.event.issue.body, '@claude')) ||
        (github.event_name == 'issue_comment' &&

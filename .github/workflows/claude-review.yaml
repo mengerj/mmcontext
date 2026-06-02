@@ -20,14 +20,15 @@ concurrency:
 
 jobs:
   review:
-    # Auto-review every PR, or respond to @claude in PR comments (owner only)
+    # Auto-review every PR, or respond to @claude in PR comments (owner only, ignore bots)
     if: >
-      (github.event_name == 'pull_request' &&
-       github.actor == 'mengerj') ||
-      (github.event_name == 'issue_comment' &&
-       github.actor == 'mengerj' &&
-       github.event.issue.pull_request &&
-       contains(github.event.comment.body, '@claude'))
+      github.event.sender.type != 'Bot' &&
+      ((github.event_name == 'pull_request' &&
+        github.actor == 'mengerj') ||
+       (github.event_name == 'issue_comment' &&
+        github.actor == 'mengerj' &&
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '@claude')))
     runs-on: ubuntu-latest
     steps:
       - uses: anthropics/claude-code-action@v1
