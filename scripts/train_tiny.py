@@ -2,9 +2,9 @@
 """Train an MMContext model on the cxg_schaefer_tiny dataset.
 
 Quick-start training script using sentence-transformers v5.4+ pipeline.
-Supports two modes:
+Supports two modalities:
 
-  1. **gene-list + text** (default) — gene-name strings as anchors, text
+  1. **text** — gene-name strings as anchors, text
      descriptions as positives.  No VectorStore needed.
   2. **bimodal** — omics vectors from a VectorStore as anchors, text as
      positives.  Requires ``--vector-store`` pointing to a ``.mmap`` file
@@ -12,11 +12,11 @@ Supports two modes:
 
 Usage::
 
-    # Gene-list mode (default)
-    python scripts/train_tiny.py --output-dir outputs/tiny_genelist
+    # Text modality
+    python scripts/train_tiny.py --output-dir outputs/tiny_text
 
-    # Bimodal mode
-    python scripts/train_tiny.py --mode bimodal \
+    # Bimodal modality (default)
+    python scripts/train_tiny.py --modality bimodal \
         --vector-store /path/to/store.mmap \
         --output-dir outputs/tiny_bimodal
 
@@ -42,8 +42,8 @@ from sentence_transformers import (
 from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
 from sentence_transformers.sentence_transformer.modules import Normalize, Pooling
 
+from mmcontext.embed import prepare_dataset
 from mmcontext.modules import AdapterModule, MMContextModule
-from mmcontext.utils import resolve_negative_indices_and_rename
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -52,90 +52,6 @@ logger = logging.getLogger(__name__)
 # Dataset helpers
 # ---------------------------------------------------------------------------
 HF_DATASET = "jo-mengr/cxg_schaefer_tiny"
-
-
-def prepare_genelist_dataset(ds, use_hard_negatives: bool = True):
-    """Reshape dataset for gene-list + text training.
-
-    Returns a HF Dataset with columns ``anchor`` (gene names), ``positive``
-    (text description), and optionally resolved hard-negative columns
-    ``negative_1``, ``negative_2``, … when ``use_hard_negatives`` is True and
-    the dataset exposes ``negative_*_idx`` columns.
-    """
-    has_neg_idx = any(c for c in ds.column_names if c.startswith("negative_") and c.endswith("_idx"))
-    if use_hard_negatives and has_neg_idx:
-        ds = resolve_negative_indices_and_rename(
-            ds,
-            primary_cell_sentence_col="cell_sentence_1",
-            positive_col="positive",
-            negative_prefix="negative",
-            index_col="sample_idx",
-            remove_index_col=True,
-        )
-        neg_cols = sorted(c for c in ds.column_names if c.startswith("negative"))
-        ds = ds.select_columns(["anchor", "positive"] + neg_cols)
-        logger.info(
-            "Gene-list dataset (with hard negatives): %d samples, columns=%s",
-            len(ds),
-            ds.column_names,
-        )
-    else:
-        # cell_sentence_1 = space-separated gene names → anchor
-        ds = ds.rename_columns({"cell_sentence_1": "anchor"})
-        ds = ds.select_columns(["anchor", "positive"])
-        logger.info("Gene-list dataset: %d samples, columns=%s", len(ds), ds.column_names)
-    return ds
-
-
-def prepare_bimodal_dataset(ds, use_hard_negatives: bool = True):
-    """Reshape dataset for bimodal (omics + text) training.
-
-    Prefixes ``sample_idx`` with ``omics:`` so MMContextModule routes them
-    through the VectorStore path.
-
-    Returns a HF Dataset with columns ``anchor``, ``positive``, and optionally
-    resolved hard-negative columns when ``use_hard_negatives`` is True and the
-    dataset exposes ``negative_*_idx`` columns.
-
-    Notes
-    -----
-    Hard negatives are resolved to text: odd-numbered negatives become the
-    positive text of another sample; even-numbered negatives become the
-    gene-list text of another sample.
-    """
-    has_neg_idx = any(c for c in ds.column_names if c.startswith("negative_") and c.endswith("_idx"))
-    if use_hard_negatives and has_neg_idx:
-        ds = resolve_negative_indices_and_rename(
-            ds,
-            primary_cell_sentence_col="cell_sentence_1",
-            positive_col="positive",
-            negative_prefix="negative",
-            index_col="sample_idx",
-            remove_index_col=False,  # keep sample_idx so we can build the omics anchor
-        )
-
-        def _prefix_omics(example):
-            example["anchor"] = f"omics:{example['sample_idx']}"
-            return example
-
-        ds = ds.map(_prefix_omics)
-        neg_cols = sorted(c for c in ds.column_names if c.startswith("negative"))
-        ds = ds.select_columns(["anchor", "positive"] + neg_cols)
-        logger.info(
-            "Bimodal dataset (with hard negatives): %d samples, columns=%s",
-            len(ds),
-            ds.column_names,
-        )
-    else:
-
-        def _prefix_omics(example):
-            example["anchor"] = f"omics:{example['sample_idx']}"
-            return example
-
-        ds = ds.map(_prefix_omics)
-        ds = ds.select_columns(["anchor", "positive"])
-        logger.info("Bimodal dataset: %d samples, columns=%s", len(ds), ds.column_names)
-    return ds
 
 
 # ---------------------------------------------------------------------------
@@ -190,10 +106,10 @@ def main():
     """Train MMContext on cxg_schaefer_tiny dataset."""
     parser = argparse.ArgumentParser(description="Train MMContext on cxg_schaefer_tiny")
     parser.add_argument(
-        "--mode",
-        choices=["genelist", "bimodal"],
-        default="genelist",
-        help="Training mode (default: genelist)",
+        "--modality",
+        choices=["text", "bimodal"],
+        default="bimodal",
+        help="Training modality (default: bimodal)",
     )
     parser.add_argument(
         "--text-model",
@@ -203,7 +119,7 @@ def main():
     parser.add_argument(
         "--vector-store",
         default=None,
-        help="Path to .mmap VectorStore file. For bimodal mode: if omitted, "
+        help="Path to .mmap VectorStore file. For bimodal modality: if omitted, "
         "the store is built automatically from adata_link + sample_idx "
         "columns using --obsm-key.",
     )
@@ -267,10 +183,18 @@ def main():
 
     # --- Dataset ---
     ds_raw = load_dataset(args.dataset, split="train")
-    if args.mode == "bimodal":
-        ds = prepare_bimodal_dataset(ds_raw, use_hard_negatives=args.hard_negatives)
-    else:
-        ds = prepare_genelist_dataset(ds_raw, use_hard_negatives=args.hard_negatives)
+    # genelist mode uses cell-sentence text anchors; bimodal uses omics ids.
+    # The primary cell sentence is chosen by modality: cell_sentence_1
+    # (gene-list) for bimodal, cell_sentence_2 (text description) for text.
+    modality = "bimodal" if args.modality == "bimodal" else "text"
+    primary_cell_sentence = "cell_sentence_1" if modality == "bimodal" else "cell_sentence_2"
+    ds = prepare_dataset(
+        ds_raw,
+        purpose="train",
+        modality=modality,
+        primary_cell_sentence=primary_cell_sentence,
+        use_hard_negatives=args.hard_negatives,
+    )
 
     # --- Pipeline ---
     pipeline = build_pipeline(
@@ -279,8 +203,8 @@ def main():
         shared_dim=args.shared_dim,
     )
 
-    # Attach VectorStore for bimodal mode
-    if args.mode == "bimodal":
+    # Attach VectorStore for bimodal modality
+    if args.modality == "bimodal":
         from mmcontext.io import VectorStore, prepare_vector_store
 
         if args.vector_store is not None:
@@ -359,7 +283,7 @@ def main():
         loss=loss,
     )
 
-    logger.info("Starting training: mode=%s, epochs=%d, batch_size=%d", args.mode, args.epochs, args.batch_size)
+    logger.info("Starting training: modality=%s, epochs=%d, batch_size=%d", args.modality, args.epochs, args.batch_size)
     trainer.train()
 
     # --- Save final model ---
