@@ -1,4 +1,5 @@
 # tests/utils.py
+import hashlib
 import json
 import logging
 import os
@@ -25,6 +26,16 @@ from datasets import Dataset, DatasetDict
 from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
+
+
+def url_to_cache_name(url: str) -> str:
+    """Deterministic short name for a URL, used as a cache file/directory name.
+
+    Mirrors the scheme used by :func:`mmcontext.io.prepare_store.prepare_vector_store`
+    so that the same remote store maps to a stable, collision-free cache key
+    regardless of its position in a links list.
+    """
+    return hashlib.sha256(url.encode()).hexdigest()[:16]
 
 
 def remove_corrupted_null_arrays(zarr_path: str | Path) -> list[str]:
@@ -131,6 +142,15 @@ def load_test_adata_from_hf_dataset(
     ------
     ValueError
         If the split references multiple different files.
+
+    Notes
+    -----
+    The downloaded store is cached under *save_dir* using a deterministic hash
+    of its URL (``<sha256[:16]>``), matching
+    :func:`mmcontext.io.prepare_store.prepare_vector_store`. This makes the
+    cache key stable and collision-free across datasets sharing the same
+    *save_dir* (the legacy ``chunk_0`` naming caused different datasets to
+    overwrite/false-hit each other).
     """
     # 1) ensure there is exactly ONE unique link
     links, _ = collect_unique_links({"test": test_split}, split="test", link_column=link_column)
@@ -146,6 +166,7 @@ def load_test_adata_from_hf_dataset(
         overwrite=False,
         zenodo_token=zenodo_token,
         force_drafts=force_drafts,
+        name_by_url_hash=True,
     )
     local_path = next(iter(local_map.values()))
 
@@ -470,6 +491,7 @@ def download_and_extract_links(
     zenodo_token: str | None = None,
     chunk_size: int = 8 * (1 << 20),  # 8MB chunks for better performance
     force_drafts: bool = False,
+    name_by_url_hash: bool = False,
 ) -> dict[str, Path]:
     """
     Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either
@@ -502,6 +524,14 @@ def download_and_extract_links(
         by removing ``/draft`` from URLs. This is a quick fix to allow using
         datasets created with draft links that were published remotely afterwards.
         Set to True if you actually need to download from a draft record.
+    name_by_url_hash : bool, default False
+        If False, downloaded files are named ``chunk_<idx>.<ext>`` using the
+        link's position in *links*. This is **not** stable across calls — two
+        different links each passed as the sole item collide on ``chunk_0``.
+        If True, files are named by a deterministic hash of the URL
+        (``<sha256[:16]>.<ext>``), matching the caching scheme of
+        :func:`mmcontext.io.prepare_store.prepare_vector_store` and giving a
+        stable, collision-free cache key per URL.
 
     Returns
     -------
@@ -546,13 +576,17 @@ def download_and_extract_links(
             continue
 
         # For URLs, proceed with download logic
+        # Base name for cached outputs: a stable per-URL hash, or the legacy
+        # position-based ``chunk_<idx>`` name.
+        base = url_to_cache_name(link) if name_by_url_hash else f"chunk_{idx}"
+
         # ------------------------- check if present----
-        already = target_dir / f"chunk_{idx}.zip"
+        already = target_dir / f"{base}.zip"
         if already.exists() and not overwrite:
             out_map[link] = already
             continue  # ← skip download altogether
 
-        already = target_dir / f"chunk_{idx}.zarr"
+        already = target_dir / f"{base}.zarr"
         if already.exists() and not overwrite:
             out_map[link] = already
             continue
@@ -689,20 +723,20 @@ def download_and_extract_links(
         m4 = tmp.read_bytes()[:4]
         if m4 == PK_MAGIC:  # ⇒ ZIP archive
             if extract:
-                out_path = target_dir / f"chunk_{idx}.zarr"
+                out_path = target_dir / f"{base}.zarr"
                 if overwrite and out_path.exists():
                     shutil.rmtree(out_path)
                 with zipfile.ZipFile(tmp) as zf:
                     zf.extractall(out_path)
                 tmp.unlink(missing_ok=True)
             else:  # keep the zip
-                out_path = target_dir / f"chunk_{idx}.zip"
+                out_path = target_dir / f"{base}.zip"
                 if overwrite and out_path.exists():
                     out_path.unlink()
                 shutil.move(tmp, out_path)
         else:  # raw .h5ad etc.
             suffix = Path(link).suffix or ".bin"
-            out_path = target_dir / f"chunk_{idx}{suffix}"
+            out_path = target_dir / f"{base}{suffix}"
             if overwrite and out_path.exists():
                 out_path.unlink()
             shutil.move(tmp, out_path)
