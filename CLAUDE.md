@@ -28,32 +28,6 @@ src/mmcontext/
 └── utils.py           # Shared utilities
 ```
 
-## Branch Strategy
-
-- `main` — stable releases only
-- `dev-claude` — integration branch for all agent and feature work
-- Feature branches: always branch from `dev-claude`, never from `main`
-- Branch naming: `claude/<issue-number>-<short-slug>` for agent-created branches
-
-## Commands
-
-```bash
-# Install (editable, with test deps)
-pip install -e ".[dev,test]"
-
-# Run tests
-pytest -v --color=yes
-
-# Run tests with coverage
-coverage run -m pytest -v --color=yes && coverage report
-
-# Lint
-ruff check src/ tests/
-ruff format --check src/ tests/
-
-# Format
-ruff format src/ tests/
-```
 
 ## Code Style
 
@@ -85,7 +59,6 @@ When implementing a feature from a GitHub issue (via @claude or otherwise):
 1. **If the issue is ambiguous**: Post clarifying questions as a comment. Do NOT start implementation until the questions are answered.
 
 2. **Plan first**: Before writing any code, post an implementation plan as a comment on the issue with a checkbox list:
-
    ```
    ## Implementation Plan
    - [ ] Step 1: description
@@ -93,7 +66,6 @@ When implementing a feature from a GitHub issue (via @claude or otherwise):
    - [ ] Step 3: description
    - [ ] Verify: run tests, check linting
    ```
-
    Wait for approval (a reply containing "approved", "go ahead", "LGTM", or "looks good").
 
 3. **Implement**: Create a branch `claude/<issue-number>-<short-slug>` from `dev-claude`. Implement the plan step by step. Edit the plan comment to check off completed steps.
