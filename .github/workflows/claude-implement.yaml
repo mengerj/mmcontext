@@ -1,8 +1,6 @@
 name: Claude Code Implement
 
 on:
-  issues:
-    types: [opened, labeled]
   issue_comment:
     types: [created]
 
@@ -19,15 +17,12 @@ concurrency:
 
 jobs:
   implement:
-    # Trigger on @claude mentions in issues — only by repo owner, ignore bot comments
+    # Trigger on @claude mentions in issue comments — only by repo owner, ignore bots
     if: >
       github.actor == 'mengerj' &&
       github.event.sender.type != 'Bot' &&
-      ((github.event_name == 'issues' &&
-        contains(github.event.issue.body, '@claude')) ||
-       (github.event_name == 'issue_comment' &&
-        !github.event.issue.pull_request &&
-        contains(github.event.comment.body, '@claude')))
+      !github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
