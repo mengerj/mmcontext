@@ -396,54 +396,77 @@ class MMContextModule(InputModule):
     # ------------------------------------------------------------------
     # Freezing
     # ------------------------------------------------------------------
-    def freeze_text_encoder(self, num_layers: int | None = None) -> None:
-        """Freeze text encoder parameters.
-
-        Parameters
-        ----------
-        num_layers : int, optional
-            If given, freeze only the first ``num_layers`` layers. The
-            remaining layers and the pooler (if any) stay trainable.
-            If ``None``, freeze all parameters.
-        """
-        if num_layers is None:
-            for param in self.auto_model.parameters():
-                param.requires_grad = False
-            logger.info("Froze all text encoder parameters")
-        else:
-            self._freeze_n_layers(num_layers)
-
     def unfreeze_text_encoder(self) -> None:
         """Unfreeze all text encoder parameters."""
         for param in self.auto_model.parameters():
             param.requires_grad = True
         logger.info("Unfroze all text encoder parameters")
 
-    def _freeze_n_layers(self, num_layers: int) -> None:
-        """Freeze the first ``num_layers`` encoder layers.
+    def _get_encoder_layers(self) -> torch.nn.ModuleList | None:
+        """Return the transformer encoder layer stack, if it can be located.
 
         Handles both BERT-style (``encoder.layer``) and RoBERTa-style
-        (``roberta.encoder.layer``) architectures.
+        (``roberta.encoder.layer``) architectures. Returns ``None`` when the
+        layer stack cannot be identified.
         """
-        layers = None
         if hasattr(self.auto_model, "encoder") and hasattr(self.auto_model.encoder, "layer"):
-            layers = self.auto_model.encoder.layer
+            return self.auto_model.encoder.layer
         elif hasattr(self.auto_model, "roberta"):
-            layers = self.auto_model.roberta.encoder.layer
+            return self.auto_model.roberta.encoder.layer
         elif hasattr(self.auto_model, "bert"):
-            layers = self.auto_model.bert.encoder.layer
+            return self.auto_model.bert.encoder.layer
+        return None
 
-        if layers is None:
-            logger.warning("Could not identify encoder layers for partial freezing. Freezing all parameters instead.")
-            for param in self.auto_model.parameters():
-                param.requires_grad = False
+    def freeze_all_but_top_layers(self, num_trainable_layers: int) -> None:
+        """Freeze the text encoder, keeping only the top layers trainable.
+
+        This is the single entry point for text-encoder freezing. Passing
+        ``0`` freezes the entire encoder; passing ``N`` freezes everything
+        except the top ``N`` transformer layers. To make the whole encoder
+        trainable again, use :meth:`unfreeze_text_encoder`.
+
+        Freezes every parameter of the text encoder, then re-enables gradients
+        on the top ``num_trainable_layers`` transformer layers (counting from
+        the output end) plus the pooler, if present. This is the typical
+        "fine-tune only the last N layers" setup, which drastically reduces the
+        memory used by gradients and optimizer state.
+
+        Parameters
+        ----------
+        num_trainable_layers : int
+            Number of top transformer layers to keep trainable. ``0`` (or less)
+            freezes the entire encoder. Values larger than the available number
+            of layers keep all layers trainable.
+        """
+        # Freeze everything first.
+        for param in self.auto_model.parameters():
+            param.requires_grad = False
+
+        if num_trainable_layers <= 0:
+            logger.info("Froze all text encoder parameters (0 trainable top layers)")
             return
 
-        for i, layer in enumerate(layers):
-            if i < num_layers:
-                for param in layer.parameters():
-                    param.requires_grad = False
-        logger.info("Froze first %d text encoder layers", num_layers)
+        layers = self._get_encoder_layers()
+        if layers is None:
+            logger.warning(
+                "Could not identify encoder layers; the text encoder remains fully frozen. "
+                "Use unfreeze_text_encoder() to train all parameters instead."
+            )
+            return
+
+        total = len(layers)
+        n = min(num_trainable_layers, total)
+        for layer in layers[total - n :]:
+            for param in layer.parameters():
+                param.requires_grad = True
+
+        # Keep the pooler trainable too, when one exists.
+        pooler = getattr(self.auto_model, "pooler", None)
+        if pooler is not None:
+            for param in pooler.parameters():
+                param.requires_grad = True
+
+        logger.info("Froze text encoder, kept top %d of %d layers trainable", n, total)
 
     # ------------------------------------------------------------------
     # Save / Load (Module abstract methods)
