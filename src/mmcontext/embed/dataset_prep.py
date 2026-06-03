@@ -268,17 +268,17 @@ def prepare_dataset(
     >>> test_ds.column_names
     ['anchor', 'sample_idx', 'adata_link']
     """
-    kwargs = dict(
-        purpose=purpose,
-        modality=modality,
-        primary_cell_sentence=primary_cell_sentence,
-        sample_id_col=sample_id_col,
-        positive_col=positive_col,
-        omics_prefix=omics_prefix,
-        use_hard_negatives=use_hard_negatives,
-        truncate=truncate,
-        truncate_kwargs=truncate_kwargs,
-    )
+    kwargs = {
+        "purpose": purpose,
+        "modality": modality,
+        "primary_cell_sentence": primary_cell_sentence,
+        "sample_id_col": sample_id_col,
+        "positive_col": positive_col,
+        "omics_prefix": omics_prefix,
+        "use_hard_negatives": use_hard_negatives,
+        "truncate": truncate,
+        "truncate_kwargs": truncate_kwargs,
+    }
 
     if isinstance(ds, DatasetDict):
         return DatasetDict({name: _prepare_split(split, **kwargs) for name, split in ds.items()})
