@@ -28,7 +28,6 @@ src/mmcontext/
 └── utils.py           # Shared utilities
 ```
 
-
 ## Code Style
 
 - **Formatter/linter**: ruff (line-length=120)
@@ -59,6 +58,7 @@ When implementing a feature from a GitHub issue (via @claude or otherwise):
 1. **If the issue is ambiguous**: Post clarifying questions as a comment. Do NOT start implementation until the questions are answered.
 
 2. **Plan first**: Before writing any code, post an implementation plan as a comment on the issue with a checkbox list:
+
    ```
    ## Implementation Plan
    - [ ] Step 1: description
@@ -66,6 +66,7 @@ When implementing a feature from a GitHub issue (via @claude or otherwise):
    - [ ] Step 3: description
    - [ ] Verify: run tests, check linting
    ```
+
    Wait for approval (a reply containing "approved", "go ahead", "LGTM", or "looks good").
 
 3. **Implement**: Create a branch `claude/<issue-number>-<short-slug>` from `dev-claude`. Implement the plan step by step. Edit the plan comment to check off completed steps.
