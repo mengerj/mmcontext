@@ -350,6 +350,34 @@ class TestFreezing:
         assert frozen > 0
         assert trainable > 0
 
+    def test_freeze_all_but_top_layers_keeps_only_top(self, module):
+        """freeze_all_but_top_layers(N) trains only the top N layers."""
+        layers = module._get_encoder_layers()
+        assert layers is not None and len(layers) >= 2, "stub encoder needs >=2 layers"
+
+        module.freeze_all_but_top_layers(1)
+
+        # The last layer is trainable; all earlier layers are frozen.
+        for param in layers[-1].parameters():
+            assert param.requires_grad
+        for layer in layers[:-1]:
+            for param in layer.parameters():
+                assert not param.requires_grad
+
+    def test_freeze_all_but_top_zero_freezes_everything(self, module):
+        """num_trainable_layers=0 freezes the whole encoder."""
+        module.freeze_all_but_top_layers(0)
+        for param in module.auto_model.parameters():
+            assert not param.requires_grad
+
+    def test_freeze_all_but_top_n_exceeds_total_keeps_all_layers(self, module):
+        """Asking for more layers than exist keeps every encoder layer trainable."""
+        layers = module._get_encoder_layers()
+        module.freeze_all_but_top_layers(len(layers) + 5)
+        for layer in layers:
+            for param in layer.parameters():
+                assert param.requires_grad
+
 
 # ---------------------------------------------------------------------------
 # Persistence tests
