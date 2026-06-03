@@ -418,7 +418,7 @@ class TestTraining:
             num_train_epochs=1,
             per_device_train_batch_size=2,
             learning_rate=1e-3,
-            no_cuda=True,
+            use_cpu=True,
             report_to="none",
         )
         trainer = SentenceTransformerTrainer(
@@ -476,7 +476,7 @@ class TestTraining:
             num_train_epochs=1,
             per_device_train_batch_size=2,
             learning_rate=1e-3,
-            no_cuda=True,
+            use_cpu=True,
             report_to="none",
         )
         trainer = SentenceTransformerTrainer(
@@ -530,7 +530,7 @@ class TestTraining:
             num_train_epochs=1,
             per_device_train_batch_size=2,
             learning_rate=1e-3,
-            no_cuda=True,
+            use_cpu=True,
             report_to="none",
         )
         trainer = SentenceTransformerTrainer(
@@ -579,7 +579,7 @@ class TestTraining:
             num_train_epochs=1,
             per_device_train_batch_size=2,
             learning_rate=1e-3,
-            no_cuda=True,
+            use_cpu=True,
             report_to="none",
         )
         trainer = SentenceTransformerTrainer(
