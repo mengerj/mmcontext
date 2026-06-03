@@ -326,29 +326,40 @@ class TestProperties:
 class TestFreezing:
     """Tests for freezing/unfreezing the text encoder."""
 
-    def test_freeze_text_encoder(self, module):
-        """Freezing makes text encoder parameters non-trainable."""
-        module.freeze_text_encoder()
-        for param in module.auto_model.parameters():
-            assert not param.requires_grad
-
     def test_unfreeze_text_encoder(self, module):
-        """Unfreezing restores gradient computation."""
-        module.freeze_text_encoder()
+        """Unfreezing restores gradient computation after a full freeze."""
+        module.freeze_all_but_top_layers(0)
         module.unfreeze_text_encoder()
         for param in module.auto_model.parameters():
             assert param.requires_grad
 
-    def test_freeze_unfreeze_num_layers(self, module):
-        """Partial freezing: freeze only first N layers."""
-        # Freeze first 2 layers (if the encoder has enough)
-        module.freeze_text_encoder(num_layers=2)
+    def test_freeze_all_but_top_layers_keeps_only_top(self, module):
+        """freeze_all_but_top_layers(N) trains only the top N layers."""
+        layers = module._get_encoder_layers()
+        assert layers is not None and len(layers) >= 2, "stub encoder needs >=2 layers"
 
-        # At least some params should be frozen, some not
-        frozen = sum(1 for p in module.auto_model.parameters() if not p.requires_grad)
-        trainable = sum(1 for p in module.auto_model.parameters() if p.requires_grad)
-        assert frozen > 0
-        assert trainable > 0
+        module.freeze_all_but_top_layers(1)
+
+        # The last layer is trainable; all earlier layers are frozen.
+        for param in layers[-1].parameters():
+            assert param.requires_grad
+        for layer in layers[:-1]:
+            for param in layer.parameters():
+                assert not param.requires_grad
+
+    def test_freeze_all_but_top_zero_freezes_everything(self, module):
+        """num_trainable_layers=0 freezes the whole encoder."""
+        module.freeze_all_but_top_layers(0)
+        for param in module.auto_model.parameters():
+            assert not param.requires_grad
+
+    def test_freeze_all_but_top_n_exceeds_total_keeps_all_layers(self, module):
+        """Asking for more layers than exist keeps every encoder layer trainable."""
+        layers = module._get_encoder_layers()
+        module.freeze_all_but_top_layers(len(layers) + 5)
+        for layer in layers:
+            for param in layer.parameters():
+                assert param.requires_grad
 
 
 # ---------------------------------------------------------------------------

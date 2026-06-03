@@ -159,6 +159,26 @@ def main():
         default=True,
         help="Use hard negatives from negative_*_idx dataset columns (default: True).",
     )
+    parser.add_argument(
+        "--freeze-text-encoder",
+        action="store_true",
+        help="Freeze the text encoder to cut gradient/optimizer memory. "
+        "Combine with --unfreeze-last-n to keep the top N layers trainable.",
+    )
+    parser.add_argument(
+        "--unfreeze-last-n",
+        type=int,
+        default=0,
+        help="With --freeze-text-encoder, keep the top N transformer layers "
+        "(plus pooler) trainable. 0 freezes the whole encoder (default: 0).",
+    )
+    parser.add_argument(
+        "--bf16",
+        action=argparse.BooleanOptionalAction,
+        default=torch.backends.mps.is_available(),
+        help="Use bf16 mixed precision. Supported on MPS (macOS 14+) and CUDA; "
+        "roughly halves activation memory. Default: on when MPS is available.",
+    )
     args = parser.parse_args()
 
     # --- Dataset ---
@@ -215,6 +235,19 @@ def main():
 
         logger.info("VectorStore: %d vectors, dim=%d", len(store), store.dim)
 
+    # --- Freezing (memory savings) ---
+    # Applied to the final pipeline's MMContextModule. Freezing the text
+    # encoder removes its gradients + Adam optimizer state; keeping only the
+    # top N layers trainable is the usual fine-tuning sweet spot.
+    if args.freeze_text_encoder:
+        text_module = list(pipeline.children())[0]
+        # unfreeze_last_n == 0 freezes the whole encoder; > 0 keeps the top N trainable.
+        text_module.freeze_all_but_top_layers(args.unfreeze_last_n)
+        logger.info("Froze text encoder, keeping top %d layers trainable", args.unfreeze_last_n)
+        trainable = sum(p.numel() for p in pipeline.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in pipeline.parameters())
+        logger.info("Trainable params: %d / %d (%.1f%%)", trainable, total, 100.0 * trainable / total)
+
     # --- Wandb setup ---
     wandb_project = args.wandb_project or os.environ.get("WANDB_PROJECT")
     use_wandb = wandb_project is not None
@@ -232,7 +265,9 @@ def main():
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.lr,
         warmup_ratio=0.1,
-        fp16=torch.cuda.is_available() and not args.use_mps_device,
+        # bf16 (MPS macOS 14+ / CUDA) takes precedence; fall back to fp16 on CUDA only.
+        bf16=args.bf16,
+        fp16=(not args.bf16) and torch.cuda.is_available() and not args.use_mps_device,
         use_mps_device=args.use_mps_device,
         report_to="wandb" if use_wandb else "none",
         logging_steps=10,
