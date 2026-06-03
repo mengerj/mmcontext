@@ -76,13 +76,11 @@ def _prepare_split(
 
     if primary_cell_sentence not in ds.column_names:
         raise KeyError(
-            f"Primary cell-sentence column {primary_cell_sentence!r} not found. "
-            f"Available columns: {ds.column_names}"
+            f"Primary cell-sentence column {primary_cell_sentence!r} not found. Available columns: {ds.column_names}"
         )
     if modality == "bimodal" and sample_id_col not in ds.column_names:
         raise KeyError(
-            f"modality='bimodal' requires the sample-id column {sample_id_col!r}. "
-            f"Available columns: {ds.column_names}"
+            f"modality='bimodal' requires the sample-id column {sample_id_col!r}. Available columns: {ds.column_names}"
         )
 
     # ------------------------------------------------------------------
@@ -126,8 +124,7 @@ def _prepare_train_split(
     """Build a training-ready split: ``anchor`` + ``positive`` (+ ``negative_*``)."""
     if positive_col not in ds.column_names:
         raise KeyError(
-            f"purpose='train' requires a positive column {positive_col!r}. "
-            f"Available columns: {ds.column_names}"
+            f"purpose='train' requires a positive column {positive_col!r}. Available columns: {ds.column_names}"
         )
 
     resolve = use_hard_negatives and _has_negative_idx_columns(ds)
@@ -307,13 +304,13 @@ class InferenceData:
     """
 
     dataset: Dataset
-    adata: "ad.AnnData"
-    vector_store: "VectorStore | None"
+    adata: ad.AnnData
+    vector_store: VectorStore | None
     local_path: Path
 
 
 def prepare_inference(
-    model: "SentenceTransformer",
+    model: SentenceTransformer,
     ds: Dataset,
     *,
     modality: Modality = "bimodal",
@@ -419,7 +416,7 @@ def prepare_inference(
     )
 
     # 4) For bimodal, build + attach the VectorStore so omics anchors resolve.
-    vector_store: "VectorStore | None" = None
+    vector_store: VectorStore | None = None
     if modality == "bimodal":
         from mmcontext.io import prepare_vector_store
 
