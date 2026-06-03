@@ -43,6 +43,7 @@ from sentence_transformers.sentence_transformer.losses import MultipleNegativesR
 from sentence_transformers.sentence_transformer.modules import Normalize, Pooling
 
 from mmcontext.modules import AdapterModule, MMContextModule
+from mmcontext.utils import resolve_negative_indices_and_rename
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -53,35 +54,87 @@ logger = logging.getLogger(__name__)
 HF_DATASET = "jo-mengr/cxg_schaefer_tiny"
 
 
-def prepare_genelist_dataset(ds):
+def prepare_genelist_dataset(ds, use_hard_negatives: bool = True):
     """Reshape dataset for gene-list + text training.
 
-    Returns a HF Dataset with columns ``anchor`` (gene names) and
-    ``positive`` (text description).
+    Returns a HF Dataset with columns ``anchor`` (gene names), ``positive``
+    (text description), and optionally resolved hard-negative columns
+    ``negative_1``, ``negative_2``, … when ``use_hard_negatives`` is True and
+    the dataset exposes ``negative_*_idx`` columns.
     """
-    # cell_sentence_1 = space-separated gene names → anchor
-    ds = ds.rename_columns({"cell_sentence_1": "anchor"})
-    ds = ds.select_columns(["anchor", "positive"])
-    logger.info("Gene-list dataset: %d samples, columns=%s", len(ds), ds.column_names)
+    has_neg_idx = any(c for c in ds.column_names if c.startswith("negative_") and c.endswith("_idx"))
+    if use_hard_negatives and has_neg_idx:
+        ds = resolve_negative_indices_and_rename(
+            ds,
+            primary_cell_sentence_col="cell_sentence_1",
+            positive_col="positive",
+            negative_prefix="negative",
+            index_col="sample_idx",
+            remove_index_col=True,
+        )
+        neg_cols = sorted(c for c in ds.column_names if c.startswith("negative"))
+        ds = ds.select_columns(["anchor", "positive"] + neg_cols)
+        logger.info(
+            "Gene-list dataset (with hard negatives): %d samples, columns=%s",
+            len(ds),
+            ds.column_names,
+        )
+    else:
+        # cell_sentence_1 = space-separated gene names → anchor
+        ds = ds.rename_columns({"cell_sentence_1": "anchor"})
+        ds = ds.select_columns(["anchor", "positive"])
+        logger.info("Gene-list dataset: %d samples, columns=%s", len(ds), ds.column_names)
     return ds
 
 
-def prepare_bimodal_dataset(ds):
+def prepare_bimodal_dataset(ds, use_hard_negatives: bool = True):
     """Reshape dataset for bimodal (omics + text) training.
 
     Prefixes ``sample_idx`` with ``omics:`` so MMContextModule routes them
     through the VectorStore path.
 
-    Returns a HF Dataset with columns ``anchor`` and ``positive``.
+    Returns a HF Dataset with columns ``anchor``, ``positive``, and optionally
+    resolved hard-negative columns when ``use_hard_negatives`` is True and the
+    dataset exposes ``negative_*_idx`` columns.
+
+    Notes
+    -----
+    Hard negatives are resolved to text: odd-numbered negatives become the
+    positive text of another sample; even-numbered negatives become the
+    gene-list text of another sample.
     """
+    has_neg_idx = any(c for c in ds.column_names if c.startswith("negative_") and c.endswith("_idx"))
+    if use_hard_negatives and has_neg_idx:
+        ds = resolve_negative_indices_and_rename(
+            ds,
+            primary_cell_sentence_col="cell_sentence_1",
+            positive_col="positive",
+            negative_prefix="negative",
+            index_col="sample_idx",
+            remove_index_col=False,  # keep sample_idx so we can build the omics anchor
+        )
 
-    def prefix_omics(example):
-        example["anchor"] = f"omics:{example['sample_idx']}"
-        return example
+        def _prefix_omics(example):
+            example["anchor"] = f"omics:{example['sample_idx']}"
+            return example
 
-    ds = ds.map(prefix_omics)
-    ds = ds.select_columns(["anchor", "positive"])
-    logger.info("Bimodal dataset: %d samples, columns=%s", len(ds), ds.column_names)
+        ds = ds.map(_prefix_omics)
+        neg_cols = sorted(c for c in ds.column_names if c.startswith("negative"))
+        ds = ds.select_columns(["anchor", "positive"] + neg_cols)
+        logger.info(
+            "Bimodal dataset (with hard negatives): %d samples, columns=%s",
+            len(ds),
+            ds.column_names,
+        )
+    else:
+
+        def _prefix_omics(example):
+            example["anchor"] = f"omics:{example['sample_idx']}"
+            return example
+
+        ds = ds.map(_prefix_omics)
+        ds = ds.select_columns(["anchor", "positive"])
+        logger.info("Bimodal dataset: %d samples, columns=%s", len(ds), ds.column_names)
     return ds
 
 
@@ -184,14 +237,20 @@ def main():
         default=None,
         help="Optional W&B run name (auto-generated if omitted)",
     )
+    parser.add_argument(
+        "--hard-negatives",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use hard negatives from negative_*_idx dataset columns (default: True).",
+    )
     args = parser.parse_args()
 
     # --- Dataset ---
     ds_raw = load_dataset(args.dataset, split="train")
     if args.mode == "bimodal":
-        ds = prepare_bimodal_dataset(ds_raw)
+        ds = prepare_bimodal_dataset(ds_raw, use_hard_negatives=args.hard_negatives)
     else:
-        ds = prepare_genelist_dataset(ds_raw)
+        ds = prepare_genelist_dataset(ds_raw, use_hard_negatives=args.hard_negatives)
 
     # --- Pipeline ---
     pipeline = build_pipeline(
