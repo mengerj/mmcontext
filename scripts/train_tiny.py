@@ -317,12 +317,9 @@ def main():
     # top N layers trainable is the usual fine-tuning sweet spot.
     if args.freeze_text_encoder:
         text_module = list(pipeline.children())[0]
-        if args.unfreeze_last_n > 0:
-            text_module.freeze_all_but_top_layers(args.unfreeze_last_n)
-            logger.info("Froze text encoder, keeping top %d layers trainable", args.unfreeze_last_n)
-        else:
-            text_module.freeze_text_encoder()
-            logger.info("Froze entire text encoder")
+        # unfreeze_last_n == 0 freezes the whole encoder; > 0 keeps the top N trainable.
+        text_module.freeze_all_but_top_layers(args.unfreeze_last_n)
+        logger.info("Froze text encoder, keeping top %d layers trainable", args.unfreeze_last_n)
         trainable = sum(p.numel() for p in pipeline.parameters() if p.requires_grad)
         total = sum(p.numel() for p in pipeline.parameters())
         logger.info("Trainable params: %d / %d (%.1f%%)", trainable, total, 100.0 * trainable / total)

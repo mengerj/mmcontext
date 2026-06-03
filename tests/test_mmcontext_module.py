@@ -326,29 +326,12 @@ class TestProperties:
 class TestFreezing:
     """Tests for freezing/unfreezing the text encoder."""
 
-    def test_freeze_text_encoder(self, module):
-        """Freezing makes text encoder parameters non-trainable."""
-        module.freeze_text_encoder()
-        for param in module.auto_model.parameters():
-            assert not param.requires_grad
-
     def test_unfreeze_text_encoder(self, module):
-        """Unfreezing restores gradient computation."""
-        module.freeze_text_encoder()
+        """Unfreezing restores gradient computation after a full freeze."""
+        module.freeze_all_but_top_layers(0)
         module.unfreeze_text_encoder()
         for param in module.auto_model.parameters():
             assert param.requires_grad
-
-    def test_freeze_unfreeze_num_layers(self, module):
-        """Partial freezing: freeze only first N layers."""
-        # Freeze first 2 layers (if the encoder has enough)
-        module.freeze_text_encoder(num_layers=2)
-
-        # At least some params should be frozen, some not
-        frozen = sum(1 for p in module.auto_model.parameters() if not p.requires_grad)
-        trainable = sum(1 for p in module.auto_model.parameters() if p.requires_grad)
-        assert frozen > 0
-        assert trainable > 0
 
     def test_freeze_all_but_top_layers_keeps_only_top(self, module):
         """freeze_all_but_top_layers(N) trains only the top N layers."""

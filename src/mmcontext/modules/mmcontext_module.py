@@ -396,23 +396,6 @@ class MMContextModule(InputModule):
     # ------------------------------------------------------------------
     # Freezing
     # ------------------------------------------------------------------
-    def freeze_text_encoder(self, num_layers: int | None = None) -> None:
-        """Freeze text encoder parameters.
-
-        Parameters
-        ----------
-        num_layers : int, optional
-            If given, freeze only the first ``num_layers`` layers. The
-            remaining layers and the pooler (if any) stay trainable.
-            If ``None``, freeze all parameters.
-        """
-        if num_layers is None:
-            for param in self.auto_model.parameters():
-                param.requires_grad = False
-            logger.info("Froze all text encoder parameters")
-        else:
-            self._freeze_n_layers(num_layers)
-
     def unfreeze_text_encoder(self) -> None:
         """Unfreeze all text encoder parameters."""
         for param in self.auto_model.parameters():
@@ -434,24 +417,13 @@ class MMContextModule(InputModule):
             return self.auto_model.bert.encoder.layer
         return None
 
-    def _freeze_n_layers(self, num_layers: int) -> None:
-        """Freeze the first ``num_layers`` encoder layers."""
-        layers = self._get_encoder_layers()
-
-        if layers is None:
-            logger.warning("Could not identify encoder layers for partial freezing. Freezing all parameters instead.")
-            for param in self.auto_model.parameters():
-                param.requires_grad = False
-            return
-
-        for i, layer in enumerate(layers):
-            if i < num_layers:
-                for param in layer.parameters():
-                    param.requires_grad = False
-        logger.info("Froze first %d text encoder layers", num_layers)
-
     def freeze_all_but_top_layers(self, num_trainable_layers: int) -> None:
         """Freeze the text encoder, keeping only the top layers trainable.
+
+        This is the single entry point for text-encoder freezing. Passing
+        ``0`` freezes the entire encoder; passing ``N`` freezes everything
+        except the top ``N`` transformer layers. To make the whole encoder
+        trainable again, use :meth:`unfreeze_text_encoder`.
 
         Freezes every parameter of the text encoder, then re-enables gradients
         on the top ``num_trainable_layers`` transformer layers (counting from

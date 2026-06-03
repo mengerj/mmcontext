@@ -90,7 +90,7 @@ class TestUnfreezeTextEncoderCallback:
     def test_text_encoder_frozen_before_unfreeze_epoch(self, pipeline_without_attention):
         """Text encoder parameters must stay frozen before the unfreeze epoch."""
         model = pipeline_without_attention
-        model[0].freeze_text_encoder()
+        model[0].freeze_all_but_top_layers(0)
 
         cb = UnfreezeTextEncoderCallback(unfreeze_epoch=2.0)
         self._call_epoch(cb, model, epoch=0.0)
@@ -102,7 +102,7 @@ class TestUnfreezeTextEncoderCallback:
     def test_text_encoder_unfreezes_at_target_epoch(self, pipeline_without_attention):
         """Text encoder should be unfrozen exactly at the configured epoch."""
         model = pipeline_without_attention
-        model[0].freeze_text_encoder()
+        model[0].freeze_all_but_top_layers(0)
 
         cb = UnfreezeTextEncoderCallback(unfreeze_epoch=2.0)
         self._call_epoch(cb, model, epoch=2.0)
@@ -113,7 +113,7 @@ class TestUnfreezeTextEncoderCallback:
     def test_text_encoder_unfreezes_past_target_epoch(self, pipeline_without_attention):
         """Unfreezing also triggers when epoch exceeds the target (e.g., epoch 3 > target 2)."""
         model = pipeline_without_attention
-        model[0].freeze_text_encoder()
+        model[0].freeze_all_but_top_layers(0)
 
         cb = UnfreezeTextEncoderCallback(unfreeze_epoch=2.0)
         self._call_epoch(cb, model, epoch=3.0)
@@ -124,13 +124,13 @@ class TestUnfreezeTextEncoderCallback:
     def test_text_encoder_unfreezes_only_once(self, pipeline_without_attention):
         """The unfreeze action should happen exactly once regardless of subsequent epochs."""
         model = pipeline_without_attention
-        model[0].freeze_text_encoder()
+        model[0].freeze_all_but_top_layers(0)
 
         cb = UnfreezeTextEncoderCallback(unfreeze_epoch=1.0)
         self._call_epoch(cb, model, epoch=1.0)
 
         # Manually re-freeze to check the callback doesn't unfreeze again
-        model[0].freeze_text_encoder()
+        model[0].freeze_all_but_top_layers(0)
         self._call_epoch(cb, model, epoch=2.0)
 
         assert _all_frozen(model[0].auto_model), "Should not re-unfreeze after unfrozen=True is set"
@@ -150,7 +150,7 @@ class TestUnfreezeTextEncoderCallback:
     def test_different_unfreeze_epochs(self, pipeline_without_attention):
         """Two callbacks with different epochs unfreeze independently."""
         model = pipeline_without_attention
-        model[0].freeze_text_encoder()
+        model[0].freeze_all_but_top_layers(0)
 
         cb_epoch1 = UnfreezeTextEncoderCallback(unfreeze_epoch=1.0)
         cb_epoch3 = UnfreezeTextEncoderCallback(unfreeze_epoch=3.0)
@@ -160,7 +160,7 @@ class TestUnfreezeTextEncoderCallback:
         assert cb_epoch1.unfrozen
         assert not cb_epoch3.unfrozen
 
-        model[0].freeze_text_encoder()  # re-freeze for the next check
+        model[0].freeze_all_but_top_layers(0)  # re-freeze for the next check
         # At epoch 3 — the epoch-3 callback fires
         self._call_epoch(cb_epoch3, model, epoch=3.0)
         assert cb_epoch3.unfrozen
