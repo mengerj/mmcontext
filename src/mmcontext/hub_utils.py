@@ -69,7 +69,9 @@ def get_hf_username() -> str:
             "2. Run 'huggingface-cli login' to authenticate"
         ) from None
     except Exception as e:
-        raise ValueError(f"Failed to get HuggingFace username: {e}\nPlease check your HuggingFace token is valid.") from e
+        raise ValueError(
+            f"Failed to get HuggingFace username: {e}\nPlease check your HuggingFace token is valid."
+        ) from e
 
 
 def check_model_exists(model_name: str, username: str | None = None) -> bool:

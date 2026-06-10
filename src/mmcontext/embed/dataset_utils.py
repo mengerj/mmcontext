@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Literal
 
 import anndata as ad
+import numpy as np
 import pandas as pd
 import torch
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 from huggingface_hub import HfApi
 
 from mmcontext.file_utils import remove_corrupted_null_arrays
+from mmcontext.io._zarr_read import _open_zarr, _read_obs_names_zarr, read_obs_and_obsm
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +145,8 @@ def collect_adata_subset(
     *,
     file_paths: list[Path] | None = None,
     join_vars: str = "outer",  # 'inner' if you need exact var overlap
+    obsm_key: str | None = None,
+    obs_columns: list[str] | None = None,
 ) -> ad.AnnData:
     """
     Load a subset of the data from the download directory or from specific file paths.
@@ -164,6 +168,15 @@ def collect_adata_subset(
         Used when files are in their original locations (e.g., local datasets).
     join_vars : {'outer', 'inner'}, default 'outer'
         How to merge variables (genes) when concatenating chunks.
+    obsm_key : str | None, default None
+        If given, use a memory-lean path: for each chunk only the requested
+        rows of ``obsm[obsm_key]`` plus the ``obs`` table are read (the full
+        ``X`` matrix and other ``obsm`` layers are never materialised). The
+        returned AnnData has no ``X`` (``n_vars == 0``) and carries the layer in
+        ``obsm[obsm_key]``. If ``None`` the legacy full-read behaviour is used.
+    obs_columns : list[str] | None, default None
+        When *obsm_key* is given, restrict the collected ``obs`` to these
+        columns (plus the index). Columns absent from a chunk are ignored.
 
     Returns
     -------
@@ -172,7 +185,9 @@ def collect_adata_subset(
 
     Notes
     -----
-    * For now, all chunks are loaded into memory.
+    * With *obsm_key* set, the zarr path reads only the obs index, the requested
+      obsm layer (for the wanted rows), and the label columns. Without it, all
+      chunks are loaded fully into memory (the legacy behaviour).
     * Either download_dir or file_paths must be provided.
     """
     if download_dir is None and file_paths is None:
@@ -205,14 +220,33 @@ def collect_adata_subset(
             logger.debug("Scanning Zarr store %s", path)
             # Fix corrupted null arrays before reading
             remove_corrupted_null_arrays(path)
-            view = ad.read_zarr(path)
-            wanted = remaining.intersection(view.obs_names)
-            if wanted:
-                logger.info("  ↳ %d obs found in %s", len(wanted), path.name)
-                collected.append(view[list(wanted)].copy())  # loads only slice
-                remaining.difference_update(wanted)
-            if hasattr(view, "file") and view.file:
-                view.file.close()  # be nice to the OS
+
+            if obsm_key is not None:
+                # Lean path: read obs_names (cheap), then only the wanted rows of
+                # the requested obsm layer. ad.read_zarr is NOT used because it
+                # materialises the entire store (X + all obsm) before slicing.
+                obs_names = _read_obs_names_zarr(_open_zarr(path))
+                name_to_idx = {n: i for i, n in enumerate(obs_names)}
+                wanted = remaining.intersection(obs_names)
+                if wanted:
+                    logger.info("  ↳ %d obs found in %s", len(wanted), path.name)
+                    wanted_list = [n for n in obs_names if n in wanted]  # store order
+                    rows = np.array([name_to_idx[n] for n in wanted_list])
+                    obs_df, obsm = read_obs_and_obsm(path, obsm_key=obsm_key, rows=rows, obs_columns=obs_columns)
+                    sub = ad.AnnData(obs=obs_df)
+                    sub.obsm[obsm_key] = obsm
+                    collected.append(sub)
+                    remaining.difference_update(wanted)
+            else:
+                # Legacy full-read path (loads the whole store into memory).
+                view = ad.read_zarr(path)
+                wanted = remaining.intersection(view.obs_names)
+                if wanted:
+                    logger.info("  ↳ %d obs found in %s", len(wanted), path.name)
+                    collected.append(view[list(wanted)].copy())
+                    remaining.difference_update(wanted)
+                if hasattr(view, "file") and view.file:
+                    view.file.close()  # be nice to the OS
 
     # scan *.h5ad files -----------------------------------------------
     for path in paths_to_scan:
@@ -223,14 +257,26 @@ def collect_adata_subset(
         if path.suffix == ".h5ad":
             logger.debug("Scanning H5AD file %s", path.name)
             view = ad.read_h5ad(path, backed="r")
-            wanted = remaining.intersection(view.obs_names)
+            obs_names = list(view.obs_names)
+            wanted = remaining.intersection(obs_names)
             if hasattr(view, "file") and view.file:
                 view.file.close()
 
             if wanted:
                 logger.info("  ↳ %d obs found in %s", len(wanted), path.name)
-                full = ad.read_h5ad(path)  # loads entire file once
-                collected.append(full[list(wanted)].copy())
+                if obsm_key is not None:
+                    # Lean path: read only the requested obsm rows + obs columns
+                    # via backed="r" instead of materialising the whole file.
+                    name_to_idx = {n: i for i, n in enumerate(obs_names)}
+                    wanted_list = [n for n in obs_names if n in wanted]
+                    rows = np.array([name_to_idx[n] for n in wanted_list])
+                    obs_df, obsm = read_obs_and_obsm(path, obsm_key=obsm_key, rows=rows, obs_columns=obs_columns)
+                    sub = ad.AnnData(obs=obs_df)
+                    sub.obsm[obsm_key] = obsm
+                    collected.append(sub)
+                else:
+                    full = ad.read_h5ad(path)  # loads entire file once
+                    collected.append(full[list(wanted)].copy())
                 remaining.difference_update(wanted)
 
     if remaining:
