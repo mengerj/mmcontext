@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 from zipfile import ZipFile, is_zipfile
@@ -313,3 +314,79 @@ def prepare_vector_store(
     store = VectorStore.from_numpy(matrix, all_ids, path=output_path)
     logger.info("VectorStore saved to %s", output_path)
     return store
+
+
+def build_namespaced_vector_store(
+    per_dataset: dict[str, tuple[VectorStore, Sequence[str]]],
+    *,
+    output_path: str | Path,
+    namespace_sep: str = ":",
+) -> VectorStore:
+    """Merge several per-dataset stores into one with namespaced ids.
+
+    Multiple omics datasets typically number their samples independently
+    (``sample_idx`` "0", "1", … restarts in each dataset), so concatenating
+    their stores directly would collide. A single mmcontext pipeline holds
+    exactly one :class:`VectorStore`, so the per-dataset stores must be merged.
+    This helper re-keys every vector to ``{dataset_name}{sep}{sample_idx}`` and
+    writes one combined store.
+
+    The same namespacing must be applied to the dataset's ``sample_idx`` column
+    *before* building anchors, so the resulting ``omics:{name}{sep}{idx}``
+    anchors resolve against these keys. Build each per-dataset store on the
+    **original** ids first (so the lookup against ``adata.obs_names`` in
+    :func:`prepare_vector_store` succeeds), then pass it here.
+
+    Parameters
+    ----------
+    per_dataset : dict[str, tuple[VectorStore, Sequence[str]]]
+        Maps a dataset name to ``(store, original_sample_ids)``. The ids are
+        looked up in *store* via :meth:`VectorStore.batch_lookup`; duplicates
+        are de-duplicated while preserving order.
+    output_path : str or Path
+        Where to write the merged ``.mmap`` file (a sidecar ``.index.json`` is
+        written alongside it).
+    namespace_sep : str, default ":"
+        Separator between the dataset name and the original id.
+
+    Returns
+    -------
+    VectorStore
+        The merged store, keyed by ``{name}{sep}{orig_id}``.
+
+    Raises
+    ------
+    ValueError
+        If *per_dataset* is empty or the stores disagree on dimensionality.
+    """
+    if not per_dataset:
+        raise ValueError("per_dataset is empty: at least one store is required.")
+
+    all_ids: list[str] = []
+    all_vectors: list[np.ndarray] = []
+    dim: int | None = None
+
+    for name, (store, orig_ids) in per_dataset.items():
+        # Unique, order-preserving so rows line up with the namespaced ids.
+        unique_ids = list(dict.fromkeys(str(i) for i in orig_ids))
+        if not unique_ids:
+            continue
+        vectors = store.batch_lookup(unique_ids)  # (N, D)
+        if dim is None:
+            dim = vectors.shape[1]
+        elif vectors.shape[1] != dim:
+            raise ValueError(
+                f"Store '{name}' has dim {vectors.shape[1]} but a previous store has dim {dim}. "
+                "All omics datasets in one run must share the same obsm_key / dimensionality."
+            )
+        all_vectors.append(vectors)
+        all_ids.extend(f"{name}{namespace_sep}{sid}" for sid in unique_ids)
+
+    matrix = np.concatenate(all_vectors, axis=0)
+    logger.info(
+        "Merged %d namespaced VectorStores: %d vectors, dim=%d",
+        len(per_dataset),
+        matrix.shape[0],
+        matrix.shape[1],
+    )
+    return VectorStore.from_numpy(matrix, all_ids, path=output_path)

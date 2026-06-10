@@ -40,10 +40,8 @@ from sentence_transformers import (
     SentenceTransformerTrainingArguments,
 )
 from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
-from sentence_transformers.sentence_transformer.modules import Normalize, Pooling
 
-from mmcontext.embed import prepare_dataset
-from mmcontext.modules import AdapterModule, MMContextModule
+from mmcontext.embed import build_pipeline, prepare_dataset
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -52,51 +50,6 @@ logger = logging.getLogger(__name__)
 # Dataset helpers
 # ---------------------------------------------------------------------------
 HF_DATASET = "jo-mengr/cxg_schaefer_tiny"
-
-
-# ---------------------------------------------------------------------------
-# Pipeline builder
-# ---------------------------------------------------------------------------
-def build_pipeline(
-    text_model: str,
-    omics_dim: int | None = None,
-    shared_dim: int = 256,
-) -> SentenceTransformer:
-    """Build the MMContext sentence-transformer pipeline.
-
-    Parameters
-    ----------
-    text_model
-        HuggingFace model name/path for the text encoder.
-    omics_dim
-        Dimension of omics vectors (only needed for bimodal mode).
-        If None, the adapter omics head is sized to match text_dim.
-    shared_dim
-        Output dimension of the shared embedding space.
-    """
-    mmcontext = MMContextModule(model_name_or_path=text_model)
-    text_dim = mmcontext.get_word_embedding_dimension()
-
-    if omics_dim is None:
-        omics_dim = text_dim
-
-    adapter = AdapterModule(
-        text_input_dim=text_dim,
-        omics_input_dim=omics_dim,
-        shared_dim=shared_dim,
-    )
-    pooling = Pooling(embedding_dimension=shared_dim, pooling_mode="mean")
-    normalize = Normalize()
-
-    pipeline = SentenceTransformer(modules=[mmcontext, adapter, pooling, normalize])
-    logger.info(
-        "Pipeline: text_dim=%d, omics_dim=%d, shared_dim=%d, params=%d",
-        text_dim,
-        omics_dim,
-        shared_dim,
-        sum(p.numel() for p in pipeline.parameters()),
-    )
-    return pipeline
 
 
 # ---------------------------------------------------------------------------

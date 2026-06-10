@@ -1,0 +1,90 @@
+# Config-driven multi-dataset training (scripts/train_config.py).
+# Plain YAML — no Hydra. Run:
+#   python scripts/train_config.py --config conf/training/multi_example.yaml
+
+# --- Model ---
+model: null # HF repo / local path to continue fine-tuning, or null to build fresh
+tag: cxg_geo_tiny # optional suffix appended to the auto-generated Hub model name
+push_to_hub: false
+
+# --- Shared embedding space ---
+obsm_key: X_gs10k # single obsm key used to build the VectorStore for ALL bimodal datasets
+shared_dim: 256 # output dim of the shared space
+adapter_hidden_dim: null # null/0 = Linear+LayerNorm head; >0 = MLP (Linear->ReLU->Linear->LayerNorm)
+
+# --- Text encoder ---
+text_encoder:
+  name: NeuML/pubmedbert-base-embeddings
+  max_seq_length: 512
+
+# --- Freezing ---
+freeze_text_encoder: true # static freeze at start
+unfreeze_last_n_layers: 1 # with freeze_text_encoder: keep top N layers trainable (0 = freeze all)
+unfreeze_epoch: 16 # unfreeze the WHOLE encoder at this epoch (UnfreezeTextEncoderCallback)
+# adapter_freezing:        # optional; omit to skip the per-modality adapter callback
+#   freeze_text_adapter: false
+#   freeze_omics_adapter: false
+#   unfreeze_text_adapter_epoch: null
+#   unfreeze_omics_adapter_epoch: null
+
+# --- Gene tokens (only affect text-modality truncation) ---
+gene_special_token: null # e.g. "[GENE]" — added to the tokenizer and used by truncation
+delimiter: " "
+
+# --- Caching ---
+cache_dir: data/huggingface # HF datasets cache (null = default)
+adata_cache_dir: data/anndata # zarr/AnnData download cache for the VectorStore
+vector_store_dir: data/vector_stores # where per-dataset + merged .mmap stores are written
+force_refresh_cache: false
+
+# --- Omics datasets (processed via prepare_dataset) ---
+# sample_idx is auto-namespaced to "{name}:{sample_idx}" so multiple datasets
+# never collide in the merged VectorStore. truncate/truncate_kwargs only apply
+# to modality: text (the omics-vector anchor of bimodal datasets is not text).
+omics_datasets:
+  - id: jo-mengr/cxg_schaefer_tiny
+    name: cxg_tiny
+    type: multiplets # -> MultipleNegativesRankingLoss + TripletEvaluator
+    modality: bimodal # bimodal (omics vectors) | text (cell-sentence text)
+    primary_cell_sentence: cell_sentence_1
+    positive_col: positive
+    use_hard_negatives: true
+    truncate: false
+  - id: jo-mengr/geo_schaefer_tiny
+    name: geo_tiny
+    type: multiplets
+    modality: bimodal
+    primary_cell_sentence: cell_sentence_1
+    positive_col: positive
+    use_hard_negatives: true
+
+# --- Bio datasets (already anchor/positive/negative; loaded raw) ---
+bio_datasets:
+  - id: jo-mengr/ncbi_cell_types_1000
+    name: celltype_descriptions
+    type: multiplets
+    revision: hard_negatives
+
+# --- Trainer ---
+trainer:
+  output_dir: outputs/multi_gs10k
+  num_train_epochs: 2
+  per_device_train_batch_size: 64
+  per_device_eval_batch_size: 64
+  learning_rate: 2e-5
+  warmup_ratio: 0.1
+  bf16: true
+  fp16: false
+  eval_strategy: steps
+  eval_steps: 200
+  save_strategy: steps
+  save_steps: 2000
+  save_total_limit: 2
+  logging_steps: 50
+  max_grad_norm: 1.0
+  gradient_checkpointing: false
+  dataloader_num_workers: 0
+  use_mps_device: true
+  use_cosine_scheduler: false
+  wandb_project: mmcontext # set to enable W&B logging
+  wandb_run_name: null
