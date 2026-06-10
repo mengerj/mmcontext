@@ -20,10 +20,10 @@ landed (and where it diverged from the original §2–§3 plan):
 
 - **Artifact contract** (`mmcontext_benchmark/artifacts.py`): one on-disk layout
   per `(dataset, model)` — embedders write `embeddings.parquet` + `subset.h5ad`
-  + `*_label_embeddings_*`; direct classifiers write
-  `predictions_<label>.parquet`; both write `meta.yaml`. Adapters and eval only
-  talk through this, which is what makes different methods comparable.
-- **Adapters + registry** (`adapters/`): one adapter per model *kind*. The
+  - `*_label_embeddings_*`; direct classifiers write
+    `predictions_<label>.parquet`; both write `meta.yaml`. Adapters and eval only
+    talk through this, which is what makes different methods comparable.
+- **Adapters + registry** (`adapters/`): one adapter per model _kind_. The
   `mmcontext` adapter **auto-detects** the old (registered-embeddings) vs new
   (VectorStore) approach by inspecting the loaded model's first module — so a
   single config entry works for both. External tools declare an explicit
@@ -44,8 +44,8 @@ landed (and where it diverged from the original §2–§3 plan):
 - **Config**: Hydra is retained. `conf/benchmark.yaml` composes `datasets/` and
   `models/` lists; `scripts/run_benchmark.py` runs embed → eval → collect.
 
-Consequence for this plan: the §3.2 "MOVE" rows are realised as *adapters +
-container entrypoints* in the benchmark repo, not as 1:1 file moves. The
+Consequence for this plan: the §3.2 "MOVE" rows are realised as _adapters +
+container entrypoints_ in the benchmark repo, not as 1:1 file moves. The
 `mmcontext`-side slim-down below is unchanged and still to do.
 
 ---
@@ -53,10 +53,10 @@ container entrypoints* in the benchmark repo, not as 1:1 file moves. The
 ## 1. Guiding principles
 
 1. **`mmcontext` = the model.** Modules, adapters, the VectorStore the model
-   depends on, hub/training utilities, and a *slim* eval surface that a user can
+   depends on, hub/training utilities, and a _slim_ eval surface that a user can
    run from `tutorials/evaluate_model.ipynb` on a single trained model.
 2. **`mmcontext-benchmark` = the science of comparison.** Everything that loads
-   *other* models, runs multi-model embedding pipelines, computes comparative
+   _other_ models, runs multi-model embedding pipelines, computes comparative
    metrics, and reproduces paper figures. It depends on `mmcontext` (and on
    `adata-hf-datasets`), never the reverse.
 3. **No new dependency edges into `mmcontext`.** After the split, nothing in
@@ -72,9 +72,9 @@ container entrypoints* in the benchmark repo, not as 1:1 file moves. The
 These shaped the boundaries below and are worth recording:
 
 - **No `src/` file imports `adata_hf_datasets`.** The only references are in
-  `pyproject.toml`, `egg-info`, docstrings, and *notebooks*. The package dep is
+  `pyproject.toml`, `egg-info`, docstrings, and _notebooks_. The package dep is
   effectively a notebook-only dependency today, so removing it from
-  `pyproject.toml` is safe for the library. Users who need to *create* test
+  `pyproject.toml` is safe for the library. Users who need to _create_ test
   datasets install `adata-hf-datasets` themselves (as the kept
   `evaluate_model.ipynb` already instructs).
 - **The kept eval modules are self-contained.** `query_annotate`,
@@ -103,33 +103,33 @@ These shaped the boundaries below and are worth recording:
 
 ### 3.1 KEEP in `mmcontext`
 
-| Path | Notes |
-|---|---|
-| `src/mmcontext/modules/*` | Core architecture — untouched. |
-| `src/mmcontext/io/vector_store.py` | Required by `MMContextModule`. |
-| `src/mmcontext/io/prepare_store.py` | Keep the VectorStore-from-HF-dataset path (no `adata_hf` import; only a docstring mention). |
-| `src/mmcontext/eval/{base,registry,utils}.py` | Eval framework + label specs. |
-| `src/mmcontext/eval/query_annotate.py` | `OmicsQueryAnnotator` — used by the notebook; has tests. |
-| `src/mmcontext/eval/{ari,embedding_alignment,label_similarity}.py` | Single-model metrics. |
-| `src/mmcontext/eval/{scib_wrapper,evaluate_scib}.py` | scIB metrics for one embedding. |
-| `src/mmcontext/eval/umap_plotter.py` | Single-model UMAP eval. |
-| `src/mmcontext/embed/dataset_utils.py` | `SentenceDataset`, `load_generic_dataset`, `collect_adata_subset` — minimal loading. |
-| `src/mmcontext/embed/dataset_prep.py` | `prepare_inference`, `InferenceData`, `prepare_dataset` — minimal data prep. |
-| **NEW** `src/mmcontext/embed/encode.py` | Single-model encode helpers split out of `model_utils.py` (see 3.3). |
-| `src/mmcontext/{callback,hub_utils,simulator,utils,file_utils,sanity_helpers}.py` | Core/training/util. |
-| `src/mmcontext/pl/*` | Plotting (used by kept eval + notebook). |
-| `tutorials/evaluate_model.ipynb` | Canonical single-model evaluation notebook. |
+| Path                                                                              | Notes                                                                                       |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `src/mmcontext/modules/*`                                                         | Core architecture — untouched.                                                              |
+| `src/mmcontext/io/vector_store.py`                                                | Required by `MMContextModule`.                                                              |
+| `src/mmcontext/io/prepare_store.py`                                               | Keep the VectorStore-from-HF-dataset path (no `adata_hf` import; only a docstring mention). |
+| `src/mmcontext/eval/{base,registry,utils}.py`                                     | Eval framework + label specs.                                                               |
+| `src/mmcontext/eval/query_annotate.py`                                            | `OmicsQueryAnnotator` — used by the notebook; has tests.                                    |
+| `src/mmcontext/eval/{ari,embedding_alignment,label_similarity}.py`                | Single-model metrics.                                                                       |
+| `src/mmcontext/eval/{scib_wrapper,evaluate_scib}.py`                              | scIB metrics for one embedding.                                                             |
+| `src/mmcontext/eval/umap_plotter.py`                                              | Single-model UMAP eval.                                                                     |
+| `src/mmcontext/embed/dataset_utils.py`                                            | `SentenceDataset`, `load_generic_dataset`, `collect_adata_subset` — minimal loading.        |
+| `src/mmcontext/embed/dataset_prep.py`                                             | `prepare_inference`, `InferenceData`, `prepare_dataset` — minimal data prep.                |
+| **NEW** `src/mmcontext/embed/encode.py`                                           | Single-model encode helpers split out of `model_utils.py` (see 3.3).                        |
+| `src/mmcontext/{callback,hub_utils,simulator,utils,file_utils,sanity_helpers}.py` | Core/training/util.                                                                         |
+| `src/mmcontext/pl/*`                                                              | Plotting (used by kept eval + notebook).                                                    |
+| `tutorials/evaluate_model.ipynb`                                                  | Canonical single-model evaluation notebook.                                                 |
 
 ### 3.2 MOVE to `mmcontext-benchmark`
 
-| Path | New home (benchmark) | Reason |
-|---|---|---|
-| `src/mmcontext/eval/eval_pipeline.py` | `mmcontext_benchmark/eval/pipeline.py` | Multi-model comparison orchestrator. |
-| `src/mmcontext/embed/embed_pipeline.py` | `mmcontext_benchmark/embed/pipeline.py` | Multi-model embedding pipeline. |
-| `src/mmcontext/embed/scsa_utils.py` | `mmcontext_benchmark/models/scsa.py` | Competitor model (SCSA). |
-| `src/mmcontext/embed/cellwhisperer_utils.py` | `mmcontext_benchmark/models/cellwhisperer.py` | Competitor model (CellWhisperer). |
-| `model_utils.py` → `prepare_model_and_embed`, `prepare_model_and_ds`, `process_single_dataset_model` | `mmcontext_benchmark/embed/orchestrate.py` | Multi-model orchestration split. |
-| `tutorials/pretrained_inference.ipynb`, `tutorials/train_new.ipynb` | `mmcontext-benchmark/examples/` (or delete) | Embed-data tutorials using `adata_hf_datasets`. |
+| Path                                                                                                 | New home (benchmark)                          | Reason                                          |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------- |
+| `src/mmcontext/eval/eval_pipeline.py`                                                                | `mmcontext_benchmark/eval/pipeline.py`        | Multi-model comparison orchestrator.            |
+| `src/mmcontext/embed/embed_pipeline.py`                                                              | `mmcontext_benchmark/embed/pipeline.py`       | Multi-model embedding pipeline.                 |
+| `src/mmcontext/embed/scsa_utils.py`                                                                  | `mmcontext_benchmark/models/scsa.py`          | Competitor model (SCSA).                        |
+| `src/mmcontext/embed/cellwhisperer_utils.py`                                                         | `mmcontext_benchmark/models/cellwhisperer.py` | Competitor model (CellWhisperer).               |
+| `model_utils.py` → `prepare_model_and_embed`, `prepare_model_and_ds`, `process_single_dataset_model` | `mmcontext_benchmark/embed/orchestrate.py`    | Multi-model orchestration split.                |
+| `tutorials/pretrained_inference.ipynb`, `tutorials/train_new.ipynb`                                  | `mmcontext-benchmark/examples/` (or delete)   | Embed-data tutorials using `adata_hf_datasets`. |
 
 ### 3.3 SPLIT `embed/model_utils.py`
 
@@ -168,7 +168,7 @@ Remove from `mmcontext`:
 
 **Training stays in `mmcontext`.** The package keeps its training code
 (`callback.py`, training utilities, hub upload). `wandb` is used for training
-logging, so it is **not removed** — instead it becomes an *optional* extra so
+logging, so it is **not removed** — instead it becomes an _optional_ extra so
 inference-only users get a lighter install:
 
 ```toml
@@ -181,7 +181,7 @@ Training code must import `wandb` lazily (inside the training/callback path,
 guarded by a clear `ImportError` message pointing to `pip install
 mmcontext[train]`) so that `import mmcontext` and inference never require it.
 
-Candidates to also drop from `mmcontext` *once their only users have moved*
+Candidates to also drop from `mmcontext` _once their only users have moved_
 (verify with a final grep — do not remove blindly): `scib`, `louvain` (if only
 used by scIB multi-model paths). Keep anything still imported by the kept
 eval/model code. `scib`/`louvain` are used by the kept
@@ -208,7 +208,7 @@ Port `scsa_utils`, `cellwhisperer_utils`, `embed_pipeline`, `eval_pipeline`,
 multi-model `model_utils` functions, and the two embed-data tutorials into the
 benchmark repo. Fix imports to `mmcontext.*` for shared helpers (`eval.utils`,
 `file_utils`, `pl`). Get benchmark tests passing against installed `mmcontext`.
-*No deletion in `mmcontext` yet — both repos temporarily overlap.*
+_No deletion in `mmcontext` yet — both repos temporarily overlap._
 
 **Phase 2 — Split `model_utils.py` in `mmcontext`.**
 Branch `claude/<issue>-split-model-utils`. Create `embed/encode.py` with the
@@ -238,7 +238,7 @@ Add a README note pointing benchmarking/comparison users to
   (`test_query_annotate.py`, module/adapter/encoder tests, `test_io`,
   `test_prepare_store.py`). Add a regression test asserting the slim public API:
   `import mmcontext; mmcontext.eval.get(...)` works and the moved symbols are
-  *gone* (`pytest.raises(ImportError)` / `AttributeError`).
+  _gone_ (`pytest.raises(ImportError)` / `AttributeError`).
 - **Import-isolation test:** a test that imports every `src/mmcontext` module and
   asserts `adata_hf_datasets` was never imported (check `sys.modules`). This
   locks in the dependency removal.
@@ -252,13 +252,13 @@ Add a README note pointing benchmarking/comparison users to
 
 ## 7. Risks & mitigations
 
-| Risk | Mitigation |
-|---|---|
-| Hidden runtime coupling not caught by static grep | Phase 1 keeps both copies until benchmark tests pass; only Phase 3 deletes. |
-| `eval.utils.LabelKind` / `file_utils` used by moved code | These stay in `mmcontext`; benchmark imports them — intended one-way edge. |
-| Dropping `scib`/`louvain` breaks kept scIB eval | Keep them; only drop deps whose *only* importer moved (verify by grep). |
-| Notebook drift (Jo is mid-update) | Phase 5 is last; coordinate with the in-progress `evaluate_model.ipynb` rewrite. |
-| Users relying on old `mmcontext.embed.embed_pipeline` | Add a deprecation shim that raises `ImportError` with a message pointing to `mmcontext-benchmark` (one release), or note in CHANGELOG. |
+| Risk                                                     | Mitigation                                                                                                                             |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Hidden runtime coupling not caught by static grep        | Phase 1 keeps both copies until benchmark tests pass; only Phase 3 deletes.                                                            |
+| `eval.utils.LabelKind` / `file_utils` used by moved code | These stay in `mmcontext`; benchmark imports them — intended one-way edge.                                                             |
+| Dropping `scib`/`louvain` breaks kept scIB eval          | Keep them; only drop deps whose _only_ importer moved (verify by grep).                                                                |
+| Notebook drift (Jo is mid-update)                        | Phase 5 is last; coordinate with the in-progress `evaluate_model.ipynb` rewrite.                                                       |
+| Users relying on old `mmcontext.embed.embed_pipeline`    | Add a deprecation shim that raises `ImportError` with a message pointing to `mmcontext-benchmark` (one release), or note in CHANGELOG. |
 
 ---
 

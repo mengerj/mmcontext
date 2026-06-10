@@ -215,9 +215,7 @@ class TestAssembleAndTrain:
 
         before = {n: p.clone() for n, p in pipeline.named_parameters() if p.requires_grad}
         trainer.train()
-        delta = sum(
-            (p - before[n]).abs().sum().item() for n, p in pipeline.named_parameters() if n in before
-        )
+        delta = sum((p - before[n]).abs().sum().item() for n, p in pipeline.named_parameters() if n in before)
         assert delta > 0, "No parameters changed during multi-dataset training"
 
 
