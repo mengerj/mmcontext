@@ -31,9 +31,9 @@ from zipfile import ZipFile, is_zipfile
 
 import numpy as np
 import requests
-import zarr
 from tqdm.auto import tqdm
 
+from ._zarr_read import _get_obsm_zarr_array, _open_zarr, _read_obs_names_zarr
 from .vector_store import VectorStore
 
 if TYPE_CHECKING:
@@ -42,55 +42,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Zarr helpers — read obs_names and obsm without loading full AnnData
-# ---------------------------------------------------------------------------
-
-
-def _read_obs_names_zarr(root: zarr.Group) -> list[str]:
-    """Read observation names from a zarr-backed AnnData store.
-
-    AnnData zarr layout stores the obs index under ``obs/_index`` (recent
-    anndata) or ``obs/index`` (older convention).  In both cases the values
-    may be stored directly or via ``__categories``.
-    """
-    obs = root["obs"]
-
-    # Determine the index key name
-    if "_index" in obs.attrs:
-        idx_key = obs.attrs["_index"]
-    elif "__index_level_0__" in obs:
-        idx_key = "__index_level_0__"
-    else:
-        idx_key = "_index"
-
-    idx_array = obs[idx_key]
-
-    # Handle categorical encoding (older anndata versions)
-    if hasattr(idx_array, "attrs") and "categories" in idx_array.attrs:
-        cat_path = idx_array.attrs["categories"]
-        codes = idx_array[:]
-        categories = root[cat_path][:]
-        return [categories[c].decode() if isinstance(categories[c], bytes) else str(categories[c]) for c in codes]
-
-    values = idx_array[:]
-    return [v.decode() if isinstance(v, bytes) else str(v) for v in values]
-
-
-def _get_obsm_zarr_array(root: zarr.Group, obsm_key: str) -> zarr.Array:
-    """Return a zarr Array handle for an obsm layer (no data read yet).
-
-    Callers can use ``.get_orthogonal_selection()`` or ``[rows]`` to read
-    only the rows they need, so the full matrix is never in memory.
-    """
-    if "obsm" not in root:
-        raise KeyError(f"No 'obsm' group in zarr store. Available: {list(root.keys())}")
-
-    obsm = root["obsm"]
-    if obsm_key not in obsm:
-        raise KeyError(f"Key '{obsm_key}' not in obsm. Available: {list(obsm.keys())}")
-
-    return obsm[obsm_key]
+# Zarr handle helpers (`_open_zarr`, `_read_obs_names_zarr`,
+# `_get_obsm_zarr_array`) live in `._zarr_read` and are imported above so there
+# is a single implementation shared with the loaders in `file_utils` and
+# `embed.dataset_utils`.
 
 
 # ---------------------------------------------------------------------------
@@ -168,23 +123,6 @@ def _maybe_extract_zip(zip_path: Path, zarr_dir: Path) -> Path:
     # Not a zip — the "download" was already a zarr directory or similar
     zip_path.rename(zarr_dir)
     return zarr_dir
-
-
-def _open_zarr(path: Path) -> zarr.Group:
-    """Open a zarr store from a directory or zip file."""
-    if path.suffix == ".zip" and path.is_file():
-        return zarr.open(str(path), mode="r")
-    elif path.is_dir():
-        # Could be a zarr directory, or a directory containing a single zarr
-        if (path / ".zgroup").exists() or (path / ".zattrs").exists():
-            return zarr.open(str(path), mode="r")
-        # Check for a single subdirectory that is the actual zarr
-        subdirs = [p for p in path.iterdir() if p.is_dir()]
-        if len(subdirs) == 1:
-            return zarr.open(str(subdirs[0]), mode="r")
-        raise ValueError(f"Cannot determine zarr root in {path}")
-    else:
-        raise FileNotFoundError(f"Path does not exist: {path}")
 
 
 # ---------------------------------------------------------------------------

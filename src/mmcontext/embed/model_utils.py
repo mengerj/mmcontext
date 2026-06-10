@@ -227,7 +227,13 @@ def prepare_model_and_embed(
     )
 
     all_indices: list[int | str] = []
-    all_embeddings: list[list[float]] = []
+    # Preallocate a single contiguous float32 buffer instead of accumulating a
+    # list[list[float]] (~1 GB of boxed Python floats for 100k × 768). The width
+    # D is only known after the first batch, so allocate lazily then fill by
+    # offset.
+    n_total = len(torch_ds)
+    out: np.ndarray | None = None
+    offset = 0
 
     st_model.eval()
     with torch.inference_mode():
@@ -239,13 +245,23 @@ def prepare_model_and_embed(
                 convert_to_numpy=True,
                 show_progress_bar=False,
             )
+            embeddings = np.asarray(embeddings, dtype=np.float32)
+            if out is None:
+                out = np.empty((n_total, embeddings.shape[1]), dtype=np.float32)
+            out[offset : offset + embeddings.shape[0]] = embeddings
+            offset += embeddings.shape[0]
             if isinstance(batch_indices, torch.Tensor):
                 batch_indices = batch_indices.tolist()
             all_indices.extend(batch_indices)
-            all_embeddings.extend(embeddings.tolist())
 
-    # Create DataFrame using from_dict to avoid deprecation warning
-    emb_df = pd.DataFrame.from_dict({"sample_idx": all_indices, "embedding": all_embeddings})
+    if out is None:
+        out = np.empty((0, 0), dtype=np.float32)
+    else:
+        out = out[:offset]  # trim in case n_total over-counted (e.g. drop_last)
+
+    # Each "embedding" cell is a 1-D float32 view into the contiguous buffer.
+    emb_df = pd.DataFrame({"sample_idx": all_indices})
+    emb_df["embedding"] = list(out)
     logger.info("Generated %d embeddings", len(emb_df))
     return emb_df, path_map
 
@@ -520,13 +536,12 @@ def encode_adata(
         show_progress_bar=show_progress_bar,
     )
 
-    # Create DataFrame with embeddings
-    emb_df = pd.DataFrame.from_dict(
-        {
-            "sample_idx": dataset_indices,
-            "embedding": embeddings.tolist(),
-        }
-    )
+    # Create DataFrame with embeddings. Store each row as a 1-D float32 array
+    # (a view into the contiguous encode() output) rather than a list[float],
+    # avoiding ~1 GB of boxed Python floats for large (N × D) results.
+    embeddings = np.asarray(embeddings, dtype=np.float32)
+    emb_df = pd.DataFrame({"sample_idx": dataset_indices})
+    emb_df["embedding"] = list(embeddings)
 
     # Validate that embedding indices match dataset indices (sanity check)
     if len(emb_df) != len(dataset_indices):

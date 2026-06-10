@@ -109,6 +109,8 @@ def load_test_adata_from_hf_dataset(
     link_column: str = "adata_link",
     zenodo_token: str | None = None,
     force_drafts: bool = False,
+    lean: bool = False,
+    obs_columns: list[str] | None = None,
 ) -> tuple[ad.AnnData, Path]:
     """
     Download the unique AnnData chunk referenced in *test_split* and load it.
@@ -130,11 +132,26 @@ def load_test_adata_from_hf_dataset(
         If False, automatically converts Zenodo draft links to published links.
         This is a quick fix for datasets created with draft links that were
         published remotely afterwards. Set to True to use actual draft links.
+    lean : bool, default False
+        If True, do **not** materialise the full AnnData. Instead read only the
+        ``obs`` table (subset to *obs_columns* if given) and the single
+        ``obsm[layer_key]`` layer, returning a minimal AnnData with no ``X`` and
+        ``n_vars == 0``. This keeps memory low for large zarr chunks (50k–100k
+        cells) where only the obs index, label columns, and one embedding layer
+        are needed downstream. Requires ``axis == "obs"``; for ``axis == "var"``
+        the function falls back to a full read with a warning. For ``.h5ad``
+        files the lean path reads via ``backed="r"``; a full read remains the
+        accepted fallback.
+    obs_columns : list[str] | None, default None
+        When *lean* is True, restrict the returned ``obs`` to these columns
+        (plus the index). Columns absent from the store are ignored. Ignored
+        when *lean* is False.
 
     Returns
     -------
     adata : AnnData
-        The loaded AnnData (in memory, not backed).
+        The loaded AnnData. Fully in-memory unless *lean* is True, in which case
+        it contains only ``obs`` and ``obsm[layer_key]``.
     local_path : pathlib.Path
         Path to the downloaded store (`*.zarr`, `*.h5ad`, or `*.zip`).
 
@@ -171,6 +188,28 @@ def load_test_adata_from_hf_dataset(
     local_path = next(iter(local_map.values()))
 
     # 3) open store
+    if lean and axis != "obs":
+        logger.warning("lean=True is only supported for axis='obs'; falling back to a full read.")
+        lean = False
+
+    if lean:
+        # Lean path: read only obs (optionally column-subset) and the single
+        # obsm[layer_key] layer. No X, no other obsm layers — keeps memory low.
+        from mmcontext.io._zarr_read import read_obs_and_obsm
+
+        if local_path.suffix not in (".h5ad", ".zip") and local_path.is_dir():
+            # Fix corrupted null arrays before reading (zarr directory only)
+            remove_corrupted_null_arrays(local_path)
+
+        obs_df, obsm = read_obs_and_obsm(local_path, obsm_key=layer_key, obs_columns=obs_columns)
+        adata = ad.AnnData(obs=obs_df)
+        if layer_key is not None:
+            if obsm is None:
+                raise KeyError(f"Layer '{layer_key}' could not be read from obsm of file {local_path}")
+            adata.obsm[layer_key] = obsm
+        logger.info("Loaded lean test AnnData with %d cells (obs + obsm['%s'] only)", adata.n_obs, layer_key)
+        return adata, local_path
+
     if local_path.suffix == ".h5ad":
         adata = ad.read_h5ad(local_path)
     elif local_path.suffix == ".zip":
