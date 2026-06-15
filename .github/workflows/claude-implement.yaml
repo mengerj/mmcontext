@@ -54,7 +54,7 @@ jobs:
 
       - name: Upload session log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: claude-implement-issue${{ github.event.issue.number }}-${{ github.run_number }}
           path: claude-logs/
