@@ -1,26 +1,20 @@
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 import os
 import re
-import shutil
 from collections.abc import Iterable
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import anndata
 import numpy as np
 import pandas as pd
-import scanpy as sc
 import scipy.sparse as sp
 import torch
-from omegaconf import DictConfig
 from sentence_transformers import evaluation, losses
 from torch import nn
-from tqdm import tqdm
 
 try:
     import wandb  # optional; wrapper no-ops if not available or not initialized
@@ -1334,75 +1328,3 @@ def resolve_negative_indices_and_rename(
     return processed_dataset
 
 
-'''
-def prepare_omics_resources(hf_ds, *, prefix: str = "sample_idx:"):
-    """
-    Parameters
-    ----------
-    hf_ds : datasets.Dataset
-        Must expose ``sample_idx`` and ``data_representation``.
-    prefix : str, optional
-        Tag added in front of each key in the lookup (default ``"sample_idx:"``).
-
-    Returns
-    -------
-    embedding_matrix : np.ndarray  (num_ids, dim)
-    lookup           : dict[str, int]
-    """
-    lookup = {}
-    vectors = []
-    # loop over row with progress bar
-    for row in tqdm(hf_ds, desc="Preparing omics resources", unit="row"):
-        sid = row["sample_idx"]
-        vec = row["data_representation"]
-        row_id = len(lookup)  # 0‥N–1 in encounter order
-        lookup[f"{prefix}{sid}"] = row_id
-        vectors.append(vec)
-
-    embedding_matrix = np.stack(vectors).astype("float32")
-    return embedding_matrix, lookup
-'''
-
-
-def copy_resolved_config(cfg, hydra_output_dir: Path, named_output_dir: Path) -> None:
-    """
-    Copy the resolved config to the output directory.
-
-    Serialize the *instantiated* Hydra config twice: once in the Hydra run
-    directory and once in the named output directory so downstream users can
-    locate it without knowing the run-dir.
-
-    The config is enriched with a few runtime fields first (git SHA, SLURM
-    job-ID, command line, etc.).
-    """
-    import subprocess
-
-    from hydra.utils import to_absolute_path
-    from omegaconf import OmegaConf
-
-    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-
-    # --- enrich with runtime metadata -------------------------------------
-    git_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    cfg_dict["_meta"] = {
-        "git_sha": git_sha,
-        "cmd": " ".join([to_absolute_path("main.py"), *os.sys.argv[1:]]),
-        "slurm_job_id": os.getenv("SLURM_JOB_ID") if cfg.slurm.store_id else None,
-    }
-
-    # -----------------------------------------------------------------------
-    for target_dir in (hydra_output_dir, named_output_dir):
-        target_dir.mkdir(parents=True, exist_ok=True)
-        out = target_dir / "resolved_config.json"
-        with out.open("w") as fp:
-            json.dump(cfg_dict, fp, indent=2)
-        logger.info("Wrote resolved Hydra config → %s", out)
-
-    # Also copy *raw* yaml files for debugging
-    orig_conf_dir = Path("conf").absolute()
-    shutil.copytree(orig_conf_dir, named_output_dir / "conf_raw", dirs_exist_ok=True)

@@ -1,18 +1,20 @@
-import importlib
-import inspect
-import pkgutil
-from pathlib import Path
+"""mmcontext.eval — Evaluation tools for mmcontext models.
 
-# Automatically import all classes from all submodules in pp
-__all__ = []
+Evaluators follow a registry pattern: import a module to register its class,
+then retrieve it by name via :func:`get`.  The evaluate-model-2.0 notebook
+uses ``LabelSimilarity`` and ``OmicsQueryAnnotator`` as its primary tools.
+"""
 
-package_dir = Path(__file__).resolve().parent
-for module_info in pkgutil.iter_modules([str(package_dir)]):
-    module = importlib.import_module(f".{module_info.name}", package=__name__)
+# Import evaluator modules so their @register decorators run.
+from . import ari, label_similarity  # noqa: F401
+from .base import BaseEvaluator, EvalResult
+from .query_annotate import OmicsQueryAnnotator
+from .registry import get, register
 
-    # Dynamically get all classes in the module and add them to __all__
-    for name, obj in inspect.getmembers(module):
-        if inspect.isclass(obj) or inspect.isfunction(obj):
-            if obj.__module__ == module.__name__:
-                globals()[name] = obj  # Add class to the global namespace
-                __all__.append(name)  # Add class to __all__ to make them importable
+__all__ = [
+    "BaseEvaluator",
+    "EvalResult",
+    "OmicsQueryAnnotator",
+    "get",
+    "register",
+]
