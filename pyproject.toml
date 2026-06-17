@@ -26,7 +26,6 @@ classifiers = [
 ]
 dependencies = [
   "accelerate>=1.9",
-  "adata-hf-datasets @ git+https://github.com/mengerj/adata_hf_datasets.git",
   "anndata>=0.11.3",
   "datasets>=2.19.1,!=4",                                                     # Avoid: TypeError: Wrong key type: '0' of type '<class 'numpy.int64'>'. Expected one of int, slice, range, str or Iterable.
   "huggingface-hub>=0.34.3",
@@ -62,8 +61,6 @@ packages.find.include = [ "mmcontext*" ]
 include-package-data = true
 package-data = {}
 
-[tool.uv]
-sources.adata-hf-datasets = { git = "https://github.com/mengerj/adata_hf_datasets.git" }
 
 # "mmcontext.conf" = [ "*.json" ]
 [tool.ruff]
