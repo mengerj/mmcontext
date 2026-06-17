@@ -7,6 +7,12 @@ bimodal (omics-vector) and text anchors in one run. It reuses the existing
 multi-dataset machinery: ``prepare_dataset``, ``prepare_vector_store``,
 ``get_loss`` / ``get_evaluator``, the unfreeze callbacks, and the Hub helpers.
 
+When continuing from an already-trained model (``model:`` set), an optional
+``mining:`` block enables hard-negative mining (as in ``scripts/finetune_tiny.py``):
+each dataset's own negatives are dropped and model-specific negatives are mined
+with :func:`sentence_transformers.util.mine_hard_negatives`. The mining settings
+are recorded in the pushed model card.
+
 Usage::
 
     python scripts/train_config.py --config conf/training/multi_example.yaml
@@ -40,6 +46,7 @@ from mmcontext.training import (
     TrainConfig,
     assemble_training_data,
     build_merged_vector_store,
+    format_training_details,
     load_config,
     load_raw_datasets,
 )
@@ -133,6 +140,17 @@ def main() -> None:
     if cfg.gene_special_token:
         register_gene_special_token(model, cfg.gene_special_token)
 
+    # --- Hard-negative mining sanity check ---
+    mining_enabled = cfg.mining is not None and cfg.mining.enabled
+    if mining_enabled and not cfg.model:
+        logger.warning(
+            "Hard-negative mining is enabled but no `model:` was provided. Mining against a "
+            "freshly initialised model produces near-random negatives — set `model:` to a "
+            "pretrained checkpoint to continue fine-tuning, or disable mining."
+        )
+    if mining_enabled:
+        logger.info("Hard-negative mining enabled; dataset-provided negatives will be replaced by mined ones.")
+
     # --- Static text-encoder freezing ---
     if cfg.freeze_text_encoder:
         model[0].freeze_all_but_top_layers(cfg.unfreeze_last_n_layers)
@@ -218,6 +236,9 @@ def main() -> None:
     trainer.train()
 
     # --- Save ---
+    # Tag the model card before saving so the tag lands in the README frontmatter.
+    if mining_enabled:
+        model.model_card_data.add_tags(["hard-negative-mining"])
     save_path = Path(cfg.trainer.output_dir) / "final"
     model.save(str(save_path))
     logger.info("Model saved to %s", save_path)
@@ -227,7 +248,7 @@ def main() -> None:
 
     # --- Hub upload ---
     if cfg.push_to_hub:
-        push_to_hub(cfg, model)
+        push_to_hub(cfg, model, save_path)
 
     logger.info("Done.")
 
@@ -247,9 +268,14 @@ def verify_roundtrip(model: SentenceTransformer, save_path: Path) -> None:
         logger.info("Save/load roundtrip OK (max_diff=%.2e)", max_diff)
 
 
-def push_to_hub(cfg: TrainConfig, model: SentenceTransformer) -> None:
-    """Upload the trained model to the Hub under a unique name."""
-    from mmcontext.hub_utils import generate_unique_model_name, get_hf_username
+def push_to_hub(cfg: TrainConfig, model: SentenceTransformer, save_path: Path) -> None:
+    """Upload the trained model to the Hub under a unique name.
+
+    The saved model directory's ``README.md`` is augmented with a training-details
+    section (including any hard-negative mining settings) and that local folder is
+    uploaded verbatim, so the card on the Hub records how the model was finetuned.
+    """
+    from mmcontext.hub_utils import append_model_card_section, generate_unique_model_name, get_hf_username
 
     try:
         username = get_hf_username()
@@ -260,8 +286,12 @@ def push_to_hub(cfg: TrainConfig, model: SentenceTransformer) -> None:
             username=username,
         )
         repo_id = f"{username}/{model_name}"
+
+        # Record how the model was (fine)tuned in the model card before pushing.
+        append_model_card_section(save_path, format_training_details(cfg))
+
         logger.info("Pushing model to Hub: %s", repo_id)
-        model.push_to_hub(repo_id, private=True, exist_ok=True)
+        model.push_to_hub(repo_id, private=True, exist_ok=True, local_model_path=str(save_path))
         logger.info("Uploaded model to https://huggingface.co/%s", repo_id)
     except Exception as e:
         logger.warning("Hub upload failed: %s. The model is saved locally and can be pushed manually.", e)

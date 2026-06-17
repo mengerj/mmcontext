@@ -75,6 +75,31 @@ class AdapterFreezingConfig:
 
 
 @dataclass
+class MiningConfig:
+    """Hard-negative mining settings (``sentence_transformers.util.mine_hard_negatives``).
+
+    When ``enabled``, each dataset's own hard negatives are dropped and
+    model-specific negatives are mined instead: the ``anchor`` column (omics ids
+    resolved through the attached VectorStore for bimodal datasets, or text for
+    the text modality) is encoded as the query and the ``positive`` texts form
+    the corpus; the closest-but-not-true positives become the mined negatives.
+
+    This only makes sense when continuing from an already-trained model (set
+    ``model:`` in the config) — mining against a freshly initialised bimodal
+    model produces near-random negatives. Mirrors ``scripts/finetune_tiny.py``.
+    """
+
+    enabled: bool = False
+    num_negatives: int = 3
+    range_min: int = 1
+    range_max: int | None = None
+    max_score: float | None = 0.95
+    relative_margin: float | None = None
+    sampling_strategy: str = "top"
+    use_faiss: bool = False
+
+
+@dataclass
 class TrainerConfig:
     """SentenceTransformerTrainingArguments-facing settings."""
 
@@ -120,6 +145,7 @@ class TrainConfig:
     unfreeze_last_n_layers: int = 0
     unfreeze_epoch: float = 1
     adapter_freezing: AdapterFreezingConfig | None = None
+    mining: MiningConfig | None = None
 
     gene_special_token: str | None = None
     delimiter: str = " "
@@ -178,6 +204,9 @@ def config_from_dict(data: dict[str, Any]) -> TrainConfig:
         else None
     )
 
+    mining_raw = data.pop("mining", None)
+    mining = MiningConfig(**_filter_kwargs(MiningConfig, mining_raw)) if mining_raw else None
+
     omics = [DatasetConfig(**_filter_kwargs(DatasetConfig, d)) for d in (data.pop("omics_datasets", None) or [])]
     bio = [DatasetConfig(**_filter_kwargs(DatasetConfig, d)) for d in (data.pop("bio_datasets", None) or [])]
 
@@ -185,6 +214,7 @@ def config_from_dict(data: dict[str, Any]) -> TrainConfig:
         text_encoder=text_encoder,
         trainer=trainer,
         adapter_freezing=adapter_freezing,
+        mining=mining,
         omics_datasets=omics,
         bio_datasets=bio,
         **_filter_kwargs(TrainConfig, data),
@@ -377,6 +407,83 @@ def _select_training_columns(ds: Dataset, name: str) -> Dataset:
     return ds.select_columns(keep)
 
 
+def _mine_negatives(
+    pairs: Dataset,
+    model: SentenceTransformer,
+    mining: MiningConfig,
+    *,
+    name: str,
+    batch_size: int,
+) -> Dataset:
+    """Mine model-specific hard negatives for an ``anchor``/``positive`` dataset.
+
+    Wraps :func:`sentence_transformers.util.mine_hard_negatives` with the
+    ``n-tuple`` output format (``anchor`` / ``positive`` / ``negative_1`` …),
+    which both :class:`MultipleNegativesRankingLoss` and the ``TripletEvaluator``
+    consume. Only the ``anchor``/``positive`` columns are used; the model is put
+    in eval mode for the encode pass and its previous mode is restored.
+
+    Parameters
+    ----------
+    pairs : datasets.Dataset
+        Dataset with at least ``anchor`` and ``positive`` columns.
+    model : SentenceTransformer
+        Pretrained pipeline (VectorStore already attached for bimodal anchors).
+    mining : MiningConfig
+        Mining parameters.
+    name : str
+        Dataset label, used only for logging.
+    batch_size : int
+        Encode batch size for the similarity search.
+
+    Returns
+    -------
+    datasets.Dataset
+        The mined ``n-tuple`` dataset.
+    """
+    from sentence_transformers.util import mine_hard_negatives
+
+    pairs = pairs.select_columns(["anchor", "positive"])
+    logger.info(
+        "Mining hard negatives for '%s': num_negatives=%d, range=[%d, %s], max_score=%s, "
+        "relative_margin=%s, sampling=%s, faiss=%s",
+        name,
+        mining.num_negatives,
+        mining.range_min,
+        mining.range_max,
+        mining.max_score,
+        mining.relative_margin,
+        mining.sampling_strategy,
+        mining.use_faiss,
+    )
+    was_training = model.training
+    model.eval()
+    try:
+        mined = mine_hard_negatives(
+            pairs,
+            model,
+            anchor_column_name="anchor",
+            positive_column_name="positive",
+            num_negatives=mining.num_negatives,
+            range_min=mining.range_min,
+            range_max=mining.range_max,
+            max_score=mining.max_score,
+            relative_margin=mining.relative_margin,
+            sampling_strategy=mining.sampling_strategy,
+            output_format="n-tuple",
+            batch_size=batch_size,
+            use_faiss=mining.use_faiss,
+            verbose=True,
+        )
+    finally:
+        if was_training:
+            model.train()
+    logger.info(
+        "Mined '%s': %d rows (from %d pairs), columns=%s", name, len(mined), len(pairs), mined.column_names
+    )
+    return mined
+
+
 def assemble_training_data(
     cfg: TrainConfig,
     model: SentenceTransformer,
@@ -391,6 +498,12 @@ def assemble_training_data(
     :func:`~mmcontext.embed.prepare_dataset`. Bio datasets are assumed to be in
     final ``anchor`` / ``positive`` / ``negative_*`` form and passed through;
     a small slice of their train split is reused for evaluation.
+
+    When ``cfg.mining`` is enabled, each dataset's own hard negatives are dropped
+    and model-specific negatives are mined from the anchor/positive pairs with
+    :func:`sentence_transformers.util.mine_hard_negatives` (see
+    :func:`_mine_negatives`). Both the train datasets and the evaluator's
+    validation sets are mined so they reflect the same negative distribution.
 
     Parameters
     ----------
@@ -420,7 +533,9 @@ def assemble_training_data(
     losses: dict[str, Any] = {}
     evaluators: list[Any] = []
     logging_steps = cfg.trainer.logging_steps
+    train_bs = cfg.trainer.per_device_train_batch_size
     eval_bs = cfg.trainer.per_device_eval_batch_size
+    mining = cfg.mining if (cfg.mining is not None and cfg.mining.enabled) else None
 
     # -- Omics datasets -------------------------------------------------------
     for dcfg in cfg.omics_datasets:
@@ -433,16 +548,20 @@ def assemble_training_data(
             if val_split is not None:
                 val_split = _namespace_sample_ids(val_split, dcfg.name)
 
+        # With mining on, drop the dataset's own hard negatives and mine
+        # model-specific ones from the anchor/positive pairs instead.
         prep_kwargs = {
             "purpose": "train",
             "modality": dcfg.modality,
             "primary_cell_sentence": dcfg.primary_cell_sentence,
             "positive_col": dcfg.positive_col,
-            "use_hard_negatives": dcfg.use_hard_negatives,
+            "use_hard_negatives": False if mining else dcfg.use_hard_negatives,
             "truncate": dcfg.truncate,
             "truncate_kwargs": dcfg.truncate_kwargs,
         }
         train_ready = prepare_dataset(train_split, **prep_kwargs)
+        if mining:
+            train_ready = _mine_negatives(train_ready, model, mining, name=dcfg.name, batch_size=train_bs)
         train_datasets[dcfg.name] = train_ready
 
         losses[dcfg.name] = get_loss(
@@ -455,6 +574,10 @@ def assemble_training_data(
 
         if val_split is not None:
             val_ready = prepare_dataset(val_split, **prep_kwargs)
+            if mining:
+                val_ready = _mine_negatives(
+                    val_ready, model, mining, name=f"{dcfg.name} (eval)", batch_size=eval_bs
+                )
             eval_datasets[dcfg.name] = val_ready
             evaluators.append(
                 get_evaluator(
@@ -472,6 +595,9 @@ def assemble_training_data(
             logger.warning("Bio dataset '%s' has no 'train' split, skipping", dcfg.name)
             continue
         train_split = _select_training_columns(dsdict["train"], dcfg.name)
+        if mining:
+            # Drop the dataset's own negatives and mine model-specific ones.
+            train_split = _mine_negatives(train_split, model, mining, name=dcfg.name, batch_size=train_bs)
         train_datasets[dcfg.name] = train_split
 
         losses[dcfg.name] = get_loss(
@@ -483,6 +609,7 @@ def assemble_training_data(
         )
 
         # Reuse a slice of train as a sanity-check eval set (mirrors old train.py).
+        # When mining, this slice already carries the mined negatives.
         val_size = min(1000, len(train_split))
         val_split = train_split.select(range(val_size))
         eval_datasets[dcfg.name] = val_split
@@ -501,3 +628,57 @@ def assemble_training_data(
         losses=losses,
         evaluators=evaluators,
     )
+
+
+# ---------------------------------------------------------------------------
+# Model-card details
+# ---------------------------------------------------------------------------
+def format_training_details(cfg: TrainConfig) -> str:
+    """Render a Markdown summary of how the model was (fine)tuned.
+
+    Intended for the Hugging Face model card so it is clear from the repo whether
+    the model was finetuned with hard-negative mining and with which settings.
+
+    Parameters
+    ----------
+    cfg : TrainConfig
+        Run config.
+
+    Returns
+    -------
+    str
+        A Markdown bullet list.
+    """
+    lines: list[str] = []
+    if cfg.model:
+        lines.append(f"- **Continued from**: `{cfg.model}`")
+    else:
+        lines.append(f"- **Base text encoder**: `{cfg.text_encoder.name}`")
+    if cfg.omics_datasets:
+        lines.append(f"- **Omics embedding key (obsm)**: `{cfg.obsm_key}`")
+    lines.append(f"- **Shared embedding dimension**: {cfg.shared_dim}")
+
+    mining = cfg.mining
+    if mining is not None and mining.enabled:
+        lines.append(
+            "- **Hard-negative mining**: ✅ enabled "
+            "(`sentence_transformers.util.mine_hard_negatives`, `n-tuple` output)"
+        )
+        lines.append(f"    - `num_negatives`: {mining.num_negatives}")
+        lines.append(f"    - `range_min` / `range_max`: {mining.range_min} / {mining.range_max}")
+        lines.append(f"    - `max_score`: {mining.max_score}")
+        lines.append(f"    - `relative_margin`: {mining.relative_margin}")
+        lines.append(f"    - `sampling_strategy`: {mining.sampling_strategy}")
+        lines.append(f"    - `use_faiss`: {mining.use_faiss}")
+        lines.append(
+            "    - Negatives are mined per-anchor in the model's current shared embedding space "
+            "(omics anchors resolved via the VectorStore for bimodal datasets), replacing any "
+            "dataset-provided hard negatives."
+        )
+    else:
+        lines.append("- **Hard-negative mining**: ❌ not used (dataset-provided hard negatives, if any)")
+
+    train_names = [d.name for d in cfg.omics_datasets] + [d.name for d in cfg.bio_datasets]
+    if train_names:
+        lines.append(f"- **Training datasets**: {', '.join(train_names)}")
+    return "\n".join(lines)

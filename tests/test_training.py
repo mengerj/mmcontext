@@ -30,10 +30,12 @@ from mmcontext.embed import build_pipeline
 from mmcontext.io import VectorStore, build_namespaced_vector_store
 from mmcontext.training import (
     DatasetConfig,
+    MiningConfig,
     TrainConfig,
     TrainerConfig,
     assemble_training_data,
     config_from_dict,
+    format_training_details,
 )
 
 OMICS_DIM = 8
@@ -272,3 +274,101 @@ class TestConfig:
         cfg = config_from_dict({"obsm_key": "X_pca", "bogus_key": 123})
         assert cfg.obsm_key == "X_pca"
         assert not hasattr(cfg, "bogus_key")
+
+    def test_mining_defaults_to_none(self):
+        cfg = config_from_dict({"obsm_key": "X_pca"})
+        assert cfg.mining is None
+
+    def test_mining_parsed_with_overrides(self):
+        cfg = config_from_dict(
+            {
+                "mining": {
+                    "enabled": True,
+                    "num_negatives": 5,
+                    "range_max": 50,
+                    "max_score": 0.9,
+                    "sampling_strategy": "random",
+                    "use_faiss": True,
+                }
+            }
+        )
+        assert isinstance(cfg.mining, MiningConfig)
+        assert cfg.mining.enabled is True
+        assert cfg.mining.num_negatives == 5
+        assert cfg.mining.range_max == 50
+        assert cfg.mining.max_score == 0.9
+        assert cfg.mining.sampling_strategy == "random"
+        assert cfg.mining.use_faiss is True
+        # Untouched fields keep their defaults.
+        assert cfg.mining.range_min == 1
+        assert cfg.mining.relative_margin is None
+
+
+# ---------------------------------------------------------------------------
+# 5. Model-card training details
+# ---------------------------------------------------------------------------
+class TestTrainingDetails:
+    def test_details_without_mining(self):
+        cfg = TrainConfig(
+            model="jo-mengr/pretrained",
+            obsm_key="X_scvi_fm",
+            omics_datasets=[DatasetConfig(id="a/b", name="d1")],
+        )
+        md = format_training_details(cfg)
+        assert "Continued from" in md and "jo-mengr/pretrained" in md
+        assert "not used" in md  # mining disabled
+        assert "X_scvi_fm" in md
+
+    def test_details_with_mining(self):
+        cfg = TrainConfig(
+            model="outputs/pretrained/final",
+            mining=MiningConfig(enabled=True, num_negatives=4, use_faiss=True),
+            omics_datasets=[DatasetConfig(id="a/b", name="d1")],
+            bio_datasets=[DatasetConfig(id="c/d", name="bio")],
+        )
+        md = format_training_details(cfg)
+        assert "enabled" in md
+        assert "num_negatives`: 4" in md
+        assert "use_faiss`: True" in md
+        assert "mine_hard_negatives" in md
+        assert "d1, bio" in md  # training datasets list
+
+
+# ---------------------------------------------------------------------------
+# 6. Mining-enabled assembly
+# ---------------------------------------------------------------------------
+class TestMiningAssembly:
+    def test_mining_replaces_dataset_negatives(self, pipeline, tmp_path):
+        merged = build_namespaced_vector_store(
+            {"omics_a": (_make_store(["0", "1", "2", "3"], tmp_path, name="om")[0], ["0", "1", "2", "3"])},
+            output_path=os.path.join(tmp_path, "merged_mine.mmap"),
+        )
+        pipeline[0].set_vector_store(merged)
+
+        cfg = TrainConfig(
+            obsm_key="X_scvi_fm",
+            shared_dim=SHARED_DIM,
+            # use_hard_negatives=True in the dataset must be overridden by mining.
+            omics_datasets=[
+                DatasetConfig(id="dummy/a", name="omics_a", modality="bimodal", use_hard_negatives=True),
+            ],
+            mining=MiningConfig(enabled=True, num_negatives=1, range_min=0, max_score=None),
+            trainer=TrainerConfig(per_device_train_batch_size=2, per_device_eval_batch_size=2, logging_steps=1),
+        )
+        omics_raw = {
+            "omics_a": DatasetDict(
+                train=_omics_split(["0", "1", "2", "3"]),
+                val=_omics_split(["0", "1", "2", "3"]),
+            )
+        }
+        assembled = assemble_training_data(cfg, pipeline, omics_raw, log_backend="none")
+
+        train = assembled.train_datasets["omics_a"]
+        # Mining produces an n-tuple with mined negative_1 (not the dataset's negative_1/2).
+        assert "negative_1" in train.column_names
+        assert "anchor" in train.column_names and "positive" in train.column_names
+        assert len(train) > 0
+        # Omics anchors are still resolvable namespaced ids.
+        assert train["anchor"][0].startswith("omics:omics_a:")
+        # Eval set was mined too, so the evaluator has a usable negative column.
+        assert len(assembled.evaluators) == 1

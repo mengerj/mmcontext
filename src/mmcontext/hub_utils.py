@@ -732,6 +732,42 @@ def insert_custom_content_after_yaml(existing_readme: str, custom_content: str) 
     return "\n".join(combined_lines)
 
 
+def append_model_card_section(
+    model_dir: str | Path,
+    section_md: str,
+    *,
+    heading: str = "Training Details (MMContext)",
+) -> Path:
+    """Append a Markdown section to a saved model's ``README.md``.
+
+    ``SentenceTransformer.save`` writes a ``README.md`` (model card) into the
+    model directory. When that directory is later pushed via
+    ``model.push_to_hub(..., local_model_path=model_dir)``, the file is uploaded
+    verbatim — so appending here makes custom details (e.g. hard-negative mining
+    settings) show up on the Hub.
+
+    Parameters
+    ----------
+    model_dir : str or Path
+        Directory of a saved SentenceTransformer model.
+    section_md : str
+        Markdown body for the new section (without the heading).
+    heading : str, optional
+        Section heading (rendered as an ``##`` header).
+
+    Returns
+    -------
+    Path
+        Path to the README that was written.
+    """
+    readme = Path(model_dir) / "README.md"
+    existing = readme.read_text() if readme.exists() else ""
+    block = f"\n\n## {heading}\n\n{section_md.strip()}\n"
+    readme.write_text(existing + block)
+    logger.info("Appended '%s' section to %s", heading, readme)
+    return readme
+
+
 def get_model_info_from_config(config_path: str | Path) -> dict[str, str]:
     """
     Extract model information from training configuration.
