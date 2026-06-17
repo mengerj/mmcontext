@@ -324,6 +324,8 @@ def prepare_inference(
     truncate: bool = False,
     truncate_kwargs: dict | None = None,
     overwrite_store: bool = False,
+    lean: bool = False,
+    obs_columns: list[str] | None = None,
 ) -> InferenceData:
     """Wire up a model + dataset + AnnData for inference on one test chunk.
 
@@ -366,6 +368,15 @@ def prepare_inference(
         Forwarded to :func:`prepare_dataset` (text modality).
     overwrite_store : bool, default False
         Rebuild the VectorStore even if *store_path* already exists.
+    lean : bool, default False
+        If True, load only the ``obs`` table (subset to *obs_columns*) and the
+        single ``obsm[obsm_key]`` layer for the returned AnnData — no ``X``. The
+        VectorStore is built independently from the store, so the returned
+        ``InferenceData.adata`` only needs its label columns downstream. Keeps
+        peak memory low on large chunks.
+    obs_columns : list[str] | None, default None
+        With *lean* True, restrict the returned ``obs`` to these columns (plus
+        the index). Ignored when *lean* is False.
 
     Returns
     -------
@@ -398,6 +409,8 @@ def prepare_inference(
         layer_key=obsm_key if modality == "bimodal" else None,
         link_column=adata_link_col,
         zenodo_token=zenodo_token,
+        lean=lean,
+        obs_columns=obs_columns,
     )
 
     # 2) Restrict the dataset to the rows present in this chunk.

@@ -826,37 +826,51 @@ def build_embedding_df(
     -----
     *Works with AnnData ≥ 0.10 and Zarr ≥ 2.16.*
     """
+    from mmcontext.io._zarr_read import read_obs_and_obsm
+
     rows: list[dict] = []
 
     for p in link2path.values():
         p = Path(p)
         logger.info("Reading %s", p)
 
-        # -------------------------------------------------- open store ----
-        if p.suffix == ".h5ad":  # plain HDF5
-            adata = ad.read_h5ad(p, backed="r")
-        elif p.suffix == ".zip":  # zipped zarr
-            zroot = zarr.open(p, mode="r")
-            adata = ad.read_zarr(zroot)
-        elif p.suffix == ".zarr" or p.is_dir():  # dir zarr
-            # Fix corrupted null arrays before reading
-            remove_corrupted_null_arrays(p)
-            adata = ad.read_zarr(str(p))
+        # -------------------------------------------------- read embedding ----
+        # For the obs axis we only need obsm[layer_key] + the obs index, so use
+        # the lean reader: it pulls just that one layer (zarr: never touches X or
+        # other obsm layers; h5ad: backed read). The var axis still falls back to
+        # a full read (the lean reader is obs-only).
+        if axis == "obs":
+            if p.suffix not in (".h5ad", ".zip") and p.is_dir():
+                # Fix corrupted null arrays before reading (zarr directory only)
+                remove_corrupted_null_arrays(p)
+            try:
+                obs_df, emb_matrix = read_obs_and_obsm(p, obsm_key=layer_key)
+            except FileNotFoundError:
+                logger.warning("Skip unsupported file %s", p)
+                continue
+            if emb_matrix is None:
+                raise KeyError(f"Layer key '{layer_key}' not found in obsm for file {p}.")
+            tokens = obs_df.index.to_numpy()
         else:
-            logger.warning("Skip unsupported file %s", p)
-            continue
-
-        # Get embedding matrix with helpful error message if key is missing
-        try:
-            emb_matrix = adata.obsm[layer_key] if axis == "obs" else adata.varm[layer_key]
-        except KeyError as e:
-            available_keys = list(adata.obsm.keys()) if axis == "obs" else list(adata.varm.keys())
-            axis_name = "obsm" if axis == "obs" else "varm"
-            raise KeyError(
-                f"Layer key '{layer_key}' not found in adata.{axis_name} for file {p}.\n"
-                f"Available keys in adata.{axis_name}: {available_keys}"
-            ) from e
-        tokens = adata.obs.index.to_numpy() if axis == "obs" else adata.var.index.to_numpy()
+            if p.suffix == ".h5ad":  # plain HDF5
+                adata = ad.read_h5ad(p, backed="r")
+            elif p.suffix == ".zip":  # zipped zarr
+                zroot = zarr.open(p, mode="r")
+                adata = ad.read_zarr(zroot)
+            elif p.suffix == ".zarr" or p.is_dir():  # dir zarr
+                remove_corrupted_null_arrays(p)
+                adata = ad.read_zarr(str(p))
+            else:
+                logger.warning("Skip unsupported file %s", p)
+                continue
+            try:
+                emb_matrix = adata.varm[layer_key]
+            except KeyError as e:
+                raise KeyError(
+                    f"Layer key '{layer_key}' not found in adata.varm for file {p}.\n"
+                    f"Available keys in adata.varm: {list(adata.varm.keys())}"
+                ) from e
+            tokens = adata.var.index.to_numpy()
 
         # -------------------------------------------------- stream rows ----
         n_rows = emb_matrix.shape[0]
@@ -870,7 +884,8 @@ def build_embedding_df(
                 else:
                     vec = np.asarray(vec)
                 rows.append({"token": tokens[start + i], "embedding": vec})
-        adata.file.close() if hasattr(adata, "file") else None  # close backing
+        if axis != "obs" and hasattr(adata, "file"):
+            adata.file.close() if adata.file else None  # close backing
 
     df = pd.DataFrame(rows, columns=["token", "embedding"])
     logger.info("Built DataFrame with %d rows × %d-dim embeddings", len(df), len(df["embedding"].iloc[0]))
