@@ -19,14 +19,13 @@ text_encoder:
 
 mining:
   enabled: true
-  num_negatives: 3          # negatives to mine per anchor
-  range_min: 1              # skip the N closest candidates (closest is usually the true positive)
-  range_max: null           # only consider candidates up to this rank (null = no bound)
-  max_score: 0.95           # drop candidates above this similarity (avoid false negatives)
-  relative_margin: null     # negatives must score below relative_margin * positive_score
-  sampling_strategy: top    # "top" | "random"
-  use_faiss: false          # use FAISS for the similarity search (large datasets)
-
+  num_negatives: 3 # negatives to mine per anchor
+  range_min: 1 # skip the N closest candidates (closest is usually the true positive)
+  range_max: null # only consider candidates up to this rank (null = no bound)
+  max_score: 0.95 # drop candidates above this similarity (avoid false negatives)
+  relative_margin: null # negatives must score below relative_margin * positive_score
+  sampling_strategy: top # "top" | "random"
+  use_faiss: false # use FAISS for the similarity search (large datasets)
 
 # --- Freezing ---
 freeze_text_encoder: true # static freeze at start

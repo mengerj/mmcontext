@@ -478,9 +478,7 @@ def _mine_negatives(
     finally:
         if was_training:
             model.train()
-    logger.info(
-        "Mined '%s': %d rows (from %d pairs), columns=%s", name, len(mined), len(pairs), mined.column_names
-    )
+    logger.info("Mined '%s': %d rows (from %d pairs), columns=%s", name, len(mined), len(pairs), mined.column_names)
     return mined
 
 
@@ -575,9 +573,7 @@ def assemble_training_data(
         if val_split is not None:
             val_ready = prepare_dataset(val_split, **prep_kwargs)
             if mining:
-                val_ready = _mine_negatives(
-                    val_ready, model, mining, name=f"{dcfg.name} (eval)", batch_size=eval_bs
-                )
+                val_ready = _mine_negatives(val_ready, model, mining, name=f"{dcfg.name} (eval)", batch_size=eval_bs)
             eval_datasets[dcfg.name] = val_ready
             evaluators.append(
                 get_evaluator(

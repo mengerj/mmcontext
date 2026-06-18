@@ -6,7 +6,7 @@ uses ``LabelSimilarity`` and ``OmicsQueryAnnotator`` as its primary tools.
 """
 
 # Import evaluator modules so their @register decorators run.
-from . import ari, label_similarity  # noqa: F401
+from . import ari, label_similarity
 from .base import BaseEvaluator, EvalResult
 from .query_annotate import OmicsQueryAnnotator
 from .registry import get, register

@@ -1326,5 +1326,3 @@ def resolve_negative_indices_and_rename(
         raise TypeError("resolve_negative_indices expects a Dataset or DatasetDict")
 
     return processed_dataset
-
-

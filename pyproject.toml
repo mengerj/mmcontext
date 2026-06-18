@@ -37,34 +37,33 @@ dependencies = [
   "transformers>=4.57.1",
   "zarr>=3.1.6",
 ]
-optional-dependencies.eval = [
-  "scib>=1.1.7",
-  "umap-learn>=0.5",
-]
-optional-dependencies.train = [
-  "wandb>=0.27",
-]
 optional-dependencies.dev = [
+  "build",
   "pre-commit",
   "ruff",
   "twine",
-  "build",
+]
+optional-dependencies.eval = [
+  "scib>=1.1.7",
+  "umap-learn>=0.5",
 ]
 optional-dependencies.test = [
   "coverage",
   "pytest",
   "python-json-logger",
 ]
+optional-dependencies.train = [
+  "wandb>=0.27",
+]
 urls.Homepage = "https://github.com/mengerj/mmcontext"
-urls.Source = "https://github.com/mengerj/mmcontext"
 urls.Issues = "https://github.com/mengerj/mmcontext/issues"
+urls.Source = "https://github.com/mengerj/mmcontext"
 
 [tool.setuptools]
 packages.find.where = [ "src" ]
 packages.find.include = [ "mmcontext*" ]
 include-package-data = true
 package-data = {}
-
 
 # "mmcontext.conf" = [ "*.json" ]
 [tool.ruff]

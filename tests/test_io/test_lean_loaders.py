@@ -16,8 +16,8 @@ import pandas as pd
 import pytest
 
 from mmcontext import file_utils
-from mmcontext.io._adata_subset import collect_adata_subset
 from mmcontext.file_utils import load_test_adata_from_hf_dataset
+from mmcontext.io._adata_subset import collect_adata_subset
 
 D = 8
 
