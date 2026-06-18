@@ -48,16 +48,21 @@ def synthetic_zarr(tmp_dir):
     n_obs, d_pca, d_scvi = 10, 4, 8
     rng = np.random.default_rng(42)
 
+    def _write(group, name, data):
+        arr = group.create_array(name, shape=data.shape, dtype=data.dtype)
+        arr[:] = data
+        return arr
+
     # obs group with _index
     obs = root.create_group("obs")
     obs_names = [f"cell_{i}" for i in range(n_obs)]
-    obs.create_dataset("_index", data=np.array(obs_names, dtype="U"))
+    _write(obs, "_index", np.array(obs_names, dtype="U"))
     obs.attrs["_index"] = "_index"
 
     # obsm group
     obsm = root.create_group("obsm")
-    obsm.create_dataset("X_pca", data=rng.standard_normal((n_obs, d_pca)).astype(np.float32))
-    obsm.create_dataset("X_scvi", data=rng.standard_normal((n_obs, d_scvi)).astype(np.float32))
+    _write(obsm, "X_pca", rng.standard_normal((n_obs, d_pca)).astype(np.float32))
+    _write(obsm, "X_scvi", rng.standard_normal((n_obs, d_scvi)).astype(np.float32))
 
     return zarr_path, obs_names, n_obs, d_pca, d_scvi
 

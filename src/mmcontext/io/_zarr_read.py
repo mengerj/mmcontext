@@ -37,8 +37,9 @@ def _open_zarr(path: Path) -> zarr.Group:
     if path.suffix == ".zip" and path.is_file():
         return zarr.open(str(path), mode="r")
     elif path.is_dir():
-        # Could be a zarr directory, or a directory containing a single zarr
-        if (path / ".zgroup").exists() or (path / ".zattrs").exists():
+        # Could be a zarr directory, or a directory containing a single zarr.
+        # v3 stores carry ``zarr.json``; v2 stores carry ``.zgroup``/``.zattrs``.
+        if (path / "zarr.json").exists() or (path / ".zgroup").exists() or (path / ".zattrs").exists():
             return zarr.open(str(path), mode="r")
         # Check for a single subdirectory that is the actual zarr
         subdirs = [p for p in path.iterdir() if p.is_dir()]

@@ -75,7 +75,7 @@ def remove_corrupted_null_arrays(zarr_path: str | Path) -> list[str]:
         for key in list(group.keys()):
             current_path = f"{path}/{key}" if path else key
             item = group[key]
-            if isinstance(item, zarr.core.Array):
+            if isinstance(item, zarr.Array):
                 attrs = dict(item.attrs)
                 if attrs.get("encoding-type") == "null":
                     # Remove the corrupted array from filesystem
@@ -86,7 +86,7 @@ def remove_corrupted_null_arrays(zarr_path: str | Path) -> list[str]:
                         else:
                             full_path.unlink()
                         removed.append(current_path)
-            elif isinstance(item, zarr.hierarchy.Group):
+            elif isinstance(item, zarr.Group):
                 find_and_remove(item, current_path)
 
     find_and_remove(z)
