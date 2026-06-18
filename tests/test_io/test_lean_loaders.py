@@ -1,7 +1,7 @@
 """Tests for the opt-in memory-lean paths in the AnnData loaders.
 
 Covers:
-* :func:`mmcontext.embed.dataset_utils.collect_adata_subset` with ``obsm_key``
+* :func:`mmcontext.io.collect_adata_subset` with ``obsm_key``
 * :func:`mmcontext.file_utils.load_test_adata_from_hf_dataset` with ``lean=True``
 
 Both should read only the obs table and the requested ``obsm`` layer, return a
@@ -16,9 +16,8 @@ import pandas as pd
 import pytest
 
 from mmcontext import file_utils
-from mmcontext.embed import dataset_utils
-from mmcontext.embed.dataset_utils import collect_adata_subset
 from mmcontext.file_utils import load_test_adata_from_hf_dataset
+from mmcontext.io._adata_subset import collect_adata_subset
 
 D = 8
 
@@ -82,7 +81,9 @@ def test_collect_subset_lean_does_not_read_full_zarr(two_chunks, monkeypatch):
     def _boom(*args, **kwargs):
         raise AssertionError("lean collect_adata_subset must not call ad.read_zarr")
 
-    monkeypatch.setattr(dataset_utils.ad, "read_zarr", _boom)
+    from mmcontext.io import _adata_subset
+
+    monkeypatch.setattr(_adata_subset.ad, "read_zarr", _boom)
     ids = ["cell_1", "cell_31"]
     adata = collect_adata_subset(file_paths=paths, sample_ids=ids, obsm_key="X_scvi")
     assert list(adata.obs_names) == ids

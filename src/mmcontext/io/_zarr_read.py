@@ -37,8 +37,9 @@ def _open_zarr(path: Path) -> zarr.Group:
     if path.suffix == ".zip" and path.is_file():
         return zarr.open(str(path), mode="r")
     elif path.is_dir():
-        # Could be a zarr directory, or a directory containing a single zarr
-        if (path / ".zgroup").exists() or (path / ".zattrs").exists():
+        # Could be a zarr directory, or a directory containing a single zarr.
+        # v3 stores carry ``zarr.json``; v2 stores carry ``.zgroup``/``.zattrs``.
+        if (path / "zarr.json").exists() or (path / ".zgroup").exists() or (path / ".zattrs").exists():
             return zarr.open(str(path), mode="r")
         # Check for a single subdirectory that is the actual zarr
         subdirs = [p for p in path.iterdir() if p.is_dir()]
@@ -66,16 +67,24 @@ def _read_obs_names_zarr(root: zarr.Group) -> list[str]:
     else:
         idx_key = "_index"
 
-    idx_array = obs[idx_key]
+    idx_elem = obs[idx_key]
 
+    # anndata ≥ 0.11 with zarr 3.x stores array elements as zarr Groups
+    # (encoded format with encoding-type metadata). Use read_elem which handles
+    # both old (plain zarr Array) and new (encoded zarr Group) layouts.
+    if isinstance(idx_elem, zarr.Group):
+        index_data = _read_elem(idx_elem)
+        return [str(v) for v in index_data]
+
+    # Legacy path: plain zarr Array
     # Handle categorical encoding (older anndata versions)
-    if hasattr(idx_array, "attrs") and "categories" in idx_array.attrs:
-        cat_path = idx_array.attrs["categories"]
-        codes = idx_array[:]
+    if hasattr(idx_elem, "attrs") and "categories" in idx_elem.attrs:
+        cat_path = idx_elem.attrs["categories"]
+        codes = idx_elem[:]
         categories = root[cat_path][:]
         return [categories[c].decode() if isinstance(categories[c], bytes) else str(categories[c]) for c in codes]
 
-    values = idx_array[:]
+    values = idx_elem[:]
     return [v.decode() if isinstance(v, bytes) else str(v) for v in values]
 
 
@@ -116,7 +125,9 @@ def _select_rows_float32(arr: zarr.Array, rows: np.ndarray | None) -> np.ndarray
 
     sort_order = np.argsort(rows)
     sorted_rows = rows[sort_order]
-    selected = arr.get_orthogonal_selection((sorted_rows, slice(None))).astype(np.float32, copy=False)
+    # Use oindex for orthogonal row selection — compatible with zarr 2.x and 3.x
+    # (zarr 3.x deprecated get_orthogonal_selection in favour of arr.oindex).
+    selected = arr.oindex[sorted_rows, :].astype(np.float32, copy=False)
     # Unsort back to the caller's original row order
     unsort = np.argsort(sort_order)
     return selected[unsort]

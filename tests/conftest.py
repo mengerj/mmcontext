@@ -4,6 +4,7 @@ import os
 from typing import Optional, Union
 from unittest.mock import patch
 
+import anndata as ad
 import datasets
 import numpy as np
 import pandas as pd
@@ -14,6 +15,15 @@ from transformers import PretrainedConfig, PreTrainedModel
 from transformers.models.auto import configuration_auto, modeling_auto
 
 from mmcontext._legacy.mmcontextencoder import MMContextEncoder, MMContextProcessor
+
+# -----------------------------------------------------------------------------
+# Zarr v3 format
+# -----------------------------------------------------------------------------
+# anndata still defaults to writing the zarr v2 on-disk format. Force v3 so test
+# fixtures that call ``adata.write_zarr(...)`` produce v3 stores, matching the
+# format produced in production and exercising the v3 read path. Loaded for the
+# whole test session because every test dir inherits this root conftest.
+ad.settings.zarr_write_format = 3
 
 # -----------------------------------------------------------------------------
 # Logging
