@@ -29,7 +29,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 from dotenv import load_dotenv
 from sentence_transformers import (
     SentenceTransformer,
