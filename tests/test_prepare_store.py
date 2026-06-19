@@ -6,7 +6,6 @@ The Zenodo URL fixup is tested via the internal helper.
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 
