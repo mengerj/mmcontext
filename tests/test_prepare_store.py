@@ -14,7 +14,6 @@ import pytest
 import zarr
 
 from mmcontext.io.prepare_store import (
-    _download_zarr,
     _get_obsm_zarr_array,
     _open_zarr,
     _read_obs_names_zarr,
