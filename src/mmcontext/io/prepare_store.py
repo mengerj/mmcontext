@@ -27,6 +27,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 from zipfile import ZipFile, is_zipfile
 
 import numpy as np
@@ -83,14 +84,17 @@ def _download_zarr(url: str, cache_dir: Path) -> Path:
     # Zenodo draft→published URL fixup: published records use the non-draft
     # API path, but datasets often store the draft URL from upload time.
     download_url = url
-    if "zenodo.org" in download_url and "/draft/" in download_url:
+    parsed = urlparse(download_url)
+    host = (parsed.hostname or "").lower()
+    is_zenodo_host = host == "zenodo.org" or host.endswith(".zenodo.org")
+    if is_zenodo_host and "/draft/" in download_url:
         download_url = download_url.replace("/draft/", "/")
         logger.info("Converted Zenodo draft URL to published: %s", download_url)
 
     logger.info("Downloading %s → %s", download_url, zip_path)
 
     headers = {}
-    if "zenodo.org" in download_url:
+    if is_zenodo_host:
         headers["User-Agent"] = "Mozilla/5.0 (compatible; mmcontext/1.0)"
 
     with requests.get(download_url, stream=True, timeout=(30, 600), headers=headers) as r:
