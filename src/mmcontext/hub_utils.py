@@ -1,15 +1,185 @@
 """Utilities for uploading MMContext models to Hugging Face Hub with custom model cards."""
 
 import logging
+import os
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional, Union
 
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, HfFolder
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Authentication / naming helpers (shared by training scripts)
+# ---------------------------------------------------------------------------
+def get_hf_token() -> str | None:
+    """Return a HuggingFace token from env vars or cached CLI credentials.
+
+    Checks ``HF_TOKEN_UPLOAD`` then ``HF_TOKEN``, then falls back to the token
+    cached by ``huggingface-cli login``.
+
+    Returns
+    -------
+    str or None
+        The token if found, otherwise ``None``.
+    """
+    token = os.getenv("HF_TOKEN_UPLOAD") or os.getenv("HF_TOKEN")
+    if token:
+        return token
+    try:
+        return HfFolder.get_token()
+    except Exception:
+        return None
+
+
+def get_hf_username() -> str:
+    """Auto-detect the HuggingFace username from a token or CLI login.
+
+    Returns
+    -------
+    str
+        The username of the authenticated account.
+
+    Raises
+    ------
+    ValueError
+        If no valid authentication is found or the token is invalid.
+    """
+    from huggingface_hub.errors import LocalTokenNotFoundError
+
+    api = HfApi()
+    token = get_hf_token()
+    try:
+        user_info = api.whoami(token=token)
+        if isinstance(user_info, dict):
+            username = user_info.get("name")
+            if username:
+                logger.info("Auto-detected HuggingFace username: %s", username)
+                return username
+            raise ValueError(f"Could not extract username from HuggingFace API response. Response: {user_info}")
+        raise ValueError(f"Unexpected response type from whoami(): {type(user_info)}")
+    except LocalTokenNotFoundError:
+        raise ValueError(
+            "No HuggingFace authentication found. Please either:\n"
+            "1. Set HF_TOKEN or HF_TOKEN_UPLOAD environment variable, or\n"
+            "2. Run 'huggingface-cli login' to authenticate"
+        ) from None
+    except Exception as e:
+        raise ValueError(
+            f"Failed to get HuggingFace username: {e}\nPlease check your HuggingFace token is valid."
+        ) from e
+
+
+def check_model_exists(model_name: str, username: str | None = None) -> bool:
+    """Check whether ``{username}/{model_name}`` exists on the Hub.
+
+    Parameters
+    ----------
+    model_name : str
+        Repository name (without the owner prefix).
+    username : str, optional
+        Owner; auto-detected via :func:`get_hf_username` when omitted.
+
+    Returns
+    -------
+    bool
+        ``True`` if the model exists, ``False`` otherwise (including on any error).
+    """
+    try:
+        if username is None:
+            username = get_hf_username()
+        HfApi().model_info(f"{username}/{model_name}")
+        return True
+    except Exception:
+        return False
+
+
+def generate_model_name(
+    text_encoder_name: str,
+    *,
+    obsm_key: str | None = None,
+    tag: str | None = None,
+) -> str:
+    """Build a model name like ``mmcontext-{encoder}-{obsm_key}[-{tag}]``.
+
+    Parameters
+    ----------
+    text_encoder_name : str
+        HuggingFace text-encoder id (e.g. ``"NeuML/pubmedbert-base-embeddings"``).
+    obsm_key : str, optional
+        Omics embedding key (e.g. ``"X_scvi_fm"``); the leading ``"X_"`` is
+        stripped. Omitted from the name when ``None`` (text-only run).
+    tag : str, optional
+        Optional suffix tag.
+
+    Returns
+    -------
+    str
+        The generated model name.
+    """
+    name = text_encoder_name.lower()
+    if "pubmedbert" in name:
+        encoder_str = "pubmedbert"
+    elif "biobert" in name:
+        encoder_str = "biobert"
+    elif "modernbert" in name:
+        encoder_str = "biomodern" if "bioclinical" in name else "modernbert"
+    elif "qwen" in name:
+        encoder_str = "qwen"
+    else:
+        encoder_str = text_encoder_name.split("/")[-1]
+
+    if obsm_key:
+        method = obsm_key[2:] if obsm_key.startswith("X_") else obsm_key
+        model_name = f"mmcontext-{encoder_str}-{method}"
+    else:
+        model_name = f"mmcontext-{encoder_str}"
+
+    if tag and tag.strip():
+        model_name = f"{model_name}-{tag.strip()}"
+    return model_name
+
+
+def generate_unique_model_name(
+    text_encoder_name: str,
+    *,
+    obsm_key: str | None = None,
+    tag: str | None = None,
+    username: str | None = None,
+) -> str:
+    """Like :func:`generate_model_name` but append ``-vN`` to avoid Hub clashes.
+
+    Parameters
+    ----------
+    text_encoder_name, obsm_key, tag
+        Forwarded to :func:`generate_model_name`.
+    username : str, optional
+        Owner to check against; auto-detected when omitted.
+
+    Returns
+    -------
+    str
+        A model name that does not currently exist under *username*.
+    """
+    base_name = generate_model_name(text_encoder_name, obsm_key=obsm_key, tag=tag)
+    if username is None:
+        username = get_hf_username()
+    if not check_model_exists(base_name, username):
+        return base_name
+    version = 2
+    while version <= 10:
+        versioned = f"{base_name}-v{version}"
+        if not check_model_exists(versioned, username):
+            logger.info("Model '%s' exists, using '%s' instead", base_name, versioned)
+            return versioned
+        version += 1
+    import time
+
+    return f"{base_name}-{int(time.time())}"
 
 
 # Embedding method descriptions
@@ -560,6 +730,42 @@ def insert_custom_content_after_yaml(existing_readme: str, custom_content: str) 
     # Combine all parts
     combined_lines = before_lines + custom_lines + after_lines
     return "\n".join(combined_lines)
+
+
+def append_model_card_section(
+    model_dir: str | Path,
+    section_md: str,
+    *,
+    heading: str = "Training Details (MMContext)",
+) -> Path:
+    """Append a Markdown section to a saved model's ``README.md``.
+
+    ``SentenceTransformer.save`` writes a ``README.md`` (model card) into the
+    model directory. When that directory is later pushed via
+    ``model.push_to_hub(..., local_model_path=model_dir)``, the file is uploaded
+    verbatim — so appending here makes custom details (e.g. hard-negative mining
+    settings) show up on the Hub.
+
+    Parameters
+    ----------
+    model_dir : str or Path
+        Directory of a saved SentenceTransformer model.
+    section_md : str
+        Markdown body for the new section (without the heading).
+    heading : str, optional
+        Section heading (rendered as an ``##`` header).
+
+    Returns
+    -------
+    Path
+        Path to the README that was written.
+    """
+    readme = Path(model_dir) / "README.md"
+    existing = readme.read_text() if readme.exists() else ""
+    block = f"\n\n## {heading}\n\n{section_md.strip()}\n"
+    readme.write_text(existing + block)
+    logger.info("Appended '%s' section to %s", heading, readme)
+    return readme
 
 
 def get_model_info_from_config(config_path: str | Path) -> dict[str, str]:

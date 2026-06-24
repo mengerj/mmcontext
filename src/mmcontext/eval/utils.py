@@ -2,7 +2,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 import numpy as np
 import pandas as pd
@@ -11,7 +11,7 @@ from anndata import AnnData
 logger = logging.getLogger(__name__)
 
 
-class LabelKind(str, Enum):
+class LabelKind(StrEnum):
     """Name for the kind of label."""
 
     BIO = "bio"

@@ -1,4 +1,5 @@
 # tests/utils.py
+import hashlib
 import json
 import logging
 import os
@@ -25,6 +26,16 @@ from datasets import Dataset, DatasetDict
 from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
+
+
+def url_to_cache_name(url: str) -> str:
+    """Deterministic short name for a URL, used as a cache file/directory name.
+
+    Mirrors the scheme used by :func:`mmcontext.io.prepare_store.prepare_vector_store`
+    so that the same remote store maps to a stable, collision-free cache key
+    regardless of its position in a links list.
+    """
+    return hashlib.sha256(url.encode()).hexdigest()[:16]
 
 
 def remove_corrupted_null_arrays(zarr_path: str | Path) -> list[str]:
@@ -64,7 +75,7 @@ def remove_corrupted_null_arrays(zarr_path: str | Path) -> list[str]:
         for key in list(group.keys()):
             current_path = f"{path}/{key}" if path else key
             item = group[key]
-            if isinstance(item, zarr.core.Array):
+            if isinstance(item, zarr.Array):
                 attrs = dict(item.attrs)
                 if attrs.get("encoding-type") == "null":
                     # Remove the corrupted array from filesystem
@@ -75,7 +86,7 @@ def remove_corrupted_null_arrays(zarr_path: str | Path) -> list[str]:
                         else:
                             full_path.unlink()
                         removed.append(current_path)
-            elif isinstance(item, zarr.hierarchy.Group):
+            elif isinstance(item, zarr.Group):
                 find_and_remove(item, current_path)
 
     find_and_remove(z)
@@ -98,6 +109,8 @@ def load_test_adata_from_hf_dataset(
     link_column: str = "adata_link",
     zenodo_token: str | None = None,
     force_drafts: bool = False,
+    lean: bool = False,
+    obs_columns: list[str] | None = None,
 ) -> tuple[ad.AnnData, Path]:
     """
     Download the unique AnnData chunk referenced in *test_split* and load it.
@@ -119,11 +132,26 @@ def load_test_adata_from_hf_dataset(
         If False, automatically converts Zenodo draft links to published links.
         This is a quick fix for datasets created with draft links that were
         published remotely afterwards. Set to True to use actual draft links.
+    lean : bool, default False
+        If True, do **not** materialise the full AnnData. Instead read only the
+        ``obs`` table (subset to *obs_columns* if given) and the single
+        ``obsm[layer_key]`` layer, returning a minimal AnnData with no ``X`` and
+        ``n_vars == 0``. This keeps memory low for large zarr chunks (50k–100k
+        cells) where only the obs index, label columns, and one embedding layer
+        are needed downstream. Requires ``axis == "obs"``; for ``axis == "var"``
+        the function falls back to a full read with a warning. For ``.h5ad``
+        files the lean path reads via ``backed="r"``; a full read remains the
+        accepted fallback.
+    obs_columns : list[str] | None, default None
+        When *lean* is True, restrict the returned ``obs`` to these columns
+        (plus the index). Columns absent from the store are ignored. Ignored
+        when *lean* is False.
 
     Returns
     -------
     adata : AnnData
-        The loaded AnnData (in memory, not backed).
+        The loaded AnnData. Fully in-memory unless *lean* is True, in which case
+        it contains only ``obs`` and ``obsm[layer_key]``.
     local_path : pathlib.Path
         Path to the downloaded store (`*.zarr`, `*.h5ad`, or `*.zip`).
 
@@ -131,6 +159,15 @@ def load_test_adata_from_hf_dataset(
     ------
     ValueError
         If the split references multiple different files.
+
+    Notes
+    -----
+    The downloaded store is cached under *save_dir* using a deterministic hash
+    of its URL (``<sha256[:16]>``), matching
+    :func:`mmcontext.io.prepare_store.prepare_vector_store`. This makes the
+    cache key stable and collision-free across datasets sharing the same
+    *save_dir* (the legacy ``chunk_0`` naming caused different datasets to
+    overwrite/false-hit each other).
     """
     # 1) ensure there is exactly ONE unique link
     links, _ = collect_unique_links({"test": test_split}, split="test", link_column=link_column)
@@ -146,10 +183,33 @@ def load_test_adata_from_hf_dataset(
         overwrite=False,
         zenodo_token=zenodo_token,
         force_drafts=force_drafts,
+        name_by_url_hash=True,
     )
     local_path = next(iter(local_map.values()))
 
     # 3) open store
+    if lean and axis != "obs":
+        logger.warning("lean=True is only supported for axis='obs'; falling back to a full read.")
+        lean = False
+
+    if lean:
+        # Lean path: read only obs (optionally column-subset) and the single
+        # obsm[layer_key] layer. No X, no other obsm layers — keeps memory low.
+        from mmcontext.io._zarr_read import read_obs_and_obsm
+
+        if local_path.suffix not in (".h5ad", ".zip") and local_path.is_dir():
+            # Fix corrupted null arrays before reading (zarr directory only)
+            remove_corrupted_null_arrays(local_path)
+
+        obs_df, obsm = read_obs_and_obsm(local_path, obsm_key=layer_key, obs_columns=obs_columns)
+        adata = ad.AnnData(obs=obs_df)
+        if layer_key is not None:
+            if obsm is None:
+                raise KeyError(f"Layer '{layer_key}' could not be read from obsm of file {local_path}")
+            adata.obsm[layer_key] = obsm
+        logger.info("Loaded lean test AnnData with %d cells (obs + obsm['%s'] only)", adata.n_obs, layer_key)
+        return adata, local_path
+
     if local_path.suffix == ".h5ad":
         adata = ad.read_h5ad(local_path)
     elif local_path.suffix == ".zip":
@@ -470,6 +530,7 @@ def download_and_extract_links(
     zenodo_token: str | None = None,
     chunk_size: int = 8 * (1 << 20),  # 8MB chunks for better performance
     force_drafts: bool = False,
+    name_by_url_hash: bool = False,
 ) -> dict[str, Path]:
     """
     Download every share-link or handle local paths.  If it is a ZIP (Nextcloud folder-download) either
@@ -502,6 +563,14 @@ def download_and_extract_links(
         by removing ``/draft`` from URLs. This is a quick fix to allow using
         datasets created with draft links that were published remotely afterwards.
         Set to True if you actually need to download from a draft record.
+    name_by_url_hash : bool, default False
+        If False, downloaded files are named ``chunk_<idx>.<ext>`` using the
+        link's position in *links*. This is **not** stable across calls — two
+        different links each passed as the sole item collide on ``chunk_0``.
+        If True, files are named by a deterministic hash of the URL
+        (``<sha256[:16]>.<ext>``), matching the caching scheme of
+        :func:`mmcontext.io.prepare_store.prepare_vector_store` and giving a
+        stable, collision-free cache key per URL.
 
     Returns
     -------
@@ -546,13 +615,17 @@ def download_and_extract_links(
             continue
 
         # For URLs, proceed with download logic
+        # Base name for cached outputs: a stable per-URL hash, or the legacy
+        # position-based ``chunk_<idx>`` name.
+        base = url_to_cache_name(link) if name_by_url_hash else f"chunk_{idx}"
+
         # ------------------------- check if present----
-        already = target_dir / f"chunk_{idx}.zip"
+        already = target_dir / f"{base}.zip"
         if already.exists() and not overwrite:
             out_map[link] = already
             continue  # ← skip download altogether
 
-        already = target_dir / f"chunk_{idx}.zarr"
+        already = target_dir / f"{base}.zarr"
         if already.exists() and not overwrite:
             out_map[link] = already
             continue
@@ -689,20 +762,20 @@ def download_and_extract_links(
         m4 = tmp.read_bytes()[:4]
         if m4 == PK_MAGIC:  # ⇒ ZIP archive
             if extract:
-                out_path = target_dir / f"chunk_{idx}.zarr"
+                out_path = target_dir / f"{base}.zarr"
                 if overwrite and out_path.exists():
                     shutil.rmtree(out_path)
                 with zipfile.ZipFile(tmp) as zf:
                     zf.extractall(out_path)
                 tmp.unlink(missing_ok=True)
             else:  # keep the zip
-                out_path = target_dir / f"chunk_{idx}.zip"
+                out_path = target_dir / f"{base}.zip"
                 if overwrite and out_path.exists():
                     out_path.unlink()
                 shutil.move(tmp, out_path)
         else:  # raw .h5ad etc.
             suffix = Path(link).suffix or ".bin"
-            out_path = target_dir / f"chunk_{idx}{suffix}"
+            out_path = target_dir / f"{base}{suffix}"
             if overwrite and out_path.exists():
                 out_path.unlink()
             shutil.move(tmp, out_path)
@@ -753,37 +826,51 @@ def build_embedding_df(
     -----
     *Works with AnnData ≥ 0.10 and Zarr ≥ 2.16.*
     """
+    from mmcontext.io._zarr_read import read_obs_and_obsm
+
     rows: list[dict] = []
 
     for p in link2path.values():
         p = Path(p)
         logger.info("Reading %s", p)
 
-        # -------------------------------------------------- open store ----
-        if p.suffix == ".h5ad":  # plain HDF5
-            adata = ad.read_h5ad(p, backed="r")
-        elif p.suffix == ".zip":  # zipped zarr
-            zroot = zarr.open(p, mode="r")
-            adata = ad.read_zarr(zroot)
-        elif p.suffix == ".zarr" or p.is_dir():  # dir zarr
-            # Fix corrupted null arrays before reading
-            remove_corrupted_null_arrays(p)
-            adata = ad.read_zarr(str(p))
+        # -------------------------------------------------- read embedding ----
+        # For the obs axis we only need obsm[layer_key] + the obs index, so use
+        # the lean reader: it pulls just that one layer (zarr: never touches X or
+        # other obsm layers; h5ad: backed read). The var axis still falls back to
+        # a full read (the lean reader is obs-only).
+        if axis == "obs":
+            if p.suffix not in (".h5ad", ".zip") and p.is_dir():
+                # Fix corrupted null arrays before reading (zarr directory only)
+                remove_corrupted_null_arrays(p)
+            try:
+                obs_df, emb_matrix = read_obs_and_obsm(p, obsm_key=layer_key)
+            except FileNotFoundError:
+                logger.warning("Skip unsupported file %s", p)
+                continue
+            if emb_matrix is None:
+                raise KeyError(f"Layer key '{layer_key}' not found in obsm for file {p}.")
+            tokens = obs_df.index.to_numpy()
         else:
-            logger.warning("Skip unsupported file %s", p)
-            continue
-
-        # Get embedding matrix with helpful error message if key is missing
-        try:
-            emb_matrix = adata.obsm[layer_key] if axis == "obs" else adata.varm[layer_key]
-        except KeyError as e:
-            available_keys = list(adata.obsm.keys()) if axis == "obs" else list(adata.varm.keys())
-            axis_name = "obsm" if axis == "obs" else "varm"
-            raise KeyError(
-                f"Layer key '{layer_key}' not found in adata.{axis_name} for file {p}.\n"
-                f"Available keys in adata.{axis_name}: {available_keys}"
-            ) from e
-        tokens = adata.obs.index.to_numpy() if axis == "obs" else adata.var.index.to_numpy()
+            if p.suffix == ".h5ad":  # plain HDF5
+                adata = ad.read_h5ad(p, backed="r")
+            elif p.suffix == ".zip":  # zipped zarr
+                zroot = zarr.open(p, mode="r")
+                adata = ad.read_zarr(zroot)
+            elif p.suffix == ".zarr" or p.is_dir():  # dir zarr
+                remove_corrupted_null_arrays(p)
+                adata = ad.read_zarr(str(p))
+            else:
+                logger.warning("Skip unsupported file %s", p)
+                continue
+            try:
+                emb_matrix = adata.varm[layer_key]
+            except KeyError as e:
+                raise KeyError(
+                    f"Layer key '{layer_key}' not found in adata.varm for file {p}.\n"
+                    f"Available keys in adata.varm: {list(adata.varm.keys())}"
+                ) from e
+            tokens = adata.var.index.to_numpy()
 
         # -------------------------------------------------- stream rows ----
         n_rows = emb_matrix.shape[0]
@@ -797,7 +884,8 @@ def build_embedding_df(
                 else:
                     vec = np.asarray(vec)
                 rows.append({"token": tokens[start + i], "embedding": vec})
-        adata.file.close() if hasattr(adata, "file") else None  # close backing
+        if axis != "obs" and hasattr(adata, "file"):
+            adata.file.close() if adata.file else None  # close backing
 
     df = pd.DataFrame(rows, columns=["token", "embedding"])
     logger.info("Built DataFrame with %d rows × %d-dim embeddings", len(df), len(df["embedding"].iloc[0]))

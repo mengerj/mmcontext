@@ -17,7 +17,7 @@ from sentence_transformers import (
 )
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 
-from mmcontext.mmcontextencoder import MMContextEncoder, MMContextProcessor
+from mmcontext._legacy.mmcontextencoder import MMContextEncoder
 
 logger = logging.getLogger(__name__)
 

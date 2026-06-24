@@ -107,6 +107,7 @@ collect_metrics:
     label_kind_filter: bio # null = all, or "bio" / "batch"
     metrics:
       - "LabelSimilarity/balanced_accuracy"
+      - "LabelSimilarity/random_baseline_accuracy"
       - "LabelSimilarity/macro_f1"
       - "LabelSimilarity/mean_auc"
       - "LabelSimilarity/mrr"
@@ -115,6 +116,7 @@ collect_metrics:
       - "LabelSimilarity/topk_accuracy@5"
     metric_display_names:
       "LabelSimilarity/balanced_accuracy": "Bal.\\ Acc."
+      "LabelSimilarity/random_baseline_accuracy": "Baseline Acc. (1/n)"
       "LabelSimilarity/macro_f1": "Macro F1"
       "LabelSimilarity/mean_auc": "Mean AUC"
       "LabelSimilarity/mrr": "MRR"

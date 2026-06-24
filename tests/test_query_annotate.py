@@ -240,12 +240,12 @@ def test_best_label_annotation():
 
     # Verify best_label matches highest score in inferred_labels
     for i in range(2):
-        label_scores = inferred_labels[i]
-        found_best = best_labels[i]
+        label_scores = inferred_labels.iloc[i]
+        found_best = best_labels.iloc[i]
         assert found_best in label_scores
         max_label = max(label_scores, key=label_scores.get)
         assert found_best == max_label
 
     # Verify expected behavior based on our encoding scheme
-    assert best_labels[0] == "label_0"
-    assert best_labels[1] == "label_1"
+    assert best_labels.iloc[0] == "label_0"
+    assert best_labels.iloc[1] == "label_1"

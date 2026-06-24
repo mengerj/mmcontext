@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from mmcontext.mmcontextencoder import AdapterModule, MMContextEncoder
+from mmcontext._legacy.mmcontextencoder import AdapterModule, MMContextEncoder
 
 
 # --------------------------------------------------------------------- #
@@ -791,7 +791,7 @@ def test_bad_ds(text_only_encoder):
         )
     # test what happens if dimensions are inconsistent
     bad_df3 = pd.DataFrame({"sample_idx": list(mapping.keys()), "embedding": list(mapping.values())})
-    bad_df3["embedding"][0] = np.ones(3, dtype=np.float32)
+    bad_df3.at[0, "embedding"] = np.ones(3, dtype=np.float32)
     # Should raise ValueError due to inconsistent dimensions
     with pytest.raises(ValueError, match="dimensions"):
         text_only_encoder.register_initial_embeddings(
