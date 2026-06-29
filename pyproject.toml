@@ -64,8 +64,8 @@ packages.find.where = [ "src" ]
 packages.find.include = [ "mmcontext*" ]
 include-package-data = true
 package-data = {}
-
 # "mmcontext.conf" = [ "*.json" ]
+
 [tool.ruff]
 line-length = 120
 src = [ "src" ]
