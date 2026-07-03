@@ -4,7 +4,7 @@ requires = [ "setuptools>=64" ]
 
 [project]
 name = "mmcontext"
-version = "2.0.0"
+version = "2.0.1"
 description = "Multimodal contrastive learning aligning text and omics embeddings via sentence-transformers."
 readme = "README.md"
 license = { file = "LICENSE" }
