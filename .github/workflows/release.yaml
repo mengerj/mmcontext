@@ -23,7 +23,18 @@ jobs:
         with:
           python-version: "3.x"
           cache: "pip"
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "Release tag: $tag / pyproject version: $pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Release tag ($tag) does not match pyproject version ($pkg). Bump the version in pyproject.toml before tagging."
+            exit 1
+          fi
       - run: pip install build
       - run: python -m build
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
