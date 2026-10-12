@@ -1,7 +1,0 @@
-# Calmate with omicverse backend for semantic cell-type label mapping.
-# Install in a dedicated venv:
-#   python -m venv modules/calmate_venv
-#   modules/calmate_venv/bin/pip install -r modules/requirements_calmate.txt
-#
-# Adjust the path below to point to your local calmate checkout.
-calmate[omicverse] @ git+https://github.com/mengerj/calmate.git
