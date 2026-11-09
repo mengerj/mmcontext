@@ -86,6 +86,7 @@ old_stuff/
 
 #build
 build/
+dist/
 
 #slurm output
 *.err
