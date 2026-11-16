@@ -11,7 +11,7 @@ Multimodal contrastive learning aligning text and omics embeddings via [sentence
 ## Paper
 
 **mmcontext** is described in detail in our paper:
-Menger, Jonatan, Sonia Maria Krissmer, Clemens Kreutz, Harald Binder, and Maren Hackenberg. "mmContext: an open framework for multimodal contrastive learning of omics and text data." bioRxiv (2025): 2025-12.
+Jonatan Menger, Sonia Maria Krissmer, Clemens Kreutz, Harald Binder, Maren Hackenberg, mmContext: an open framework for multimodal contrastive learning of omics and text data, Bioinformatics, Volume 42, Issue 6, June 2026, btag338, https://doi.org/10.1093/bioinformatics/btag338
 If you use **mmcontext** in your research, please cite our work.
 
 ## Installation
@@ -102,12 +102,15 @@ Contributions and suggestions are very welcome! Please open an [issue](https://g
 ## Citation
 
 ```bibtex
-@article{menger2025mmcontext,
-  author = {Menger, Jonatan and Krissmer, Sonia Maria and Kreutz, Clemens and Binder, Harald and Hackenberg, Maren},
-  title = {mmContext: an open framework for multimodal contrastive learning of omics and text data},
-  journal = {bioRxiv},
-  year = {2025},
-  doi = {10.1101/2025.12}
+@article{menger2026mmcontext,
+  title={mmContext: an open framework for multimodal contrastive learning of omics and text data},
+  author={Menger, Jonatan and Krissmer, Sonia Maria and Kreutz, Clemens and Binder, Harald and Hackenberg, Maren},
+  journal={Bioinformatics},
+  volume={42},
+  number={6},
+  pages={btag338},
+  year={2026},
+  publisher={Oxford University Press}
 }
 ```
 
