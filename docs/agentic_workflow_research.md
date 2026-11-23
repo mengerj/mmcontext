@@ -184,14 +184,15 @@ The audit discussion feeds into `/plan` → sub-issues → `@claude` implements.
 **What**: Set up a Cowork scheduled task that does similar work to the gh-aw audit, then compare the two approaches.
 
 **Differences**:
-| Aspect | gh-aw | Cowork Scheduled Task |
-|--------|-------|-----------------------|
-| Runs where | GitHub Actions (cloud) | Local (Cowork must be open) |
-| Security | 5-layer guardrails, read-only token | Full local access |
-| Output | GitHub Discussions/Issues | Chat notification in Cowork |
-| Data access | Repo only (sandboxed) | Full local filesystem |
-| Scheduling | Cron via Actions | Cron via Cowork app |
-| Cost | GitHub Actions minutes + LLM tokens | Subscription credit pool |
+
+| Aspect      | gh-aw                               | Cowork Scheduled Task       |
+| ----------- | ----------------------------------- | --------------------------- |
+| Runs where  | GitHub Actions (cloud)              | Local (Cowork must be open) |
+| Security    | 5-layer guardrails, read-only token | Full local access           |
+| Output      | GitHub Discussions/Issues           | Chat notification in Cowork |
+| Data access | Repo only (sandboxed)               | Full local filesystem       |
+| Scheduling  | Cron via Actions                    | Cron via Cowork app         |
+| Cost        | GitHub Actions minutes + LLM tokens | Subscription credit pool    |
 
 **Verdict**: gh-aw for anything that should run reliably regardless of whether your laptop is open. Cowork tasks for things that need local context (your `.venv`, local data files, GPU) or personal briefings.
 
